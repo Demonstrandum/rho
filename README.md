@@ -9,6 +9,7 @@ bundles my:
   - `spinner.ts` sets the working indicator and shimmering message from `spinners.json` + `maxims.txt` (chinese spinners by default; shimmer adapted from [pi-claude-shimmer](https://github.com/ouzhenkun/pi-claude-shimmer), MIT)
   - `footer.ts` replaces the built-in footer to swap the token arrow glyphs
   - `cwd.ts` adds `/cwd [path]` to change the agent's working directory mid-session
+  - `web.ts` adds `/web` to launch the [pi-web](https://github.com/jmfederico/pi-web) UI as a background service (and `/web status|stop|logs|...` passthrough)
 - **skills/**: on-demand capability packages (`SKILL.md`)
 - **prompts/**: reusable prompt templates (`/name` to expand)
 - **themes/**: `plan9` (light) and `plan9-dark`, plan9/acme-inspired

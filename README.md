@@ -77,5 +77,6 @@ themes/       *.json
 
 resource paths are declared in `package.json` under the `pi` key.
 
-spinner and message content live in `spinners.json` and `maxims.txt` at the repo
-root. edit `enabledCategories` in `spinners.json` to switch spinner sets.
+spinner and message content live in `extensions/spinners.json` and
+`extensions/maxims.txt`. change `ENABLED_CATEGORIES` in `extensions/spinner.ts`
+to switch spinner sets.

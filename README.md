@@ -5,28 +5,53 @@ personal [pi](https://pi.dev) dotfiles, packaged as a pi package (Bun + TypeScri
 bundles my:
 
 - **extensions/**: TypeScript modules that add tools, commands, ui, hooks
+  - `personal-rules.ts` appends my coding/writing rules to the system prompt every session
+  - `spinner.ts` sets the working indicator symbol and text
 - **skills/**: on-demand capability packages (`SKILL.md`)
 - **prompts/**: reusable prompt templates (`/name` to expand)
-- **themes/**: color themes
+- **themes/**: `rho`, a plan9/acme-inspired light theme
 
-## install
+## use it by default on a new machine
 
-project-local (this repo, for team sharing):
+1. install pi:
 
-```bash
-bun run link          # pi install -l $(pwd)
-```
+   ```bash
+   npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+   # or: curl -fsSL https://pi.dev/install.sh | sh
+   ```
 
-global (all projects):
+2. clone this repo:
 
-```bash
-bun run link:global   # pi install $(pwd)
-```
+   ```bash
+   git clone git@github.com:<user>/rho ~/Git/rho
+   ```
 
-or install from git once pushed:
+3. install it globally so every pi session picks it up:
+
+   ```bash
+   pi install ~/Git/rho
+   ```
+
+   this registers the package in `~/.pi/agent/settings.json`. from now on, running
+   `pi` anywhere loads rho's extensions, skills, prompts, and rules automatically.
+
+4. select the theme once (persists in settings):
+
+   ```bash
+   pi
+   /settings   # theme -> rho
+   ```
+
+to install straight from git without a local clone:
 
 ```bash
 pi install git:github.com/<user>/rho
+```
+
+project-local instead of global (writes to `.pi/settings.json` in the current repo):
+
+```bash
+pi install -l ~/Git/rho
 ```
 
 ## develop
@@ -36,8 +61,9 @@ bun install
 bun run typecheck
 ```
 
-enable/disable individual resources with `pi config`. reload without restart via
-`/reload` in an interactive session.
+`bun run link` installs the working checkout project-locally, `bun run link:global`
+installs it globally. `/reload` in a session picks up changes without a restart.
+use `pi config` to enable/disable individual resources.
 
 ## layout
 

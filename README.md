@@ -1,6 +1,6 @@
 # rho
 
-My personal [pi](https://pi.dev) dotfiles, packaged as a pi package (bun + TypeScript).
+personal [pi](https://pi.dev) dotfiles, packaged as a pi package (bun + TypeScript).
 
 Bundles my:
 

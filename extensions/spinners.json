@@ -111,6 +111,22 @@
             "水"
         ]
     },
+    "claude": {
+        "category": "claude",
+        "interval": 120,
+        "frames": [
+            "·",
+            "✢",
+            "✳",
+            "✶",
+            "✻",
+            "✽",
+            "✻",
+            "✶",
+            "✳",
+            "✢"
+        ]
+    },
     "noise": {
         "category": "unicode",
         "interval": 100,

@@ -6,7 +6,8 @@ bundles my:
 
 - **extensions/**: TypeScript modules that add tools, commands, ui, hooks
   - `personal-rules.ts` appends my coding/writing rules to the system prompt every session
-  - `spinner.ts` sets the working indicator and message from `spinners.json` + `maxims.txt` (chinese spinners by default)
+  - `spinner.ts` sets the working indicator and shimmering message from `spinners.json` + `maxims.txt` (chinese spinners by default; shimmer adapted from [pi-claude-shimmer](https://github.com/ouzhenkun/pi-claude-shimmer), MIT)
+  - `footer.ts` replaces the built-in footer to swap the token arrow glyphs
   - `cwd.ts` adds `/cwd [path]` to change the agent's working directory mid-session
 - **skills/**: on-demand capability packages (`SKILL.md`)
 - **prompts/**: reusable prompt templates (`/name` to expand)
@@ -24,13 +25,13 @@ bundles my:
 2. clone this repo:
 
    ```bash
-   git clone git@github.com:<user>/rho ~/Git/rho
+   git clone git@github.com:Demonstrandum/rho ~/rho
    ```
 
 3. install it globally so every pi session picks it up:
 
    ```bash
-   pi install ~/Git/rho
+   pi install ~/rho
    ```
 
    this registers the package in `~/.pi/agent/settings.json`. from now on, running
@@ -46,13 +47,13 @@ bundles my:
 to install straight from git without a local clone:
 
 ```bash
-pi install git:github.com/<user>/rho
+pi install git:github.com/Demonstrandum/rho
 ```
 
 project-local instead of global (writes to `.pi/settings.json` in the current repo):
 
 ```bash
-pi install -l ~/Git/rho
+pi install -l ~/rho
 ```
 
 ## develop

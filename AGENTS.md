@@ -11,6 +11,7 @@ personal instructions that apply across my projects. symlink or copy this into
 - hashmaps/dictionaries in place of a proper record/struct type are a huge code smell.
 - hand-coding behaviour instead of coining the right data structure is a code smell (e.g. inline managing a circular buffer's size at every push site instead of defining a circular buffer type).
 - prefer elegance and logical completion over ad-hoc problem solving, even when you don't happen to need the general case right now. don't write overly constrained code when the obvious generalisation is clearly better.
+- do not touch other people's code or comments in a drive-by way. while doing one task, do not delete, rewrite, reformat, or refactor code a human wrote just because it looks wrong or violates these conventions. leave it alone unless the task is specifically to change it, or ask first. these rules govern what you write, not a license to rewrite what others wrote.
 
 ## conventions
 

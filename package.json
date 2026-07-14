@@ -1,0 +1,31 @@
+{
+  "name": "rho",
+  "version": "0.1.0",
+  "description": "Samuel's personal pi dotfiles — extensions, skills, prompts, and themes.",
+  "private": true,
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./extensions"],
+    "skills": ["./skills"],
+    "prompts": ["./prompts"],
+    "themes": ["./themes"]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "link": "pi install -l $(pwd)",
+    "link:global": "pi install $(pwd)"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "latest",
+    "@earendil-works/pi-tui": "latest",
+    "typescript": "^5.6.0"
+  }
+}

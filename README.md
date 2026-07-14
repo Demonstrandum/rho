@@ -6,7 +6,8 @@ bundles my:
 
 - **extensions/**: TypeScript modules that add tools, commands, ui, hooks
   - `personal-rules.ts` appends my coding/writing rules to the system prompt every session
-  - `spinner.ts` sets the working indicator symbol and text
+  - `spinner.ts` sets the working indicator and message from `spinners.json` + `maxims.txt` (chinese spinners by default)
+  - `cwd.ts` adds `/cwd [path]` to change the agent's working directory mid-session
 - **skills/**: on-demand capability packages (`SKILL.md`)
 - **prompts/**: reusable prompt templates (`/name` to expand)
 - **themes/**: `rho`, a plan9/acme-inspired light theme
@@ -75,3 +76,6 @@ themes/       *.json
 ```
 
 resource paths are declared in `package.json` under the `pi` key.
+
+spinner and message content live in `spinners.json` and `maxims.txt` at the repo
+root. edit `enabledCategories` in `spinners.json` to switch spinner sets.

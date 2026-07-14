@@ -1,17 +1,17 @@
 # rho global agent context
 
-Personal instructions that apply across my projects. Symlink or copy this into
+personal instructions that apply across my projects. symlink or copy this into
 `~/.pi/agent/AGENTS.md`, or keep it here and let the package carry it.
 
-## Conventions
+## conventions
 
-- Be concise. No preamble, no filler.
-- Prefer bun over npm/node for scripts.
+- be concise. no preamble, no filler.
+- prefer Bun over npm/Node for scripts.
 - TypeScript, ESM, strict mode.
 
-## Writing rules
+## writing rules
 
-- NEVER use em dashes. Not the unicode character, not the double-hyphen `--`, not the triple-hyphen `---`. This applies everywhere: prose, comments, commit messages, JSON strings, code. No exceptions.
-- Use a period, a comma, parentheses, a colon or a semicolon instead.
-- Prefer all lower case.
-- Prefer ascii over unicode, unless forcing ascii becomes illegible. Examples: write `x_i` or `x[i]` not a unicode subscript, `x^i` not a superscript, `sum(x)` not a capital sigma, `sqrt(x)` not the radical sign, `->` not an arrow glyph.
+- NEVER use em dashes. not the unicode character, not the double-hyphen `--`, not the triple-hyphen `---`. this applies everywhere: prose, comments, commit messages, json strings, code. no exceptions.
+- use a period, a comma, parentheses, a colon or a semicolon instead.
+- prefer all lower case, except keep names and brands stylised (TypeScript, Bun, pi, npm, GitHub, etc).
+- prefer ascii over unicode, unless forcing ascii becomes illegible. examples: write `x_i` or `x[i]` not a unicode subscript, `x^i` not a superscript, `sum(x)` not a capital sigma, `sqrt(x)` not the radical sign, `->` not an arrow glyph.

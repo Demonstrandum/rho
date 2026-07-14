@@ -1,7 +1,7 @@
 {
   "name": "rho",
   "version": "0.1.0",
-  "description": "Samuel's personal pi dotfiles — extensions, skills, prompts, and themes.",
+  "description": "Samuel's personal pi dotfiles: extensions, skills, prompts, and themes.",
   "private": true,
   "type": "module",
   "keywords": ["pi-package"],

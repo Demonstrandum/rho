@@ -4,10 +4,10 @@ My personal [pi](https://pi.dev) dotfiles, packaged as a pi package (bun + TypeS
 
 Bundles my:
 
-- **extensions/** — TypeScript modules that add tools, commands, UI, hooks
-- **skills/** — on-demand capability packages (`SKILL.md`)
-- **prompts/** — reusable prompt templates (`/name` to expand)
-- **themes/** — color themes
+- **extensions/**: TypeScript modules that add tools, commands, UI, hooks
+- **skills/**: on-demand capability packages (`SKILL.md`)
+- **prompts/**: reusable prompt templates (`/name` to expand)
+- **themes/**: color themes
 
 ## Install
 
@@ -42,7 +42,7 @@ Enable/disable individual resources with `pi config`. Reload without restart via
 ## Layout
 
 ```
-extensions/   *.ts / *.js — auto-discovered
+extensions/   *.ts / *.js (auto-discovered)
 skills/       SKILL.md folders + top-level *.md
 prompts/      *.md
 themes/       *.json

@@ -25,6 +25,6 @@ personal instructions that apply across my projects. symlink or copy this into
 - prefer all lower case, except keep names and brands stylised (TypeScript, Bun, pi, npm, GitHub, etc).
 - prefer ascii over unicode, unless forcing ascii becomes illegible. examples: write `x_i` or `x[i]` not a unicode subscript, `x^i` not a superscript, `sum(x)` not a capital sigma, `sqrt(x)` not the radical sign, `->` not an arrow glyph.
 - no emojis.
-- no overly verbose comments or docstrings, unless they describe something non-trivial, add useful extra context, or are tangential commentary. no over-explaining, no waffling.
-- no spontaneous coinage of catchy new terms. no name-dropping obscure concepts to fake competence.
-- no dramatic, rhetorical, or speech-like writing. no rhythmic build-ups or punchy one-liners. avoid patterns like "done. the X is no more", "you were right, and this is truly the key point", or "it's not just X, it's Y, and here's why that matters". just state things plainly.
+- keep comments and docstrings minimal. only write one when the code is non-trivial, when it adds context the code cannot show (why, not what), or as a genuine aside. do not restate the code, do not pad, do not explain the obvious.
+- do not invent labels, coin cute names for things, or drop obscure jargon and references. it reads as trying to sound clever rather than being clear. use the plain existing word.
+- write plainly, not performatively. do not build to a point, do not use rhetorical cadence, do not add a flourish to open or close. things i never want to see: hollow sign-offs ("done. X is gone."), fake-insight contrasts ("this isn't just X, it's Y"), escalating triads, or teasing colons that promise significance ("and here's the interesting part:"). just say what happened or what is true and stop.

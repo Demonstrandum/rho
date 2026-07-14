@@ -16,6 +16,7 @@ machine and everything below is active when i run pi. no symlinking, no manual s
 - `extensions/spinners.json` spinner definitions keyed by name (each has `category`, `interval`, `frames`); the enabled categories live in `spinner.ts` (`chinese` by default)
 - `extensions/maxims.txt` working messages, one per line, `;` comments, picked at random each turn
 - `package.json` the `pi` manifest declaring resource paths
+- bundled third-party packages (in `dependencies` + `bundledDependencies`, referenced via `node_modules/...` in the `pi` manifest): `pi-web-access`, `@ayulab/pi-rewind`, `context-mode`. they install and load automatically with rho.
 
 ## how it loads
 

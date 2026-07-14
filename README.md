@@ -12,6 +12,10 @@ bundles my:
 - **skills/**: on-demand capability packages (`SKILL.md`)
 - **prompts/**: reusable prompt templates (`/name` to expand)
 - **themes/**: `plan9` (light) and `plan9-dark`, plan9/acme-inspired
+- **bundled packages** (installed automatically with rho, no separate install):
+  - [`pi-web-access`](https://github.com/nicobailon/pi-web-access): web fetch/search
+  - [`@ayulab/pi-rewind`](https://github.com/ayu-exorcist/oh-my-pi): rewind
+  - [`context-mode`](https://github.com/mksglu/context-mode): context mode
 
 ## use it by default on a new machine
 

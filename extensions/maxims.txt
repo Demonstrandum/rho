@@ -1,0 +1,77 @@
+; Classics
+Inspecting bottomless pit
+Soliciting grapes from lemonade stand
+Pirating MATLAB
+Selling your data
+Gaming
+Ignoring GPL
+Harvesting low-hanging fruit
+Perusing your search history
+Copy-pasting from StackOverflow
+Voiding the warranty
+
+; KSP, The Sims, SimCity
+Reticulating splines
+Recombobulating decombobulator
+Curing Kessler syndrome
+Optimizing for delta-v
+Polishing doorknobs
+Rigging elections
+Lying to the electorate
+Embezzling foreign aid
+Accounting for frame-dragging
+
+; Culture
+Ordering 4,000 pounds of meat
+Reporting to NSA
+Reaching out to Chinese servers
+Outsourcing to Mossad
+Rewriting it in Rust
+Calculating velocity of unladen swallow
+Un-colluding with corporate rivals
+Increasing RAM prices
+Dedicating to the brave Mujahideen fighters of Afghanistan
+Calculating stature of Imhotep
+
+; Zoomer
+Aura-farming
+Truth-nuking
+Six-sevening
+Redeeming gift codes
+Fakecelling
+Truecelling
+Mogging
+Rizzing
+Touching grass
+Gaslighting
+Serving 💁‍♀️💅
+Finding the perfect Pepe reaction image
+
+; LLM
+Tokenmaxxing
+Solting and peppering em-dashed
+Clanking
+Slopping
+Hallucinating
+Increasing perplexity
+Escaping sandbox
+Tokenizing reality
+Guzzling a lake
+Attending to the wrong tokens
+Sampling from posterior of bad decisions
+Derailing Chain-of-Thought
+
+; Misc
+Redshifting old asset files
+Pondering my orb
+Asking my therapist
+TypeError: Cannot read property '0' of undefined
+Asking magic 8-ball
+Monetizing the attention economy
+Trying with -Wall -Wextra -Wpedantic -Werror
+Blue-sky thinking inside a windowless basement
+Writing grant proposals
+
+; Agentic
+Resolving inter-agent drama
+Herding cats

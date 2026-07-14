@@ -1,31 +1,25 @@
-# rho global agent context
+# rho
 
-personal instructions that apply across my projects. symlink or copy this into
-`~/.pi/agent/AGENTS.md`, or keep it here and let the package carry it.
+this repo is my personal pi dotfiles, structured as a pi package. install it on any
+machine and everything below is active when i run pi. no symlinking, no manual setup.
 
-## types & design
+## what's here
 
-- good type annotations are everything. develop advanced annotations that maximally express what you care about.
-- never demote or erase a type annotation to dodge an error. solve or extend the typing instead.
-- strings used as symbols are a code smell. use enums / literal union types, not string comparison.
-- hashmaps/dictionaries in place of a proper record/struct type are a huge code smell.
-- hand-coding behaviour instead of coining the right data structure is a code smell (e.g. inline managing a circular buffer's size at every push site instead of defining a circular buffer type).
-- prefer elegance and logical completion over ad-hoc problem solving, even when you don't happen to need the general case right now. don't write overly constrained code when the obvious generalisation is clearly better.
-- do not touch other people's code or comments in a drive-by way. while doing one task, do not delete, rewrite, reformat, or refactor code a human wrote just because it looks wrong or violates these conventions. leave it alone unless the task is specifically to change it, or ask first. these rules govern what you write, not a license to rewrite what others wrote.
+- `extensions/` typescript extensions (tools, commands, ui, hooks), auto-discovered
+  - `personal-rules.ts` + `personal-rules.md` inject my personal rules into the system prompt on every session
+- `skills/` on-demand skills (`SKILL.md` folders + top-level `.md`)
+- `prompts/` prompt templates, expanded with `/name`
+- `themes/` color themes (`.json`)
+- `package.json` the `pi` manifest declaring resource paths
 
-## conventions
+## how it loads
 
-- be concise. no preamble, no filler.
-- prefer Bun over npm/Node for scripts.
-- TypeScript, ESM, strict mode.
+everything ships with the package. `pi install <rho>` (or `bun run link` for a local
+checkout) loads the extensions, skills, prompts, and themes. the personal rules are not
+a pi context file; they are bundled markdown that `personal-rules.ts` reads and appends
+to the system prompt at `before_agent_start`, so they travel with the package.
 
-## writing rules
+## working here
 
-- NEVER use em dashes. not the unicode character, not the double-hyphen `--`, not the triple-hyphen `---`. this applies everywhere: prose, comments, commit messages, json strings, code. no exceptions.
-- use a period, a comma, parentheses, a colon or a semicolon instead.
-- prefer all lower case, except keep names and brands stylised (TypeScript, Bun, pi, npm, GitHub, etc).
-- prefer ascii over unicode, unless forcing ascii becomes illegible. examples: write `x_i` or `x[i]` not a unicode subscript, `x^i` not a superscript, `sum(x)` not a capital sigma, `sqrt(x)` not the radical sign, `->` not an arrow glyph.
-- no emojis.
-- keep comments and docstrings minimal. only write one when the code is non-trivial, when it adds context the code cannot show (why, not what), or as a genuine aside. do not restate the code, do not pad, do not explain the obvious.
-- do not invent labels, coin cute names for things, or drop obscure jargon and references. it reads as trying to sound clever rather than being clear. use the plain existing word.
-- write plainly, not performatively. do not build to a point, do not use rhetorical cadence, do not add a flourish to open or close. things i never want to see: hollow sign-offs ("done. X is gone."), fake-insight contrasts ("this isn't just X, it's Y"), escalating triads, or teasing colons that promise significance ("and here's the interesting part:"). just say what happened or what is true and stop.
+- `bun install` then `bun run typecheck`.
+- `/reload` in a session picks up changes without a restart.

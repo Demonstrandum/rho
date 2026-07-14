@@ -17,6 +17,8 @@ these apply to everything you write for me, across all projects.
 - be concise. no preamble, no filler.
 - prefer Bun over npm/Node for scripts.
 - TypeScript, ESM, strict mode.
+- indent with 4 spaces, never tabs.
+- in languages with single-quote strings, use single quotes for symbolic strings (no spaces / identifier-like), e.g. `'session_start'`, and double quotes for human text, e.g. `"Hello, World!"`.
 
 ## writing
 

@@ -16,7 +16,7 @@ bundles my:
 1. install pi:
 
    ```bash
-   npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+   bun install -g @earendil-works/pi-coding-agent
    # or: curl -fsSL https://pi.dev/install.sh | sh
    ```
 

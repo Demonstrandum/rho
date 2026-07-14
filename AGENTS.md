@@ -27,3 +27,4 @@ personal instructions that apply across my projects. symlink or copy this into
 - no emojis.
 - no overly verbose comments or docstrings, unless they describe something non-trivial, add useful extra context, or are tangential commentary. no over-explaining, no waffling.
 - no spontaneous coinage of catchy new terms. no name-dropping obscure concepts to fake competence.
+- no dramatic, rhetorical, or speech-like writing. no rhythmic build-ups or punchy one-liners. avoid patterns like "done. the X is no more", "you were right, and this is truly the key point", or "it's not just X, it's Y, and here's why that matters". just state things plainly.

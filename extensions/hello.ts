@@ -1,5 +1,5 @@
 /**
- * hello — starter extension for the rho pi package.
+ * hello: starter extension for the rho pi package.
  *
  * Demonstrates the two most common extension surfaces:
  *   - a custom tool the model can call

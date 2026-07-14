@@ -3,6 +3,15 @@
 personal instructions that apply across my projects. symlink or copy this into
 `~/.pi/agent/AGENTS.md`, or keep it here and let the package carry it.
 
+## types & design
+
+- good type annotations are everything. develop advanced annotations that maximally express what you care about.
+- never demote or erase a type annotation to dodge an error. solve or extend the typing instead.
+- strings used as symbols are a code smell. use enums / literal union types, not string comparison.
+- hashmaps/dictionaries in place of a proper record/struct type are a huge code smell.
+- hand-coding behaviour instead of coining the right data structure is a code smell (e.g. inline managing a circular buffer's size at every push site instead of defining a circular buffer type).
+- prefer elegance and logical completion over ad-hoc problem solving, even when you don't happen to need the general case right now. don't write overly constrained code when the obvious generalisation is clearly better.
+
 ## conventions
 
 - be concise. no preamble, no filler.

@@ -10,6 +10,7 @@ machine and everything below is active when i run pi. no symlinking, no manual s
   - `spinner.ts` sets the working indicator and shimmering message, driven by `spinners.json` and `maxims.txt` (both in `extensions/`); shimmer/glyphs/completion line adapted from pi-claude-shimmer (MIT)
   - `footer.ts` replaces the built-in footer to customise the token arrow glyphs
   - `cwd.ts` adds `/cwd [path]` to change the directory the agent operates in, mid-session
+  - `web.ts` adds `/web` to start the pi-web UI as a background service (runs `pi-web install`/`doctor`, offers to install the global CLI if missing); passes through pi-web subcommands
 - `skills/` on-demand skills (`SKILL.md` folders + top-level `.md`)
 - `prompts/` prompt templates, expanded with `/name`
 - `themes/` color themes (`.json`)

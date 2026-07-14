@@ -11,7 +11,7 @@ bundles my:
   - `cwd.ts` adds `/cwd [path]` to change the agent's working directory mid-session
 - **skills/**: on-demand capability packages (`SKILL.md`)
 - **prompts/**: reusable prompt templates (`/name` to expand)
-- **themes/**: `rho`, a plan9/acme-inspired light theme
+- **themes/**: `plan9` (light) and `plan9-dark`, plan9/acme-inspired
 
 ## use it by default on a new machine
 
@@ -41,7 +41,7 @@ bundles my:
 
    ```bash
    pi
-   /settings   # theme -> rho
+   /settings   # theme -> plan9 (or plan9-dark)
    ```
 
 to install straight from git without a local clone:

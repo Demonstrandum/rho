@@ -1,12 +1,4 @@
-/**
- * hello: starter extension for the rho pi package.
- *
- * demonstrates the two most common extension surfaces:
- *   - a custom tool the model can call
- *   - a custom /slash command for you
- *
- * delete or rename this once you have your own.
- */
+// starter extension: a custom tool plus a /slash command. replace with your own.
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";

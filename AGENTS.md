@@ -7,6 +7,7 @@ machine and everything below is active when i run pi. no symlinking, no manual s
 
 - `extensions/` typescript extensions (tools, commands, ui, hooks), auto-discovered
   - `personal-rules.ts` + `personal-rules.md` inject my personal rules into the system prompt on every session
+  - `spinner.ts` sets the working indicator symbol/frames and text
 - `skills/` on-demand skills (`SKILL.md` folders + top-level `.md`)
 - `prompts/` prompt templates, expanded with `/name`
 - `themes/` color themes (`.json`)

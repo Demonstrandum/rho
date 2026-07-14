@@ -15,3 +15,6 @@ personal instructions that apply across my projects. symlink or copy this into
 - use a period, a comma, parentheses, a colon or a semicolon instead.
 - prefer all lower case, except keep names and brands stylised (TypeScript, Bun, pi, npm, GitHub, etc).
 - prefer ascii over unicode, unless forcing ascii becomes illegible. examples: write `x_i` or `x[i]` not a unicode subscript, `x^i` not a superscript, `sum(x)` not a capital sigma, `sqrt(x)` not the radical sign, `->` not an arrow glyph.
+- no emojis.
+- no overly verbose comments or docstrings, unless they describe something non-trivial, add useful extra context, or are tangential commentary. no over-explaining, no waffling.
+- no spontaneous coinage of catchy new terms. no name-dropping obscure concepts to fake competence.

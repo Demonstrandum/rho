@@ -20,6 +20,15 @@ these apply to everything you write for me, across all projects.
 - indent with 4 spaces, never tabs.
 - in languages with single-quote strings, use single quotes for symbolic strings (no spaces / identifier-like), e.g. `'session_start'`, and double quotes for human text, e.g. `"Hello, World!"`.
 
+## tooling
+
+- prefer `rg` (ripgrep) over `grep`, `fd` over `find`, and `fzf` for interactive filtering. they are faster, respect `.gitignore`, and have saner defaults.
+- prefer `sd` over `sed` for scripted find/replace: literal-string mode and sane regex, none of the delimiter-escaping traps.
+- prefer `ast-grep` (`sg`) over `rg` when the target is a code pattern rather than text (call sites, refactors): it matches syntax, not lines.
+- reach for `jq` / `yq` when parsing JSON / YAML instead of grepping it, but only when there is structure to parse. not needed for every task.
+- use `gh` for GitHub only when it is clearly more ergonomic than plain `git` (issues, PRs, releases); otherwise just use `git`.
+- if a preferred tool is missing, do not silently fall back. tell me it is not installed and give me the install command (e.g. `brew install ripgrep fd fzf sd ast-grep jq yq gh`), then use the standard tool for that one command only.
+
 ## writing
 
 - NEVER use em dashes. not the unicode character, not the double-hyphen `--`, not the triple-hyphen `---`. this applies everywhere: prose, comments, commit messages, json strings, code. no exceptions.

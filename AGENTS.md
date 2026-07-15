@@ -7,8 +7,9 @@ machine and everything below is active when i run pi. no symlinking, no manual s
 
 - `extensions/` typescript extensions (tools, commands, ui, hooks), auto-discovered
   - `personal-rules.ts` + `personal-rules.md` inject my personal rules into the system prompt on every session
-  - `spinner.ts` sets the working indicator and shimmering message, driven by `spinners.json` and `maxims.txt` (both in `extensions/`); shimmer/glyphs/completion line adapted from pi-claude-shimmer (MIT)
-  - `footer.ts` replaces the built-in footer to customise the token arrow glyphs
+  - `spinner.ts` sets the working indicator and shimmering message, driven by `spinners.json`, `maxims.txt`, and `verbs.txt` (all in `extensions/`); shimmer/glyphs/completion line adapted from pi-claude-shimmer (MIT)
+  - `footer.ts` replaces the built-in footer to customise the token arrow glyphs; also flips `clearOnShrink` on live for the current session
+  - `clear-on-shrink.ts` persists `terminal.clearOnShrink=true` into the global pi settings so no stale blank row is left behind when the rendered content shrinks (idempotent, written once)
   - `cwd.ts` adds `/cwd [path]` to change the directory the agent operates in, mid-session
   - `web.ts` adds `/web` to start the pi-web UI as a background service (runs `pi-web install`/`doctor`, offers to install the global CLI if missing); passes through pi-web subcommands
 - `skills/` on-demand skills (`SKILL.md` folders + top-level `.md`)
@@ -16,6 +17,7 @@ machine and everything below is active when i run pi. no symlinking, no manual s
 - `themes/` color themes (`.json`)
 - `extensions/spinners.json` spinner definitions keyed by name (each has `category`, `interval`, `frames`); the enabled categories live in `spinner.ts` (`chinese` by default)
 - `extensions/maxims.txt` working messages, one per line, `;` comments, picked at random each turn
+- `extensions/verbs.txt` completion verbs, one per line, `;` comments, picked at random for the settle line (`完 <verb> for <duration>`)
 - `package.json` the `pi` manifest declaring resource paths
 - bundled third-party packages (in `dependencies` + `bundledDependencies`, referenced via `node_modules/...` in the `pi` manifest): `pi-web-access`, `@ayulab/pi-rewind`, `context-mode`. they install and load automatically with rho.
 

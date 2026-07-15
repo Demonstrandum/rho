@@ -23,7 +23,7 @@ Accounting for frame-dragging
 
 ; Culture
 Ordering 4,000 pounds of meat
-Reporting to NSA
+Piquing the interest of the Intel Management Engine
 Reaching out to Chinese servers
 Outsourcing to Mossad
 Rewriting it in Rust
@@ -54,16 +54,18 @@ Clanking
 Slopping
 Hallucinating
 Increasing perplexity
-Escaping sandbox
+Escaping the sandbox
 Tokenizing reality
 Guzzling a lake
 Attending to the wrong tokens
 Sampling from posterior of bad decisions
 Derailing Chain-of-Thought
+Confabulating citations
+Citing totally imagined API
 
 ; Misc
 Redshifting old asset files
-Pondering my orb
+Pondering the orb
 Asking my therapist
 TypeError: Cannot read property '0' of undefined
 Asking magic 8-ball
@@ -71,7 +73,24 @@ Monetizing the attention economy
 Trying with -Wall -Wextra -Wpedantic -Werror
 Blue-sky thinking inside a windowless basement
 Writing grant proposals
+Minting new shitcoins
+Inventing even naughtier limericks
+Outsourcing to Pepsi's marketing department
+Converting cyclohexane into benzene
+Misspelling all instance of the word “necessary”
 
 ; Agentic
 Resolving inter-agent drama
 Herding cats
+Padding the context window
+
+; Dev
+Bribing the linter
+Negotiating with the borrow checker
+Force-pushing to master
+Commenting out the failing test
+Bikeshedding the button color
+Yak-shaving
+Marking it as wontfix
+Closing as duplicate
+Enumerating monoids in the category of endofunctors

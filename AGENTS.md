@@ -11,7 +11,7 @@ machine and everything below is active when i run pi. no symlinking, no manual s
   - `footer.ts` replaces the built-in footer to customise the token arrow glyphs; also flips `clearOnShrink` on live for the current session
   - `clear-on-shrink.ts` persists `terminal.clearOnShrink=true` into the global pi settings so no stale blank row is left behind when the rendered content shrinks (idempotent, written once)
   - `cwd.ts` adds `/cwd [path]` to change the directory the agent operates in, mid-session
-  - `web.ts` adds `/web` to start the pi-web UI as a background service (runs `pi-web install`/`doctor`, offers to install the global CLI if missing); passes through pi-web subcommands
+  - `web.ts` adds `/web` to run the pi-web UI as a background service and open it in the browser: `/web` installs if needed, (re)starts, health-checks, self-heals the node-pty spawn-helper chmod, registers the current session cwd as a pi-web project, and opens the URL; `/web PORT` rewrites the config port and restarts; `/web stop|restart|status|logs|doctor|version|uninstall` pass through; `/web open` just opens the current URL
 - `skills/` on-demand skills (`SKILL.md` folders + top-level `.md`)
 - `prompts/` prompt templates, expanded with `/name`
 - `themes/` color themes (`.json`)

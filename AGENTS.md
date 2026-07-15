@@ -8,6 +8,9 @@ machine and everything below is active when i run pi. no symlinking, no manual s
 - `extensions/` typescript extensions (tools, commands, ui, hooks), auto-discovered
   - `personal-rules.ts` + `personal-rules.md` inject my personal rules into the system prompt on every session
   - `spinner.ts` sets the working indicator and shimmering message, driven by `spinners.json`, `maxims.txt`, and `verbs.txt` (all in `extensions/`); shimmer/glyphs/completion line adapted from pi-claude-shimmer (MIT)
+  - `startup.ts` replaces pi's built-in startup block: it persists `quietStartup=true` (idempotent global settings write) to suppress the built-in banner + bracketed `[Prompts]`-style resource listing, then draws a compact bold-inline header via `setHeader` (logo line + one line each for `prompts`/`skills`/`commands`/`themes`). resource data comes from `pi.getCommands()` (split by `source`) and `ctx.ui.getAllThemes()`; there is no API to enumerate loaded extension files, so extension-provided slash commands show under `commands` instead of an `Extensions` section
+  - `silence-extra-usage-warning.ts` persists `warnings.anthropicExtraUsage=false` once, idempotently, so pi's "subscription auth ... billed per token" notice is not shown every session
+  - `lib/settings-store.ts` shared helper (`ensureGlobalSetting`) for the idempotent nested global-settings writes used above; in a subdirectory so extension auto-discovery (top-level `*.ts` only) does not load it as an extension
   - `footer.ts` replaces the built-in footer to customise the token arrow glyphs; also flips `clearOnShrink` on live for the current session
   - `clear-on-shrink.ts` persists `terminal.clearOnShrink=true` into the global pi settings so no stale blank row is left behind when the rendered content shrinks (idempotent, written once)
   - `cwd.ts` adds `/cwd [path]` to change the directory the agent operates in, mid-session

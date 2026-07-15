@@ -7,6 +7,8 @@ bundles my:
 - **extensions/**: TypeScript modules that add tools, commands, ui, hooks
   - `personal-rules.ts` appends my coding/writing rules to the system prompt every session
   - `spinner.ts` sets the working indicator and shimmering message from `spinners.json` + `maxims.txt` (chinese spinners by default; shimmer adapted from [pi-claude-shimmer](https://github.com/ouzhenkun/pi-claude-shimmer), MIT)
+  - `startup.ts` hides pi's built-in startup block (`quietStartup`) and renders a compact bold-inline header (logo + `prompts`/`skills`/`commands`/`themes` on one line each) via `setHeader`
+  - `silence-extra-usage-warning.ts` persists `warnings.anthropicExtraUsage=false` so the subscription-billing notice is not shown every session
   - `footer.ts` replaces the built-in footer to swap the token arrow glyphs
   - `cwd.ts` adds `/cwd [path]` to change the agent's working directory mid-session
   - `web.ts` adds `/web` to launch the [pi-web](https://github.com/jmfederico/pi-web) UI as a background service (and `/web status|stop|logs|...` passthrough)

@@ -45,7 +45,7 @@ Rizzing
 Touching grass
 Gaslighting
 Serving 💁‍♀️💅
-Finding the perfect Pepe reaction image
+Finding perfect Pepe reaction image
 
 ; LLM
 Tokenmaxxing
@@ -77,7 +77,7 @@ Minting new shitcoins
 Inventing even naughtier limericks
 Outsourcing to Pepsi's marketing department
 Converting cyclohexane into benzene
-Misspelling all instance of the word “necessary”
+Re-misspelling all instance of the word “necessary”
 
 ; Agentic
 Resolving inter-agent drama
@@ -88,7 +88,7 @@ Padding the context window
 Bribing the linter
 Negotiating with the borrow checker
 Force-pushing to master
-Commenting out the failing test
+Commenting out failing test
 Bikeshedding the button color
 Yak-shaving
 Marking it as wontfix

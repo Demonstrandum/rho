@@ -34,7 +34,7 @@ const SHIMMER_BAND = 4;
 // 完 = done. a verb in verbs.txt may end with a `<preposition>` token to swap the
 // default 'for', e.g. "Solved a Rubiks cube <in only>" -> "... in only 12s".
 const COMPLETION_GLYPH = '完';
-const COMPLETION_FALLBACK: Verb = { text: 'Toiled', preposition: 'for' };
+const COMPLETION_FALLBACK: Verb = { text: 'Toiled', preposition: 'for', trail: '' };
 
 type Rgb = [number, number, number];
 
@@ -49,6 +49,7 @@ type SpinnersFile = Record<string, SpinnerDef>;
 interface Verb {
     text: string;
     preposition: string;
+    trail: string;
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -76,8 +77,20 @@ function loadMaxims(): string[] {
 }
 
 function parseVerb(line: string): Verb {
-    const match = line.match(/^(.*?)\s*<([^>]+)>\s*$/);
-    return match ? { text: match[1].trim(), preposition: match[2].trim() } : { text: line, preposition: 'for' };
+    const match = line.match(/^(.*?)\s*(?:<([^>]*)>\s*(.*?))?$/)!;
+
+    const text        = match[1]?.trim() || COMPLETION_FALLBACK.text;
+    const preposition = match[2]?.trim() || COMPLETION_FALLBACK.preposition;
+    const trail       = match[3]?.trim() || COMPLETION_FALLBACK.trail;
+
+    return { text, preposition, trail }
+}
+
+function formatVerb(verb: Verb, duration: number | string): string {
+    duration = typeof duration === 'number' ? formatDuration(duration) : duration;
+    const words = [verb.text, verb.preposition, duration];
+    if (verb.trail) words.push(verb.trail);
+    return words.join(' ');
 }
 
 function loadVerbs(): Verb[] {
@@ -123,7 +136,7 @@ function colorSweep(text: string, frame: number, base: Rgb, shimmer: Rgb): strin
 }
 
 function formatDuration(ms: number): string {
-    const s = Math.floor(ms / 1000);
+    const s = Math.round(ms / 1000);
     const m = Math.floor(s / 60);
     return m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
 }
@@ -209,7 +222,8 @@ export default function (pi: ExtensionAPI) {
         agentStart = 0;
         verb = '';
         const done = pick(loadVerbs()) ?? COMPLETION_FALLBACK;
-        ctx?.ui.notify(`${COMPLETION_GLYPH} ${done.text} ${done.preposition} ${formatDuration(elapsed)}`, 'info');
+        const text = formatVerb(done, elapsed);
+        ctx?.ui.notify(`${COMPLETION_GLYPH} ${text}`, 'info');
     });
 
     pi.on('session_shutdown', async () => {

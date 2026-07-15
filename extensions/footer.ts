@@ -35,6 +35,33 @@ function sanitizeStatus(text: string): string {
     return text.replace(/[\r\n\t]/g, ' ').replace(/ +/g, ' ').trim();
 }
 
+// turn a raw model id like `claude-opus-4-8` into a friendly display name like
+// `Opus 4.8`. drops vendor prefixes, folds trailing numeric segments into a
+// dotted version, title-cases the name words, and uppercases known acronyms.
+const VENDOR_PREFIXES = new Set(['claude', 'anthropic', 'openai', 'google', 'meta', 'mistral', 'xai']);
+const ACRONYMS = new Set(['gpt', 'ai', 'llm']);
+const isVersionToken = (t: string): boolean => /^\d+(\.\d+)*$/.test(t);
+
+function prettifyModelName(id: string): string {
+    const tokens = id.split(/[-_]/).filter(Boolean);
+    while (tokens.length > 1 && VENDOR_PREFIXES.has(tokens[0].toLowerCase())) {
+        tokens.shift();
+    }
+    const versionTokens: string[] = [];
+    while (tokens.length > 1 && isVersionToken(tokens[tokens.length - 1])) {
+        versionTokens.unshift(tokens.pop() as string);
+    }
+    const name = tokens
+        .map((t) => {
+            const low = t.toLowerCase();
+            if (ACRONYMS.has(low)) return low.toUpperCase();
+            return low.charAt(0).toUpperCase() + low.slice(1);
+        })
+        .join(' ');
+    const version = versionTokens.join('.');
+    return version ? `${name} ${version}` : name;
+}
+
 export default function (pi: ExtensionAPI) {
     pi.on('session_start', async (_event, ctx: ExtensionContext) => {
         if (ctx.mode !== 'tui') {
@@ -110,7 +137,7 @@ export default function (pi: ExtensionAPI) {
                         statsLeftWidth = visibleWidth(statsLeft);
                     }
 
-                    const modelName = model?.id || 'no-model';
+                    const modelName = model?.id ? prettifyModelName(model.id) : 'no-model';
                     let rightBase = modelName;
                     if (model?.reasoning) {
                         const level = pi.getThinkingLevel() || 'off';

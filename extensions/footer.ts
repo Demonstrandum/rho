@@ -9,8 +9,8 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
-const ARROW_IN = '▲';
-const ARROW_OUT = '▽';
+const ARROW_IN = '▲  ';
+const ARROW_OUT = '▽  ';
 
 // pi defaults auto-compaction on; flip if you disable it in settings.
 const SHOW_AUTO = true;
@@ -41,6 +41,9 @@ export default function (pi: ExtensionAPI) {
             return;
         }
         ctx.ui.setFooter((tui, theme, footerData) => {
+            // flip clearOnShrink live so the current session drops leftover blank
+            // rows on shrink; clear-on-shrink.ts persists it so re-applies keep it.
+            tui.setClearOnShrink(true);
             const unsub = footerData.onBranchChange(() => tui.requestRender());
             return {
                 dispose: unsub,
@@ -71,7 +74,7 @@ export default function (pi: ExtensionAPI) {
                     const percentValue = contextUsage?.percent ?? 0;
                     const percent = contextUsage?.percent !== null ? percentValue.toFixed(1) : '?';
 
-                    let pwd = formatCwd(ctx.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE);
+                    let pwd = formatCwd(process.cwd(), process.env.HOME || process.env.USERPROFILE);
                     const branch = footerData.getGitBranch();
                     if (branch) pwd = `${pwd} (${branch})`;
                     const sessionName = ctx.sessionManager.getSessionName();

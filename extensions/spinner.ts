@@ -2,8 +2,9 @@
 //
 // the indicator glyphs come from spinners.json, filtered to ENABLED_CATEGORIES
 // (chinese by default). the message is a random line from maxims.txt, animated
-// with a shimmer color-sweep, and a completion line is shown when the agent
-// settles. both the maxim and the spinner are re-picked each turn.
+// with a shimmer color-sweep, and a completion line (a random verb from
+// verbs.txt) is shown when the agent settles. both the maxim and the spinner
+// are re-picked each turn.
 //
 // the shimmer sweep, glyphs, and completion line are adapted from
 // pi-claude-shimmer by ouzhenkun (MIT), https://github.com/ouzhenkun/pi-claude-shimmer
@@ -12,20 +13,28 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
 
 // edit to switch spinner sets. categories are defined per spinner in spinners.json.
 const ENABLED_CATEGORIES = ['chinese'];
 
-// shimmer palette (claude orange). base is the resting color, shimmer is the
-// moving highlight. change to fit whatever theme you run.
-const BASE_HEX = '#D77757';
-const SHIMMER_HEX = '#F59575';
-const SHIMMER_MS = 120;
+// colors come from the active theme, matching pi's native loader: the spinner is
+// the bright `accent`, the maxim rests on neutral `muted` and the shimmer sweeps
+// up toward `accent`. edit these to point at different theme roles.
+const SPINNER_COLOR: ThemeColor = 'accent';
+const MAXIM_BASE: ThemeColor = 'muted';
+const MAXIM_SHIMMER: ThemeColor = 'accent';
+const SHIMMER_MS = 80;
+// frames per trailing-dot step; the maxim grows '.' '..' '...' then repeats.
+const DOTS_STEP = 1;
+const DOTS_MAX = 3;
 const SHIMMER_BAND = 4;
 
-// shown when the agent settles: "* <verb> for <duration>".
-const COMPLETION_VERBS = ['Baked', 'Brewed', 'Churned', 'Cogitated', 'Cooked', 'Crunched', 'Sauteed', 'Worked'];
-const COMPLETION_GLYPH = '✻';
+// completion line: "完 <verb> <preposition> <duration>", e.g. "完 Toiled for 12s".
+// 完 = done. a verb in verbs.txt may end with a `<preposition>` token to swap the
+// default 'for', e.g. "Solved a Rubiks cube <in only>" -> "... in only 12s".
+const COMPLETION_GLYPH = '完';
+const COMPLETION_FALLBACK: Verb = { text: 'Toiled', preposition: 'for' };
 
 type Rgb = [number, number, number];
 
@@ -37,9 +46,22 @@ interface SpinnerDef {
 
 type SpinnersFile = Record<string, SpinnerDef>;
 
+interface Verb {
+    text: string;
+    preposition: string;
+}
+
 const here = dirname(fileURLToPath(import.meta.url));
 const spinnersPath = join(here, 'spinners.json');
 const maximsPath = join(here, 'maxims.txt');
+const verbsPath = join(here, 'verbs.txt');
+
+function loadLines(path: string): string[] {
+    return readFileSync(path, 'utf8')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !line.startsWith(';'));
+}
 
 function loadSpinners(): SpinnerDef[] {
     const file = JSON.parse(readFileSync(spinnersPath, 'utf8')) as SpinnersFile;
@@ -50,19 +72,28 @@ function loadSpinners(): SpinnerDef[] {
 }
 
 function loadMaxims(): string[] {
-    return readFileSync(maximsPath, 'utf8')
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0 && !line.startsWith(';'));
+    return loadLines(maximsPath);
+}
+
+function parseVerb(line: string): Verb {
+    const match = line.match(/^(.*?)\s*<([^>]+)>\s*$/);
+    return match ? { text: match[1].trim(), preposition: match[2].trim() } : { text: line, preposition: 'for' };
+}
+
+function loadVerbs(): Verb[] {
+    return loadLines(verbsPath).map(parseVerb);
 }
 
 function pick<T>(items: T[]): T | undefined {
     return items.length > 0 ? items[Math.floor(Math.random() * items.length)] : undefined;
 }
 
-function hexToRgb(hex: string): Rgb {
-    const h = hex.replace('#', '');
-    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+// pull the truecolor rgb behind a theme role, if the theme emits one. themes in
+// 256-color mode emit palette indices instead, in which case shimmer blending is
+// skipped and the maxim falls back to a flat themed color.
+function themeRgb(theme: Theme, color: ThemeColor): Rgb | undefined {
+    const match = theme.getFgAnsi(color).match(/38;2;(\d+);(\d+);(\d+)/);
+    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined;
 }
 
 function blend(a: Rgb, b: Rgb, t: number): Rgb {
@@ -80,9 +111,7 @@ function ansiFg(rgb: Rgb): string {
 const RESET = '\x1b[0m';
 
 // a moving highlight band across the text, returned as a per-character ansi string.
-function colorSweep(text: string, frame: number): string {
-    const base = hexToRgb(BASE_HEX);
-    const shimmer = hexToRgb(SHIMMER_HEX);
+function colorSweep(text: string, frame: number, base: Rgb, shimmer: Rgb): string {
     const total = text.length + SHIMMER_BAND * 2;
     const pos = frame % total;
     let out = '';
@@ -105,11 +134,19 @@ export default function (pi: ExtensionAPI) {
     let frame = 0;
     let verb = '';
     let agentStart = 0;
+    let baseRgb: Rgb | undefined;
+    let shimmerRgb: Rgb | undefined;
 
     const render = () => {
-        if (verb !== '') {
-            ctx?.ui.setWorkingMessage(colorSweep(verb, frame));
+        if (verb === '' || ctx === undefined) {
+            return;
         }
+        const dots = '.'.repeat((Math.floor(frame / DOTS_STEP) % (DOTS_MAX + 1)));
+        const message =
+            baseRgb !== undefined && shimmerRgb !== undefined
+                ? colorSweep(verb, frame, baseRgb, shimmerRgb) + ansiFg(baseRgb) + dots + RESET
+                : ctx.ui.theme.fg(MAXIM_BASE, verb + dots);
+        ctx.ui.setWorkingMessage(message);
     };
 
     const ensureTimer = () => {
@@ -133,10 +170,12 @@ export default function (pi: ExtensionAPI) {
         ctx = next;
         verb = pick(loadMaxims()) ?? 'working';
         frame = 0;
+        baseRgb = themeRgb(ctx.ui.theme, MAXIM_BASE);
+        shimmerRgb = themeRgb(ctx.ui.theme, MAXIM_SHIMMER);
         const spinner = pick(loadSpinners());
         if (spinner !== undefined) {
             ctx.ui.setWorkingIndicator({
-                frames: spinner.frames.map((f) => ansiFg(hexToRgb(BASE_HEX)) + f + RESET),
+                frames: spinner.frames.map((f) => ctx!.ui.theme.fg(SPINNER_COLOR, f)),
                 intervalMs: spinner.interval,
             });
         }
@@ -169,8 +208,8 @@ export default function (pi: ExtensionAPI) {
         const elapsed = Date.now() - (agentStart || Date.now());
         agentStart = 0;
         verb = '';
-        const done = pick(COMPLETION_VERBS) ?? 'Worked';
-        ctx?.ui.notify(`${COMPLETION_GLYPH} ${done} for ${formatDuration(elapsed)}`, 'info');
+        const done = pick(loadVerbs()) ?? COMPLETION_FALLBACK;
+        ctx?.ui.notify(`${COMPLETION_GLYPH} ${done.text} ${done.preposition} ${formatDuration(elapsed)}`, 'info');
     });
 
     pi.on('session_shutdown', async () => {

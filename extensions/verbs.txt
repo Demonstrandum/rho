@@ -1,0 +1,24 @@
+; completion verbs
+; append <x> to the end to replace default 'for' preposition
+
+Toiled
+Slogged
+Grafted
+Twerked
+Dabbed
+Held my chin up high
+Held back tears
+Mined coal
+Faffed about
+Pottered about
+Huffed and puffed
+Sulked
+Clanked
+Threw up
+Drew 20 gigawatts of coal power
+Evaporated 80 cubic kilometers of water <in>
+Mined Bitcoin
+Solved a Rubiks cube <in only>
+Yak-shaved
+Juggled three objects
+Sunk with Tali

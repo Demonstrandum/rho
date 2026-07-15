@@ -1,7 +1,7 @@
 {
     "class-struggle": {
         "category": "chinese",
-        "interval": 100,
+        "interval": 125,
         "frames": [
             "阶",
             "级",
@@ -16,7 +16,7 @@
     },
     "weeds-of-socialism": {
         "category": "chinese",
-        "interval": 100,
+        "interval": 90,
         "frames": [
             "宁",
             "要",
@@ -39,7 +39,7 @@
     },
     "political-power": {
         "category": "chinese",
-        "interval": 100,
+        "interval": 135,
         "frames": [
             "枪",
             "杆",
@@ -52,7 +52,7 @@
     },
     "serve-the-people": {
         "category": "chinese",
-        "interval": 100,
+        "interval": 145,
         "frames": [
             "为",
             "人",
@@ -63,7 +63,7 @@
     },
     "seek-truth-from-facts": {
         "category": "chinese",
-        "interval": 80,
+        "interval": 150,
         "frames": [
             "实",
             "事",
@@ -73,7 +73,7 @@
     },
     "smooth-sailing": {
         "category": "chinese",
-        "interval": 80,
+        "interval": 150,
         "frames": [
             "帆",
             "风",
@@ -82,7 +82,7 @@
     },
     "instant-success": {
         "category": "chinese",
-        "interval": 80,
+        "interval": 150,
         "frames": [
             "马",
             "到",
@@ -92,7 +92,7 @@
     },
     "everything-goes-well": {
         "category": "chinese",
-        "interval": 80,
+        "interval": 150,
         "frames": [
             "万",
             "事",
@@ -102,7 +102,7 @@
     },
     "elements": {
         "category": "chinese",
-        "interval": 80,
+        "interval": 145,
         "frames": [
             "木",
             "火",

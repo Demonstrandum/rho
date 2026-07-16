@@ -84,6 +84,7 @@ Re-misspelling all instances of the word “necessary”
 Going gnome hunting
 Constructing fairy circles
 Summoning the fae
+Astral projecting your code
 
 ; Agentic
 Resolving inter-agent drama

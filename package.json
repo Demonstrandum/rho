@@ -21,6 +21,7 @@
     "themes": ["./themes"]
   },
   "scripts": {
+    "test": "bun test tests/",
     "typecheck": "tsc --noEmit",
     "link": "pi install -l $(pwd)",
     "link:global": "pi install $(pwd)"
@@ -41,6 +42,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.7",
     "@earendil-works/pi-tui": "^0.80.7",
+    "@types/bun": "^1.3.14",
     "typescript": "^5.9.3"
   }
 }

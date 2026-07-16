@@ -23,6 +23,7 @@ import type { ExtensionAPI, SlashCommandInfo, Theme, ThemeColor } from '@earendi
 import { VERSION } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth } from '@earendil-works/pi-tui';
 import { ensureGlobalSetting } from './lib/settings-store';
+import { zip, choose, themeRgb, blend, ansiFg, RESET, type Rgb } from './lib/utils';
 
 // a short discoverability hint. keep it minimal; the footer carries model/token
 // state, so this only points at the two universal entry points.
@@ -67,24 +68,6 @@ class Art {
     }
 }
 
-const zip = <T extends unknown[][]>(...arrays: T) =>
-  arrays[0].map((_, i) => arrays.map((a) => a[i])) as {
-    [K in keyof T]: T[K] extends (infer U)[] ? U : never
-  }[];
-
-function choose<T>(items: T[], weights?: number[]): T {
-    const n = items.length;
-    const w = weights || Array(n).fill(1/n);
-    const cum = w.reduce((c, x) => [...c, c[c.length-1] + x], [0]).slice(1);
-    const t = Math.random() * cum[n - 1];
-
-    for (const [c, it] of zip(cum, items) as [number, T][]) {
-        if (c > t) return it;
-    }
-
-    return items[n - 1];
-}
-
 // scale the 0/1 glyph matrix into solid block-art lines the Art wrapper owns.
 function scaleGlyph(glyph: readonly number[][], scaleX: number, scaleY: number): string[] {
     const width = Math.max(...glyph.map((row) => row.length));
@@ -126,20 +109,6 @@ function shimmerProjection(dir: ShimmerDir, row: number, col: number): number {
 
 // truecolor rgb shimmer, ported from spinner.ts: blend accent -> highlight per
 // cell by a smooth moving band, instead of swapping discrete block glyphs.
-type Rgb = [number, number, number];
-
-// pull the truecolor rgb behind a theme role; undefined in 256-color mode.
-function themeRgb(theme: Theme, color: ThemeColor): Rgb | undefined {
-    const m = theme.getFgAnsi(color).match(/38;2;(\d+);(\d+);(\d+)/);
-    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : undefined;
-}
-function blend(a: Rgb, b: Rgb, t: number): Rgb {
-    return [Math.round(a[0] + (b[0] - a[0]) * t), Math.round(a[1] + (b[1] - a[1]) * t), Math.round(a[2] + (b[2] - a[2]) * t)];
-}
-function ansiFg(rgb: Rgb): string {
-    return `\x1b[38;2;${rgb[0]};${rgb[1]};${rgb[2]}m`;
-}
-const RESET = '\x1b[0m';
 
 function darken(rgb: Rgb, factor: number): Rgb {
     return [Math.round(rgb[0] * factor), Math.round(rgb[1] * factor), Math.round(rgb[2] * factor)];
@@ -194,8 +163,9 @@ function shuffledOrder(): Map<number, number> {
 // empty-to-solid density ramp, used for the quick fade-in.
 const FADE_RAMP = [' ', '░', '▒', '▓', '█'] as const;
 
-const LABEL_HEADS = ['pi', 'π'];
-const LABEL_WEIGHTS = [0.67, 0.33];
+const LABEL_HEADS   = [ 'pi', 'π'];
+const LABEL_SUBS    = ['rho', 'ϱ'];
+const LABEL_WEIGHTS = [ 0.67, 0.33];
 const LABEL_TAIL = ` v${VERSION}`;
 
 type IntroMode = 'fade' | 'build' | 'scatter';
@@ -252,16 +222,35 @@ function cellGlyph(row: number, col: number, t: number, mode: IntroMode, order: 
     return '█';
 }
 
-function renderLabel(theme: Theme, label: string, headLength: number, t: number, tl: Timeline, finished: boolean): string {
-    if (finished) {
-        return theme.bold(theme.fg('accent', label.slice(0, headLength))) + theme.fg('dim', label.slice(headLength));
+// the wordmark is a list of styled segments; the type-on reveal walks the
+// concatenation while each segment keeps its own colour/weight. head (pi) is
+// bold accent, sub (rho) is the same accent unbolded, the version tail is dim.
+interface LabelSegment {
+    readonly text: string;
+    readonly style: (theme: Theme, s: string) => string;
+}
+
+function labelLength(segments: readonly LabelSegment[]): number {
+    return segments.reduce((n, seg) => n + seg.text.length, 0);
+}
+
+function renderLabel(theme: Theme, segments: readonly LabelSegment[], t: number, tl: Timeline, finished: boolean): string {
+    const total = labelLength(segments);
+    const shown = finished ? total : Math.max(0, Math.min(total, Math.floor((t - tl.typeStart) / TYPE_PER_CHAR_MS)));
+    let out = '';
+    let remaining = shown;
+    for (const seg of segments) {
+        const take = Math.max(0, Math.min(seg.text.length, remaining));
+        if (take > 0) {
+            out += seg.style(theme, seg.text.slice(0, take));
+        }
+        remaining -= seg.text.length;
     }
-    const shown = Math.max(0, Math.min(label.length, Math.floor((t - tl.typeStart) / TYPE_PER_CHAR_MS)));
-    const head = label.slice(0, Math.min(shown, headLength));
-    const tail = shown > headLength ? label.slice(headLength, shown) : '';
-    let out = theme.bold(theme.fg('accent', head)) + theme.fg('dim', tail);
+    if (finished) {
+        return out;
+    }
     // cursor: solid while typing (no blink), then dissolve through the density ramp.
-    const typeEnd = tl.typeStart + label.length * TYPE_PER_CHAR_MS;
+    const typeEnd = tl.typeStart + total * TYPE_PER_CHAR_MS;
     let cursor: string;
     if (t < typeEnd) {
         cursor = '█';
@@ -278,6 +267,9 @@ function renderLabel(theme: Theme, label: string, headLength: number, t: number,
 interface Section {
     readonly label: string;
     readonly items: readonly string[];
+    // for the themes section: the name of the currently active theme, so it can
+    // render bold while the rest stay dim.
+    readonly current?: string;
 }
 
 function sortedNames(commands: readonly SlashCommandInfo[], source: SlashCommandInfo['source'], prefix: string): string[] {
@@ -303,12 +295,16 @@ export default function (pi: ExtensionAPI) {
         const mode = choose(INTRO_MODES, INTRO_WEIGHTS);
         // block fills reveal cells in order; scatter uses a random permutation.
         const order = mode === 'scatter' ? shuffledOrder() : REVEAL_ORDER;
-        // pick the wordmark head once per session (weighted pi vs π).
-        const head = choose(LABEL_HEADS, LABEL_WEIGHTS);
-        const label = head + LABEL_TAIL;
+        // pick the wordmark once per session (weighted pi/rho vs π/ϱ).
+        const [head, sub] = choose(zip(LABEL_HEADS, LABEL_SUBS), LABEL_WEIGHTS);
+        const label: LabelSegment[] = [
+            { text: head, style: (theme, s) => theme.bold(theme.fg('accent', s)) },
+            { text: sub, style: (theme, s) => theme.fg('accent', s) },
+            { text: LABEL_TAIL, style: (theme, s) => theme.fg('dim', s) },
+        ];
         // pick the shimmer direction once per session (uniform over the four axes).
         const dir = choose(SHIMMER_DIRS);
-        const tl = timeline(mode, label.length);
+        const tl = timeline(mode, labelLength(label));
 
         ctx.ui.setHeader((tui, theme) => {
             const start = Date.now();
@@ -368,7 +364,7 @@ export default function (pi: ExtensionAPI) {
                             line = theme.fg('accent', cells);
                         }
                         if (row === CENTER_ROW && (finished || t >= tl.typeStart)) {
-                            line += `   ${renderLabel(theme, label, head.length, t, tl, finished)}`;
+                            line += `   ${renderLabel(theme, label, t, tl, finished)}`;
                         }
                         logoLines.push(line);
                     }
@@ -385,6 +381,7 @@ export default function (pi: ExtensionAPI) {
                                 .filter((entry) => entry.path !== undefined)
                                 .map((entry) => entry.name)
                                 .sort((a, b) => a.localeCompare(b)),
+                            current: theme.name,
                         },
                     ].filter((section) => section.items.length > 0);
 
@@ -392,7 +389,17 @@ export default function (pi: ExtensionAPI) {
                     const lines = [...logoLines, '', theme.fg('dim', HINT)];
                     for (const section of sections) {
                         const label = theme.bold(theme.fg('accent', section.label.padEnd(labelWidth)));
-                        lines.push(`${label}  ${theme.fg('dim', section.items.join(', '))}`);
+                        if (section.current && section.items.includes(section.current)) {
+                            // active theme: same `dim` color as the rest, just bold.
+                            const parts = section.items.map((name) =>
+                                name === section.current
+                                    ? theme.bold(theme.fg('dim', name))
+                                    : theme.fg('dim', name),
+                            );
+                            lines.push(`${label}  ${parts.join(theme.fg('dim', ', '))}`);
+                        } else {
+                            lines.push(`${label}  ${theme.fg('dim', section.items.join(', '))}`);
+                        }
                     }
 
                     return ['', ...lines.map((line) => truncateToWidth(line, width, theme.fg('dim', '...'))), ''];

@@ -27,20 +27,20 @@
   },
   "dependencies": {
     "pi-web-access": "^0.13.0",
-    "@ayulab/pi-rewind": "^0.4.5",
+    "@ayulab/pi-rewind": "^0.4.6",
     "context-mode": "^1.0.169"
   },
   "bundledDependencies": ["pi-web-access", "@ayulab/pi-rewind", "context-mode"],
   "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "^0.80.7",
+    "@earendil-works/pi-agent-core": "^0.80.7",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
-    "typebox": "*"
+    "typebox": "^1.1.38"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "latest",
-    "@earendil-works/pi-tui": "latest",
-    "typescript": "^5.6.0"
+    "@earendil-works/pi-coding-agent": "^0.80.7",
+    "@earendil-works/pi-tui": "^0.80.7",
+    "typescript": "^5.9.3"
   }
 }

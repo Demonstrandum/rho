@@ -92,7 +92,7 @@ function scaleGlyph(glyph: readonly number[][], scaleX: number, scaleY: number):
     for (const row of glyph) {
         let line = '';
         for (let col = 0; col < width; col++) {
-            line += (row[col] === 1 ? '█' : ' ').repeat(scaleX);
+            line += (row[col] === 0 ? ' ' : '█').repeat(scaleX);
         }
         for (let k = 0; k < scaleY; k++) {
             lines.push(line);

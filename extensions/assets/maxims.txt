@@ -47,6 +47,8 @@ Touching grass
 Gaslighting
 Serving 💁‍♀️💅
 Finding perfect Pepe reaction image
+Redpilling
+Blackpilling
 
 ; LLM
 Tokenmaxxing
@@ -79,6 +81,9 @@ Inventing even naughtier limericks
 Outsourcing to Pepsi's marketing department
 Converting cyclohexane into benzene
 Re-misspelling all instances of the word “necessary”
+Going gnome hunting
+Constructing fairy circles
+Summoning the fae
 
 ; Agentic
 Resolving inter-agent drama
@@ -90,7 +95,7 @@ Bribing the linter
 Negotiating with the borrow checker
 Force-pushing to master
 Commenting out failing test
-Bikeshedding the button color
+Bikeshedding the button colours
 Yak-shaving
 Marking it as wontfix
 Closing as duplicate

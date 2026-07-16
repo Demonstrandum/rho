@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
+import { themeRgb, blend, ansiFg, RESET, type Rgb } from './lib/utils';
 
 // edit to switch spinner sets. categories are defined per spinner in spinners.json.
 const ENABLED_CATEGORIES = ['chinese'];
@@ -28,31 +29,76 @@ const SHIMMER_MS = 80;
 // frames per trailing-dot step; the maxim grows '.' '..' '...' then repeats.
 const DOTS_STEP = 1;
 const DOTS_MAX = 3;
+
+// completion line: "<sigil> <verb> <preposition> <duration>", e.g. "完 Toiled for 12s".
+// the default sigil is 完 (done). a verb in verbs.txt may lead with a `[glyph]`
+// token to swap it, e.g. "[₿] Mined Bitcoin" -> "₿ Mined Bitcoin for 12s", and
+// may end with a `<preposition>` token to swap the default 'for', e.g.
+// "Solved a Rubiks cube <in only>" -> "... in only 12s".
+const COMPLETION_GLYPH = '完';
+const COMPLETION_FALLBACK: Verb = { text: 'Toiled', preposition: 'for', trail: '', sigil: COMPLETION_GLYPH };
+
+// the completion line renders through pi's status color (`dim`), which is low
+// contrast against the background. both the text and the sigil blend from the
+// theme's `text` color toward the high-contrast extreme (black on light themes,
+// white on dark). 0 = plain text color, 1 = the pure extreme. the sigil sits
+// further toward the extreme so it reads as the brightest mark on the line.
+const COMPLETION_CONTRAST = 0.45;
+const SIGIL_INTENSITY = 0.9;
+// no-truecolor-anchor fallback in formatVerb: the verb text stays the theme's
+// light `dim` color and the sigil is nudged this far from `dim` toward the
+// dark/light extreme, a touch heavier than the verb but not full black. with no
+// rgb at all, DEFAULT_FG (default foreground, undoes pi's `dim` wrap) is used.
+const SIGIL_FALLBACK_DARKEN = 0.4;
+const DEFAULT_FG = '\x1b[39m';
 const SHIMMER_BAND = 4;
 
-// completion line: "完 <verb> <preposition> <duration>", e.g. "完 Toiled for 12s".
-// 完 = done. a verb in verbs.txt may end with a `<preposition>` token to swap the
-// default 'for', e.g. "Solved a Rubiks cube <in only>" -> "... in only 12s".
-const COMPLETION_GLYPH = '完';
-const COMPLETION_FALLBACK: Verb = { text: 'Toiled', preposition: 'for', trail: '' };
+// how the frame list is played each loop. 'repeat' runs start -> end and jumps
+// back to the start (the default, and pi's native behaviour). 'pulse' runs
+// start -> end -> start, ping-ponging without repeating the endpoints.
+type Animation = 'repeat' | 'pulse';
 
-type Rgb = [number, number, number];
+// frames may be written as an explicit array, or as a single string that is
+// split into its codepoints (so CJK / astral glyphs each become one frame).
+type RawFrames = string | string[];
+
+export function toFrames(frames: RawFrames): string[] {
+    return typeof frames === 'string' ? [...frames] : frames;
+}
+
+interface RawSpinnerDef {
+    category: string;
+    interval: number;
+    frames: RawFrames;
+    animation?: Animation;
+}
 
 interface SpinnerDef {
     category: string;
     interval: number;
     frames: string[];
+    animation?: Animation;
 }
 
-type SpinnersFile = Record<string, SpinnerDef>;
+// build one loop's worth of frames for the given animation. 'pulse' appends the
+// interior frames in reverse so the jump back to frame 0 is itself a step.
+export function playFrames(frames: string[], animation: Animation): string[] {
+    if (animation === 'pulse' && frames.length > 2) {
+        return frames.concat(frames.slice(1, -1).reverse());
+    }
+    return frames;
+}
 
-interface Verb {
+type SpinnersFile = Record<string, RawSpinnerDef>;
+
+export interface Verb {
     text: string;
     preposition: string;
     trail: string;
+    sigil: string;
 }
 
-const here = dirname(fileURLToPath(import.meta.url));
+const here = join(dirname(fileURLToPath(import.meta.url)), 'assets');
 const spinnersPath = join(here, 'spinners.json');
 const maximsPath = join(here, 'maxims.txt');
 const verbsPath = join(here, 'verbs.txt');
@@ -67,7 +113,9 @@ function loadLines(path: string): string[] {
 function loadSpinners(): SpinnerDef[] {
     const file = JSON.parse(readFileSync(spinnersPath, 'utf8')) as SpinnersFile;
     const enabled = new Set(ENABLED_CATEGORIES);
-    const all = Object.values(file);
+    const all = Object.values(file).map(
+        (spinner): SpinnerDef => ({ ...spinner, frames: toFrames(spinner.frames) }),
+    );
     const pool = all.filter((spinner) => enabled.has(spinner.category));
     return pool.length > 0 ? pool : all;
 }
@@ -76,52 +124,64 @@ function loadMaxims(): string[] {
     return loadLines(maximsPath);
 }
 
-function parseVerb(line: string): Verb {
-    const match = line.match(/^(.*?)\s*(?:<([^>]*)>\s*(.*?))?$/)!;
+export function parseVerb(line: string): Verb {
+    const sigilMatch = line.match(/^\s*\[([^\]]*)\]\s*(.*)$/);
+    const sigil = (sigilMatch?.[1]?.trim() || COMPLETION_GLYPH);
+    const rest = sigilMatch ? sigilMatch[2] : line;
+
+    const match = rest.match(/^(.*?)\s*(?:<([^>]*)>\s*(.*?))?$/)!;
 
     const text        = match[1]?.trim() || COMPLETION_FALLBACK.text;
     const preposition = match[2]?.trim() || COMPLETION_FALLBACK.preposition;
     const trail       = match[3]?.trim() || COMPLETION_FALLBACK.trail;
 
-    return { text, preposition, trail }
+    return { text, preposition, trail, sigil };
 }
 
-function formatVerb(verb: Verb, duration: number | string): string {
+// build the completion line, coloring the sigil at full contrast and the rest
+// at the softer blend so the sigil reads as the brightest mark. when there is
+// no truecolor `text` anchor to blend from, fall back on the light `dim` color
+// for the verb text and nudge the sigil `SIGIL_FALLBACK_DARKEN` of the way from
+// `dim` toward the dark/light extreme, so it reads a touch heavier than the verb
+// without collapsing to pure black. a theme like plan9 leaves `text` empty (the
+// terminal default fg), which is why the fallback matters at all. with no rgb
+// whatsoever (256-color mode) both marks use the terminal default fg.
+export function formatVerb(theme: Theme, verb: Verb, duration: number | string): string {
     duration = typeof duration === 'number' ? formatDuration(duration) : duration;
     const words = [verb.text, verb.preposition, duration];
     if (verb.trail) words.push(verb.trail);
-    return words.join(' ');
+    const rest = words.join(' ');
+
+    const lum = (c: Rgb) => c[0] + c[1] + c[2];
+    const dim = themeRgb(theme, 'dim');
+    const text = themeRgb(theme, 'text');
+    if (dim === undefined || text === undefined) {
+        if (dim === undefined) {
+            return DEFAULT_FG + verb.sigil + RESET + ' ' + DEFAULT_FG + rest + RESET;
+        }
+        const toExtreme: Rgb = lum(dim) > (255 * 3) / 2 ? [0, 0, 0] : [255, 255, 255];
+        const sigilFg = ansiFg(blend(dim, toExtreme, SIGIL_FALLBACK_DARKEN));
+        return sigilFg + verb.sigil + RESET + ' ' + ansiFg(dim) + rest + RESET;
+    }
+    const extreme: Rgb = lum(text) < lum(dim) ? [0, 0, 0] : [255, 255, 255];
+    const sigilFg = ansiFg(blend(text, extreme, SIGIL_INTENSITY));
+    const restFg = ansiFg(blend(text, extreme, COMPLETION_CONTRAST));
+    return sigilFg + verb.sigil + RESET + ' ' + restFg + rest + RESET;
 }
 
 function loadVerbs(): Verb[] {
     return loadLines(verbsPath).map(parseVerb);
 }
 
+// assets are read and parsed once at load; they never change mid-session, and
+// /reload re-runs module init to pick up edits. pick() samples fresh each turn.
+const SPINNERS = loadSpinners();
+const MAXIMS = loadMaxims();
+const VERBS = loadVerbs();
+
 function pick<T>(items: T[]): T | undefined {
     return items.length > 0 ? items[Math.floor(Math.random() * items.length)] : undefined;
 }
-
-// pull the truecolor rgb behind a theme role, if the theme emits one. themes in
-// 256-color mode emit palette indices instead, in which case shimmer blending is
-// skipped and the maxim falls back to a flat themed color.
-function themeRgb(theme: Theme, color: ThemeColor): Rgb | undefined {
-    const match = theme.getFgAnsi(color).match(/38;2;(\d+);(\d+);(\d+)/);
-    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined;
-}
-
-function blend(a: Rgb, b: Rgb, t: number): Rgb {
-    return [
-        Math.round(a[0] + (b[0] - a[0]) * t),
-        Math.round(a[1] + (b[1] - a[1]) * t),
-        Math.round(a[2] + (b[2] - a[2]) * t),
-    ];
-}
-
-function ansiFg(rgb: Rgb): string {
-    return `\x1b[38;2;${rgb[0]};${rgb[1]};${rgb[2]}m`;
-}
-
-const RESET = '\x1b[0m';
 
 // a moving highlight band across the text, returned as a per-character ansi string.
 function colorSweep(text: string, frame: number, base: Rgb, shimmer: Rgb): string {
@@ -135,7 +195,7 @@ function colorSweep(text: string, frame: number, base: Rgb, shimmer: Rgb): strin
     return out + RESET;
 }
 
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
     const s = Math.round(ms / 1000);
     const m = Math.floor(s / 60);
     return m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
@@ -181,14 +241,15 @@ export default function (pi: ExtensionAPI) {
 
     const beginTurn = (next: ExtensionContext) => {
         ctx = next;
-        verb = pick(loadMaxims()) ?? 'working';
+        verb = pick(MAXIMS) ?? 'working';
         frame = 0;
         baseRgb = themeRgb(ctx.ui.theme, MAXIM_BASE);
         shimmerRgb = themeRgb(ctx.ui.theme, MAXIM_SHIMMER);
-        const spinner = pick(loadSpinners());
+        const spinner = pick(SPINNERS);
         if (spinner !== undefined) {
+            const played = playFrames(spinner.frames, spinner.animation ?? 'repeat');
             ctx.ui.setWorkingIndicator({
-                frames: spinner.frames.map((f) => ctx!.ui.theme.fg(SPINNER_COLOR, f)),
+                frames: played.map((f) => ctx!.ui.theme.fg(SPINNER_COLOR, f)),
                 intervalMs: spinner.interval,
             });
         }
@@ -221,9 +282,10 @@ export default function (pi: ExtensionAPI) {
         const elapsed = Date.now() - (agentStart || Date.now());
         agentStart = 0;
         verb = '';
-        const done = pick(loadVerbs()) ?? COMPLETION_FALLBACK;
-        const text = formatVerb(done, elapsed);
-        ctx?.ui.notify(`${COMPLETION_GLYPH} ${text}`, 'info');
+        const done = pick(VERBS) ?? COMPLETION_FALLBACK;
+        if (ctx !== undefined) {
+            ctx.ui.notify(formatVerb(ctx.ui.theme, done, elapsed), 'info');
+        }
     });
 
     pi.on('session_shutdown', async () => {

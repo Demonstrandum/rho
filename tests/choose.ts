@@ -1,4 +1,5 @@
-const zip = (...arrays) =>
+// scratch demo: intentionally loose typing.
+const zip = (...arrays: any[][]): any[][] =>
   arrays[0].map((_, i) => arrays.map(arr => arr[i]));
 
 function choose<T>(items: T[], weights?: number[]): T {
@@ -15,12 +16,12 @@ function choose<T>(items: T[], weights?: number[]): T {
 
 const items = ['a','b','c','d'];
 const weights = [0.2, 0.3, 0.4, 0.1];
-const ideal = {}
+const ideal: Record<string, number> = {};
 for (const [i, w] of zip(items, weights)) {
     ideal[i] = w;
 }
 
-let hist = {
+let hist: Record<string, number> = {
     'a': 0,
     'b': 0,
     'c': 0,
@@ -32,7 +33,7 @@ for (let i = 0; i < 100_000; ++i) {
     hist[it] += 1
 }
 
-function printHistogram(h) {
+function printHistogram(h: Record<string, number>) {
     const AREA = 30;
     let total = 0;
     for (const bucket in h) {

@@ -113,11 +113,15 @@ test('formatVerb colours sigil brighter than the rest, plain in palette mode', (
     expect(coloredLight).toContain('\x1b[38;2;4;4;4m完\x1b[0m ');
     expect(coloredLight).toContain('\x1b[38;2;22;22;22mToiled for 12s');
 
-    // 256-color mode: no rgb anchor at all -> terminal default fg for both.
-    const palette = fakeTheme({});
+    // 256-color mode: no rgb anchor to blend from -> keep the theme's own ansi
+    // escapes, sigil on `text` and verb on the light `dim` base, not plain fg.
+    const palette = {
+        getFgAnsi: (color: string) =>
+            color === 'text' ? '\x1b[38;5;15m' : color === 'dim' ? '\x1b[38;5;8m' : '\x1b[39m',
+    } as unknown as Theme;
     const plain = formatVerb(palette, verb, 12000);
     console.log('formatVerb palette:' + plain + '   ' + show(plain));
-    expect(plain).toBe('\x1b[39m完\x1b[0m \x1b[39mToiled for 12s\x1b[0m');
+    expect(plain).toBe('\x1b[38;5;15m完\x1b[0m \x1b[38;5;8mToiled for 12s\x1b[0m');
 });
 
 test('formatVerb on the real plan9 theme: light dim verb, sigil a shade darker', () => {

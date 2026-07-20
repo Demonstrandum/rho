@@ -48,9 +48,8 @@ const SIGIL_INTENSITY = 0.9;
 // no-truecolor-anchor fallback in formatVerb: the verb text stays the theme's
 // light `dim` color and the sigil is nudged this far from `dim` toward the
 // dark/light extreme, a touch heavier than the verb but not full black. with no
-// rgb at all, DEFAULT_FG (default foreground, undoes pi's `dim` wrap) is used.
+// rgb at all the theme's own `dim`/`text` ansi escapes are used verbatim.
 const SIGIL_FALLBACK_DARKEN = 0.4;
-const DEFAULT_FG = '\x1b[39m';
 const SHIMMER_BAND = 4;
 
 // how the frame list is played each loop. 'repeat' runs start -> end and jumps
@@ -145,7 +144,9 @@ export function parseVerb(line: string): Verb {
 // `dim` toward the dark/light extreme, so it reads a touch heavier than the verb
 // without collapsing to pure black. a theme like plan9 leaves `text` empty (the
 // terminal default fg), which is why the fallback matters at all. with no rgb
-// whatsoever (256-color mode) both marks use the terminal default fg.
+// whatsoever (256-color mode) there is nothing to blend, so both marks keep the
+// theme's own ansi escapes: the verb text on the light `dim` base and the sigil
+// on the heavier `text` role, rather than collapsing to the plain terminal fg.
 export function formatVerb(theme: Theme, verb: Verb, duration: number | string): string {
     duration = typeof duration === 'number' ? formatDuration(duration) : duration;
     const words = [verb.text, verb.preposition, duration];
@@ -157,7 +158,9 @@ export function formatVerb(theme: Theme, verb: Verb, duration: number | string):
     const text = themeRgb(theme, 'text');
     if (dim === undefined || text === undefined) {
         if (dim === undefined) {
-            return DEFAULT_FG + verb.sigil + RESET + ' ' + DEFAULT_FG + rest + RESET;
+            const sigilFg = theme.getFgAnsi('text');
+            const restFg = theme.getFgAnsi('dim');
+            return sigilFg + verb.sigil + RESET + ' ' + restFg + rest + RESET;
         }
         const toExtreme: Rgb = lum(dim) > (255 * 3) / 2 ? [0, 0, 0] : [255, 255, 255];
         const sigilFg = ansiFg(blend(dim, toExtreme, SIGIL_FALLBACK_DARKEN));
@@ -183,14 +186,32 @@ function pick<T>(items: T[]): T | undefined {
     return items.length > 0 ? items[Math.floor(Math.random() * items.length)] : undefined;
 }
 
-// a moving highlight band across the text, returned as a per-character ansi string.
-function colorSweep(text: string, frame: number, base: Rgb, shimmer: Rgb): string {
-    const total = text.length + SHIMMER_BAND * 2;
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+// an emoji grapheme is one carrying a pictographic codepoint or the emoji
+// joiners (ZWJ / variation selector 16). such clusters are multi-codepoint
+// (surrogate pairs, ZWJ sequences, skin-tone modifiers); coloring per code unit
+// splits them and wrecks the terminal, so they are kept out of the sweep.
+export function isEmojiCluster(cluster: string): boolean {
+    return /\p{Extended_Pictographic}|[\u200D\uFE0F]/u.test(cluster);
+}
+
+// a moving highlight band across the text, returned as a per-grapheme ansi
+// string. the text is segmented into grapheme clusters so multi-codepoint
+// glyphs stay intact; emoji clusters render at the base color, outside the
+// sweep, since interleaving color escapes through them corrupts the output.
+export function colorSweep(text: string, frame: number, base: Rgb, shimmer: Rgb): string {
+    const clusters = [...graphemes.segment(text)].map((s) => s.segment);
+    const total = clusters.length + SHIMMER_BAND * 2;
     const pos = frame % total;
     let out = '';
-    for (let i = 0; i < text.length; i++) {
+    for (let i = 0; i < clusters.length; i++) {
+        if (isEmojiCluster(clusters[i])) {
+            out += ansiFg(base) + clusters[i];
+            continue;
+        }
         const t = Math.max(0, 1 - Math.abs(i - pos) / SHIMMER_BAND);
-        out += ansiFg(blend(base, shimmer, t)) + text[i];
+        out += ansiFg(blend(base, shimmer, t)) + clusters[i];
     }
     return out + RESET;
 }

@@ -10,7 +10,8 @@
       "./extensions",
       "node_modules/pi-web-access/index.ts",
       "node_modules/@ayulab/pi-rewind/index.js",
-      "node_modules/context-mode/build/adapters/pi/extension.js"
+      "node_modules/context-mode/build/adapters/pi/extension.js",
+      "node_modules/token-rate-pi/token-rate.ts"
     ],
     "skills": [
       "./skills",
@@ -27,11 +28,12 @@
     "link:global": "pi install $(pwd)"
   },
   "dependencies": {
-    "pi-web-access": "^0.13.0",
     "@ayulab/pi-rewind": "^0.4.6",
-    "context-mode": "^1.0.169"
+    "context-mode": "^1.0.169",
+    "pi-web-access": "^0.13.0",
+    "token-rate-pi": "^1.0.5"
   },
-  "bundledDependencies": ["pi-web-access", "@ayulab/pi-rewind", "context-mode"],
+  "bundledDependencies": ["pi-web-access", "@ayulab/pi-rewind", "context-mode", "token-rate-pi"],
   "peerDependencies": {
     "@earendil-works/pi-ai": "^0.80.7",
     "@earendil-works/pi-agent-core": "^0.80.7",

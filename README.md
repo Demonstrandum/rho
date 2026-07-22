@@ -22,25 +22,26 @@ bundles my:
   - [`context-mode`](https://github.com/mksglu/context-mode): context mode
   - [`token-rate-pi`](https://www.npmjs.com/package/token-rate-pi): average output tokens/sec in the footer status line
 
-## use it by default on a new machine
+## install
 
-1. install pi:
+1. install Bun (needed to run pi and rho):
+
+   ```bash
+   curl -fsSL https://bun.sh/install | bash
+   # or on macOS: brew install oven-sh/bun/bun
+   ```
+
+2. install pi:
 
    ```bash
    bun install -g @earendil-works/pi-coding-agent
    # or: curl -fsSL https://pi.dev/install.sh | sh
    ```
 
-2. clone this repo:
+3. install rho straight from git (no local clone needed):
 
    ```bash
-   git clone git@github.com:Demonstrandum/rho ~/rho
-   ```
-
-3. install it globally so every pi session picks it up:
-
-   ```bash
-   pi install ~/rho
+   pi install git:github.com/Demonstrandum/rho
    ```
 
    this registers the package in `~/.pi/agent/settings.json`. from now on, running
@@ -53,10 +54,13 @@ bundles my:
    /settings   # theme -> plan9 (or plan9-dark)
    ```
 
-to install straight from git without a local clone:
+### with a local clone
+
+if you want a checkout to hack on, clone it and install from the path instead:
 
 ```bash
-pi install git:github.com/Demonstrandum/rho
+git clone git@github.com:Demonstrandum/rho ~/rho
+pi install ~/rho
 ```
 
 project-local instead of global (writes to `.pi/settings.json` in the current repo):

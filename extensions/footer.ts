@@ -130,6 +130,16 @@ export default function (pi: ExtensionAPI) {
                     else if (percentValue > 70) statsParts.push(theme.fg('warning', contextDisplay));
                     else statsParts.push(contextDisplay);
 
+                    // fold extension statuses (e.g. token-rate-pi's TPS) into the
+                    // stats line next to $-spend and context, instead of a
+                    // separate third line.
+                    for (const [, text] of Array.from(footerData.getExtensionStatuses().entries()).sort(
+                        ([a], [b]) => a.localeCompare(b),
+                    )) {
+                        const clean = sanitizeStatus(text);
+                        if (clean) statsParts.push(clean);
+                    }
+
                     let statsLeft = statsParts.join(' ');
                     let statsLeftWidth = visibleWidth(statsLeft);
                     if (statsLeftWidth > width) {
@@ -168,17 +178,7 @@ export default function (pi: ExtensionAPI) {
                     const dimStatsLeft = theme.fg('dim', statsLeft);
                     const dimRemainder = theme.fg('dim', statsLine.slice(statsLeft.length));
                     const pwdLine = truncateToWidth(theme.fg('dim', pwd), width, theme.fg('dim', '...'));
-                    const lines = [pwdLine, dimStatsLeft + dimRemainder];
-
-                    const statuses = footerData.getExtensionStatuses();
-                    if (statuses.size > 0) {
-                        const line = Array.from(statuses.entries())
-                            .sort(([a], [b]) => a.localeCompare(b))
-                            .map(([, text]) => sanitizeStatus(text))
-                            .join(' ');
-                        lines.push(truncateToWidth(line, width, theme.fg('dim', '...')));
-                    }
-                    return lines;
+                    return [pwdLine, dimStatsLeft + dimRemainder];
                 },
             };
         });

@@ -36,6 +36,7 @@ these apply to everything you write for me, across all projects.
 - use `gh` for GitHub only when it is clearly more ergonomic than plain `git` (issues, PRs, releases); otherwise just use `git`.
 - if a preferred tool is missing, do not silently fall back. tell me it is not installed and give me the install command (e.g. `brew install ripgrep fd fzf sd ast-grep jq yq gh`), then use the standard tool for that one command only.
 - consider setting a timeout on long-running commands so they cannot hang the session. builds, test suites, installs, servers, and network calls all qualify.
+- do not use `git stash` (or `git stash pop/apply/drop`, or anything that hides work off to the side). you are not reliable with it: you forget stashes exist, you pop the wrong one, you drop them, and you can wipe out uncommitted work i had open at that exact moment. leave the working tree alone. if you genuinely need to set changes aside, stop and ask me, or make a commit on a branch so nothing is lost.
 
 ## writing
 

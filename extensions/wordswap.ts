@@ -15,6 +15,17 @@ export interface Swap {
     pattern: RegExp;
 }
 
+export interface PatternSwap {
+    source: string;
+    replacement: string;
+    pattern: RegExp;
+}
+
+interface SwapFile {
+    words: Record<string, string>;
+    patterns?: Record<string, string>;
+}
+
 export function buildSwaps(dict: Record<string, string>): Swap[] {
     const swaps: Swap[] = [];
     for (const [original, replacement] of Object.entries(dict)) {
@@ -30,9 +41,27 @@ export function buildSwaps(dict: Record<string, string>): Swap[] {
     return swaps;
 }
 
-function loadSwaps(): Swap[] {
-    const dict = JSON.parse(readFileSync(swapsPath, 'utf8')) as Record<string, string>;
-    return buildSwaps(dict);
+export function buildPatternSwaps(dict: Record<string, string>): PatternSwap[] {
+    const swaps: PatternSwap[] = [];
+    for (const [source, replacement] of Object.entries(dict)) {
+        const src = source.trim();
+        if (src === '') continue;
+        swaps.push({
+            source: src,
+            replacement: replacement.trim(),
+            pattern: new RegExp(`\\b${src}\\b`, 'gi'),
+        });
+    }
+    return swaps;
+}
+
+function loadSwapFile(): SwapFile {
+    const raw = JSON.parse(readFileSync(swapsPath, 'utf8'));
+    // backward compat: flat dict (no 'words' key) is all word swaps.
+    if (raw && typeof raw === 'object' && !raw.words) {
+        return { words: raw as Record<string, string> };
+    }
+    return raw as SwapFile;
 }
 
 // carry the matched text's case onto the replacement: ALL CAPS -> upper,
@@ -47,31 +76,56 @@ function matchCase(matched: string, replacement: string): string {
     return replacement;
 }
 
-export function applySwaps(text: string, swaps: Swap[]): string {
+export function applySwaps(text: string, swaps: Swap[], patternSwaps: PatternSwap[] = []): string {
     let out = text;
     for (const { pattern, replacement } of swaps) {
         out = out.replace(pattern, (matched) => matchCase(matched, replacement));
     }
+    for (const { pattern, replacement } of patternSwaps) {
+        out = out.replace(pattern, (...args) => {
+            // args: matched, ...captures, offset, fullString
+            const matched = args[0] as string;
+            let result = replacement;
+            // substitute $1, $2, etc. with captured groups.
+            for (let i = 1; i < args.length - 2; i++) {
+                if (typeof args[i] === 'string') {
+                    result = result.replace(`$${i}`, args[i] as string);
+                }
+            }
+            return matchCase(matched, result);
+        });
+    }
     return out;
 }
 
-export function promptNote(swaps: Swap[]): string {
-    const lines = swaps.map((s) => `  - "${s.original}" -> "${s.replacement}"`);
-    return [
+export function promptNote(swaps: Swap[], patternSwaps: PatternSwap[] = []): string {
+    const wordLines = swaps.map((s) => `  - "${s.original}" -> "${s.replacement}"`);
+    const parts: string[] = [
         '## vocabulary',
         '',
         'a display filter rewrites the following overused words/phrases in your',
         'finalized replies. avoid them entirely; they read as tics. the mapping',
         '(original -> what it becomes) is:',
         '',
-        ...lines,
-    ].join('\n');
+        ...wordLines,
+    ];
+    if (patternSwaps.length > 0) {
+        parts.push(
+            '',
+            'pattern swaps (regex, applied to coined compounds):',
+            '',
+            ...patternSwaps.map((s) => `  - /${s.source}/ -> "${s.replacement}"`),
+        );
+    }
+    return parts.join('\n');
 }
 
 export default function (pi: ExtensionAPI) {
-    const swaps = loadSwaps();
-    if (swaps.length === 0) return;
-    const note = promptNote(swaps);
+    const file = loadSwapFile();
+    const swaps = buildSwaps(file.words);
+    const patternSwaps = file.patterns ? buildPatternSwaps(file.patterns) : [];
+    if (swaps.length === 0 && patternSwaps.length === 0) return;
+    const note = promptNote(swaps, patternSwaps);
 
     pi.on('before_agent_start', async (event) => {
         return { systemPrompt: `${event.systemPrompt}\n\n${note}` };
@@ -85,7 +139,7 @@ export default function (pi: ExtensionAPI) {
         let changed = false;
         const content = message.content.map((block) => {
             if (block.type !== 'text') return block;
-            const text = applySwaps(block.text, swaps);
+            const text = applySwaps(block.text, swaps, patternSwaps);
             if (text === block.text) return block;
             changed = true;
             return { ...block, text };

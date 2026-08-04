@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildSwaps, applySwaps, promptNote } from '../extensions/wordswap';
+import { buildSwaps, buildPatternSwaps, applySwaps, promptNote, type PatternSwap } from '../extensions/wordswap';
 
 const dict = { 'load-bearing': 'cooked', 'honest take': 'spicy doodad', seam: 'whatchamacallit' };
 
@@ -69,9 +69,30 @@ test('buildSwaps escapes regex metacharacters and skips blank keys', () => {
 test('the shipped wordswap.json builds into a valid rule set', () => {
     const shipped = JSON.parse(
         readFileSync(join(import.meta.dir, '..', 'extensions', 'assets', 'wordswap.json'), 'utf8'),
-    ) as Record<string, string>;
-    const swaps = buildSwaps(shipped);
+    ) as { words: Record<string, string>; patterns?: Record<string, string> };
+    const swaps = buildSwaps(shipped.words);
+    const patternSwaps = shipped.patterns ? buildPatternSwaps(shipped.patterns) : [];
     expect(swaps.length).toBeGreaterThan(0);
-    console.log(promptNote(swaps));
-    expect(promptNote(swaps)).toContain('## vocabulary');
+    console.log(promptNote(swaps, patternSwaps));
+    expect(promptNote(swaps, patternSwaps)).toContain('## vocabulary');
+});
+
+test('buildPatternSwaps creates regex capture group swaps', () => {
+    const pSwaps = buildPatternSwaps({ '(\\w+)-adjacent': '$1-ish-but-not' });
+    expect(pSwaps).toHaveLength(1);
+    const input = 'rate-adjacent path';
+    const out = applySwaps(input, [], pSwaps);
+    console.log('in: ', input);
+    console.log('out:', out);
+    expect(out).toBe('rate-ish-but-not path');
+});
+
+test('pattern swaps carry case onto replacement', () => {
+    const pSwaps = buildPatternSwaps({ '(\\w+)-shaped': '$1-flavoured jelly' });
+    const input = 'A CLOUD-SHAPED object and a star-shaped one';
+    const out = applySwaps(input, [], pSwaps);
+    console.log('in: ', input);
+    console.log('out:', out);
+    expect(out).toContain('CLOUD-FLAVOURED JELLY');
+    expect(out).toContain('star-flavoured jelly');
 });

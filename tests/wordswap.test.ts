@@ -73,8 +73,33 @@ test('the shipped wordswap.json builds into a valid rule set', () => {
     const swaps = buildSwaps(shipped.words);
     const patternSwaps = shipped.patterns ? buildPatternSwaps(shipped.patterns) : [];
     expect(swaps.length).toBeGreaterThan(0);
-    console.log(promptNote(swaps, patternSwaps));
-    expect(promptNote(swaps, patternSwaps)).toContain('## vocabulary');
+    // fallback (no template): just the swap lines.
+    const fallback = promptNote(swaps, patternSwaps);
+    expect(fallback).toContain('"cooked"');
+    console.log(fallback);
+});
+
+test('promptNote fills the vocabulary template', () => {
+    const template = readFileSync(join(import.meta.dir, '..', 'system', 'vocabulary.md'), 'utf8');
+    const swaps = buildSwaps(dict);
+    const pSwaps = buildPatternSwaps({ '(\\w+)-adjacent': '$1-ish-but-not' });
+    const note = promptNote(swaps, pSwaps, template);
+    console.log(note);
+    expect(note).toContain('## vocabulary');
+    expect(note).toContain('"whatchamacallit"');
+    expect(note).toContain('pattern swaps');
+    expect(note).toContain('$1-ish-but-not');
+    expect(note).not.toContain('{{WORDS}}');
+    expect(note).not.toContain('{{PATTERNS}}');
+});
+
+test('promptNote strips patterns section when no pattern swaps exist', () => {
+    const template = readFileSync(join(import.meta.dir, '..', 'system', 'vocabulary.md'), 'utf8');
+    const swaps = buildSwaps(dict);
+    const note = promptNote(swaps, [], template);
+    expect(note).toContain('## vocabulary');
+    expect(note).not.toContain('pattern swaps');
+    expect(note).not.toContain('{{PATTERNS}}');
 });
 
 test('buildPatternSwaps creates regex capture group swaps', () => {

@@ -2,8 +2,8 @@ import { test, expect } from 'bun:test';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-const assetsDir = join(import.meta.dir, '..', 'extensions', 'assets');
-const rulesPath = join(assetsDir, 'writer-rules.md');
+const systemDir = join(import.meta.dir, '..', 'system');
+const rulesPath = join(systemDir, 'writer-rules.md');
 
 test('writer-rules.md exists and is non-empty', () => {
     expect(existsSync(rulesPath)).toBe(true);
@@ -46,6 +46,6 @@ test('writer-rules extension appends rules to system prompt', async () => {
     const base = 'existing system prompt';
     const result = `${base}\n\n${rules}`;
     expect(result).toStartWith('existing system prompt');
-    expect(result).toContain('## ASD-STE100');
+    expect(result).toContain('# technical prose');
     expect(result).toContain('## 1. Assertions');
 });

@@ -6,16 +6,16 @@ machine and everything below is active when i run pi. no symlinking, no manual s
 ## what's here
 
 - `extensions/` typescript extensions (tools, commands, ui, hooks), auto-discovered
-  - `personal-rules.ts` + `assets/personal-rules.md` inject my personal rules into the system prompt on every session
+  - `personal-rules.ts` reads `system/personal-rules.md` and injects it into the system prompt on every session
   - `spinner.ts` sets the working indicator and shimmering message, driven by `assets/spinners.json`, `assets/maxims.txt`, and `assets/verbs.txt`; shimmer/glyphs/completion line adapted from pi-claude-shimmer (MIT)
-  - `wordswap.ts` + `assets/wordswap.json` rewrite overused tic phrases in finalized assistant messages: the json has `words` (literal phrase -> replacement, matched case-insensitively on word boundaries with the matched text's case carried onto the replacement) and `patterns` (regex with capture groups -> replacement template, e.g. `(\w+)-adjacent` -> `$1-ish-but-not`, for coined compounds); on `message_end` it swaps matches in `text` content blocks (this mutates the stored message, so swaps also land in the transcript and in the model's later context, unlike claude code's display-only `MessageDisplay` hook), and on `before_agent_start` it appends the mapping to the system prompt so the model knows the filter exists and is discouraged from using those words. inspired by jola's claude code `MessageDisplay` hook (https://jola.dev/posts/how-to-stop-claude-from-saying-load-bearing)
+  - `wordswap.ts` + `assets/wordswap.json` rewrite overused tic phrases in finalized assistant messages: the json has `words` (literal phrase -> replacement, matched case-insensitively on word boundaries with the matched text's case carried onto the replacement) and `patterns` (regex with capture groups -> replacement template, e.g. `(\w+)-adjacent` -> `$1-ish-but-not`, for coined compounds); on `message_end` it swaps matches in `text` content blocks (this mutates the stored message, so swaps also land in the transcript and in the model's later context, unlike claude code's display-only `MessageDisplay` hook), and on `before_agent_start` it fills the `system/vocabulary.md` template with the swap list and appends it to the system prompt. inspired by jola's claude code `MessageDisplay` hook (https://jola.dev/posts/how-to-stop-claude-from-saying-load-bearing)
   - `startup.ts` replaces pi's built-in startup block: it persists `quietStartup=true` (idempotent global settings write) to suppress the built-in banner + bracketed `[Prompts]`-style resource listing, then draws a compact bold-inline header via `setHeader` (logo line + one line each for `prompts`/`skills`/`commands`/`themes`). resource data comes from `pi.getCommands()` (split by `source`) and `ctx.ui.getAllThemes()`; there is no API to enumerate loaded extension files, so extension-provided slash commands show under `commands` instead of an `Extensions` section
   - `silence-extra-usage-warning.ts` persists `warnings.anthropicExtraUsage=false` once, idempotently, so pi's unconditional "subscription auth ... billed per token" startup notice is suppressed; replaced by the evidence-based `extra-usage-watch.ts`
   - `extra-usage-watch.ts` monitors anthropic's unified rate-limit response headers (`representative-claim`, `overage-utilization`) on `after_provider_response` and warns once per session when requests are routed to extra-usage billing (fingerprinted as third-party or plan window exhausted); replaces the blunt startup warning suppressed by `silence-extra-usage-warning.ts`
   - `lib/settings-store.ts` shared helper (`ensureGlobalSetting`) for the idempotent nested global-settings writes used above; in a subdirectory so extension auto-discovery (top-level `*.ts` only) does not load it as an extension
-  - `writer-rules.ts` + `assets/writer-rules.md` inject the ASD-STE100 derived prose standard into the system prompt on every session. governs how the model writes technical prose: assertions, terms, compression, figures, vocabulary, sentences, rhetoric, endings, register, commentary, formatting, and failure/correction. rule numbers are shared with the auditor skill
+  - `writer-rules.ts` reads `system/writer-rules.md` and injects the ASD-STE100 derived prose standard into the system prompt. rule numbers are shared with the auditor skill
   - `auditor.ts` registers `/audit [audience]`, which invokes the `auditor` skill to review the last assistant prose output against the writer rules. modelled on ponytail's command-to-skill pattern (sends `/skill:auditor` via `sendUserMessage`)
-  - `assets/` data files consumed by the extensions above (`spinners.json`, `maxims.txt`, `verbs.txt`, `personal-rules.md`, `writer-rules.md`, `wordswap.json`); a subfolder so extension auto-discovery (top-level `*.ts` only) never treats them as extensions
+  - `assets/` data files consumed by the extensions (`spinners.json`, `maxims.txt`, `verbs.txt`, `wordswap.json`); a subfolder so extension auto-discovery (top-level `*.ts` only) never treats them as extensions
   - `footer.ts` replaces the built-in footer to customise the token arrow glyphs; also flips `clearOnShrink` on live for the current session
   - `clear-on-shrink.ts` persists `terminal.clearOnShrink=true` into the global pi settings so no stale blank row is left behind when the rendered content shrinks (idempotent, written once)
   - `image-width.ts` persists `terminal.imageWidthCells=180` into the global pi settings so inline images (e.g. from `fetch_content`) render wide (idempotent, written once, same helper as `clear-on-shrink`/`silence-extra-usage-warning`)
@@ -27,6 +27,10 @@ machine and everything below is active when i run pi. no symlinking, no manual s
 - `skills/` on-demand skills (`SKILL.md` folders + top-level `.md`)
 - `prompts/` prompt templates, expanded with `/name`
 - `themes/` color themes (`.json`)
+- `system/` prompt fragments injected into the system prompt by extensions (see `system/README.md` for injection order and templating)
+  - `personal-rules.md` conventions, design, editing, tooling, writing
+  - `writer-rules.md` ASD-STE100 derived prose standard (13 rule categories)
+  - `vocabulary.md` template for the word/pattern swap list (filled from `extensions/assets/wordswap.json`)
 - `extensions/assets/spinners.json` spinner definitions keyed by name (each has `category`, `interval`, `frames`); the enabled categories live in `spinner.ts` (`chinese` by default)
 - `extensions/assets/maxims.txt` working messages, one per line, `;` comments, picked at random each turn
 - `extensions/assets/verbs.txt` completion verbs, one per line, `;` comments, picked at random for the settle line (`完 <verb> for <duration>`)
@@ -36,9 +40,8 @@ machine and everything below is active when i run pi. no symlinking, no manual s
 ## how it loads
 
 everything ships with the package. `pi install <rho>` (or `bun run link` for a local
-checkout) loads the extensions, skills, prompts, and themes. the personal rules are not
-a pi context file; they are bundled markdown that `personal-rules.ts` reads and appends
-to the system prompt at `before_agent_start`, so they travel with the package.
+checkout) loads the extensions, skills, prompts, and themes. system prompt fragments live in `system/` and are read by extensions at
+`before_agent_start`. see `system/README.md` for the injection order.
 
 ## working here
 

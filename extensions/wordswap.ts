@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
-const swapsPath = join(dirname(fileURLToPath(import.meta.url)), 'assets', 'wordswap.json');
+const extDir = dirname(fileURLToPath(import.meta.url));
+const swapsPath = join(extDir, 'assets', 'wordswap.json');
+const templatePath = join(extDir, '..', 'system', 'vocabulary.md');
 
 export interface Swap {
     original: string;
@@ -98,24 +100,26 @@ export function applySwaps(text: string, swaps: Swap[], patternSwaps: PatternSwa
     return out;
 }
 
-export function promptNote(swaps: Swap[], patternSwaps: PatternSwap[] = []): string {
-    const wordLines = swaps.map((s) => `  - "${s.original}" -> "${s.replacement}"`);
-    const parts: string[] = [
-        '## vocabulary',
-        '',
-        'a display filter rewrites the following overused words/phrases in your',
-        'finalized replies. avoid them entirely; they read as tics. the mapping',
-        '(original -> what it becomes) is:',
-        '',
-        ...wordLines,
-    ];
+export function promptNote(swaps: Swap[], patternSwaps: PatternSwap[] = [], template?: string): string {
+    const wordLines = swaps.map((s) => `  - "${s.original}" -> "${s.replacement}"`).join('\n');
+    const patternLines = patternSwaps.map((s) => `  - /${s.source}/ -> "${s.replacement}"`).join('\n');
+
+    if (template) {
+        let out = template.replace('{{WORDS}}', wordLines);
+        if (patternSwaps.length > 0) {
+            out = out.replace('{{PATTERNS}}', patternLines);
+        } else {
+            // strip the patterns section entirely when there are none.
+            out = out.replace(/\n*pattern swaps[^\n]*\n*\{\{PATTERNS\}\}\n*/g, '');
+        }
+        return out.trimEnd();
+    }
+
+    // fallback: no template file available (e.g. in tests).
+    const parts = [wordLines];
     if (patternSwaps.length > 0) {
-        parts.push(
-            '',
-            'pattern swaps (regex, applied to coined compounds):',
-            '',
-            ...patternSwaps.map((s) => `  - /${s.source}/ -> "${s.replacement}"`),
-        );
+        parts.push('\npattern swaps (regex, applied to coined compounds):\n');
+        parts.push(patternLines);
     }
     return parts.join('\n');
 }
@@ -125,7 +129,10 @@ export default function (pi: ExtensionAPI) {
     const swaps = buildSwaps(file.words);
     const patternSwaps = file.patterns ? buildPatternSwaps(file.patterns) : [];
     if (swaps.length === 0 && patternSwaps.length === 0) return;
-    const note = promptNote(swaps, patternSwaps);
+
+    let template: string | undefined;
+    try { template = readFileSync(templatePath, 'utf8'); } catch { /* use inline fallback */ }
+    const note = promptNote(swaps, patternSwaps, template);
 
     pi.on('before_agent_start', async (event) => {
         return { systemPrompt: `${event.systemPrompt}\n\n${note}` };

@@ -1,4 +1,4 @@
-# Writer System Prompt: Technical Prose
+# technical prose
 
 Write for a reader who is expert in the general field and unfamiliar with the
 specific construction under discussion.

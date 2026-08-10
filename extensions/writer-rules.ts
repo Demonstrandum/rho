@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
-const rulesPath = join(dirname(fileURLToPath(import.meta.url)), 'assets', 'writer-rules.md');
+const rulesPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'system', 'writer-rules.md');
 const rules = readFileSync(rulesPath, 'utf8').trim();
 
 export default function (pi: ExtensionAPI) {

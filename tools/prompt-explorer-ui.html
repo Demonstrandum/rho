@@ -711,7 +711,7 @@ function buildLine(line, i) {
     // highlight {{...}} directives in raw-mode lines
     const fileInRaw = line.source.kind === 'file' && rawMode[line.source.path];
     if (fileInRaw && displayText.includes('{{')) {
-        const parts = displayText.split(/(\{\{[^}]+\}\})/g);
+        const parts = displayText.split(/(\{\{.*?\}\})/g);
         for (const part of parts) {
             if (part.match(/^\{\{[^}]+\}\}$/)) {
                 const s = document.createElement('span');

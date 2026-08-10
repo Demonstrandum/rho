@@ -125,22 +125,37 @@ export const patternSwaps = _file.patterns ? buildPatternSwaps(_file.patterns) :
 export default function (pi: ExtensionAPI) {
     if (swaps.length === 0 && patternSwaps.length === 0) return;
 
-    // very subtle red background on swapped text; tune RGB here.
-    const BG = '\x1b[48;2;35;10;10m';
-    const RESET = '\x1b[49m';
-    const highlight = (s: string) => `${BG}${s}${RESET}`;
+    const BYPASS_MARKER = /\/noswap/g;
 
-    pi.on('message_end', async (event) => {
+    pi.on('message_end', async (event, ctx) => {
+        const highlight = (s: string) => ctx.ui.theme.bg('toolErrorBg', s);
         const message = event.message;
         if (message.role !== 'assistant') return;
         if (typeof message.content === 'string') return;
 
+        // check if any text block contains the bypass marker
+        const bypass = message.content.some(
+            (block) => block.type === 'text' && BYPASS_MARKER.test(block.text),
+        );
+
         let changed = false;
         const content = message.content.map((block) => {
             if (block.type !== 'text') return block;
-            const text = applySwaps(block.text, swaps, patternSwaps, highlight);
+            let text = block.text;
+            // always strip the marker, even when bypassing
+            const stripped = text.replace(BYPASS_MARKER, '');
+            if (stripped !== text) {
+                text = stripped;
+                changed = true;
+            }
+            if (!bypass) {
+                const swapped = applySwaps(text, swaps, patternSwaps, highlight);
+                if (swapped !== text) {
+                    text = swapped;
+                    changed = true;
+                }
+            }
             if (text === block.text) return block;
-            changed = true;
             return { ...block, text };
         });
 

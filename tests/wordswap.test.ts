@@ -122,6 +122,23 @@ test('alternatives produce multiple replacements', () => {
     expect(swaps[0].replacements).toEqual(['wibbly', 'dodecahedral', 'with no wibbly bits']);
 });
 
+test('verb entries with irregular source forms use source overrides', () => {
+    const dict: Record<string, WordValue> = {
+        'run': {
+            verb: '{sprint}',
+            source: { past: 'ran', ing: 'running' },
+        },
+    };
+    const swaps = buildSwaps(dict);
+    const originals = swaps.map(s => s.original);
+    expect(originals).toContain('run');
+    expect(originals).toContain('runs');
+    expect(originals).toContain('ran');
+    expect(originals).toContain('running');
+    expect(originals).not.toContain('runned');
+    expect(originals).not.toContain('runing');
+});
+
 test('inflectVerb handles regular verbs', () => {
     expect(inflectVerb('show')).toEqual({ '3s': 'shows', past: 'showed', ing: 'showing' });
     expect(inflectVerb('showcase')).toEqual({ '3s': 'showcases', past: 'showcased', ing: 'showcasing' });

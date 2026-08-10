@@ -30,6 +30,7 @@ export interface VerbFormOverrides {
 export interface VerbEntry {
     verb: string | string[];
     forms?: Record<string, VerbFormOverrides>;
+    source?: VerbFormOverrides;
 }
 
 export type WordValue = string | string[] | VerbEntry;
@@ -89,7 +90,13 @@ function resolveTemplate(
 }
 
 function buildVerbSwaps(sourceBase: string, entry: VerbEntry): Swap[] {
-    const sourceForms = inflectVerb(sourceBase);
+    const auto = inflectVerb(sourceBase);
+    const src = entry.source ?? {};
+    const sourceForms = {
+        '3s': src['3s'] ?? auto['3s'],
+        past: src.past ?? auto.past,
+        ing: src.ing ?? auto.ing,
+    };
     const templates = Array.isArray(entry.verb) ? entry.verb : [entry.verb];
     const fo = entry.forms ?? {};
     const result: Swap[] = [];
@@ -201,7 +208,7 @@ export const swaps = buildSwaps(_file.words);
 export const patternSwaps = _file.patterns ? buildPatternSwaps(_file.patterns) : [];
 
 // flatten for the vocabulary.md template: [displayKey, displayValue][] pairs.
-function flattenEntry(key: string, value: WordValue): [string, string] {
+export function flattenEntry(key: string, value: WordValue): [string, string] {
     if (typeof value === 'string') return [key, value];
     if (Array.isArray(value)) return [key, value.join(' | ')];
     const templates = Array.isArray(value.verb) ? value.verb : [value.verb];

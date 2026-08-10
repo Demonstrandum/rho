@@ -21,6 +21,7 @@ import {
     parseSpans,
     hasMarkers,
 } from '../extensions/lib/source-str';
+import { flattenEntry } from '../extensions/wordswap';
 
 // ── paths ──────────────────────────────────────────────────
 
@@ -97,10 +98,12 @@ function resolveWithSources(): SourceLine[] {
     const swapsRelPath = relative(ROOT, SWAPS_PATH);
 
     const words = wrapEntries(
-        Object.entries(swapFile.words ?? {}), swapsRelPath, jsonText, 'words',
+        Object.entries(swapFile.words ?? {}).map(([k, v]) => flattenEntry(k, v)),
+        swapsRelPath, jsonText, 'words',
     );
     const patterns = wrapEntries(
-        Object.entries(swapFile.patterns ?? {}), swapsRelPath, jsonText, 'patterns',
+        Object.entries(swapFile.patterns ?? {}) as [string, string][],
+        swapsRelPath, jsonText, 'patterns',
     );
 
     for (const tLine of template.split('\n')) {

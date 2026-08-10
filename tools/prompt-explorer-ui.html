@@ -163,7 +163,7 @@ footer {
     border-top: 2px solid var(--border);
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 2;
     user-select: none;
 }
 
@@ -249,6 +249,76 @@ footer {
 .search-match {
     background: var(--yellow-dim);
     border-radius: 2px;
+}
+
+/* swap group: faint box, no layout shift */
+.swap-group {
+    position: relative;
+    box-shadow: inset 2px 0 0 var(--text-dim);
+}
+.swap-group .line { padding-right: 200px; }
+.swap-group-label {
+    position: absolute;
+    top: 0;
+    right: 8px;
+    font-size: 10px;
+    color: var(--text-dim);
+    opacity: 0.6;
+    pointer-events: none;
+    white-space: nowrap;
+    line-height: 22px;
+    z-index: 1;
+}
+.line .source-tag {
+    position: absolute;
+    right: 28px;
+    top: 0;
+    font-size: 10px;
+    color: var(--text-dim);
+    opacity: 0;
+    pointer-events: none;
+    white-space: nowrap;
+    line-height: 22px;
+    transition: opacity 0.1s;
+}
+.line:hover .source-tag { opacity: 0.8; }
+
+/* raw tab in file headers */
+.file-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.file-header-label { flex: 1; }
+.raw-toggle {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    opacity: 0.5;
+    flex-shrink: 0;
+}
+.raw-toggle:hover { opacity: 1; }
+.raw-toggle.active {
+    opacity: 1;
+    background: var(--border);
+    color: var(--text);
+}
+.raw-view {
+    background: var(--bg);
+    border-left: 2px solid var(--text-dim);
+    margin-left: 52px;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre;
+    color: var(--text-muted);
+    overflow-x: auto;
+    display: none;
+}
+.raw-view.open { display: block; }
+.raw-view .raw-directive {
+    color: var(--blue);
+    opacity: 0.8;
 }
 
 .toast {
@@ -354,60 +424,187 @@ function markerText(idx) {
     return ' ';
 }
 
+function swapSourceLabel(source) {
+    if (source.kind !== 'swap') return '';
+    return `wordswap.json .${source.section}."${source.key}"`;
+}
+
+function isSwap(line) {
+    return line && (line.source.kind === 'swap' || line.source.kind === 'generated');
+}
+
 function renderLines() {
     const container = document.getElementById('lines-container');
     container.innerHTML = '';
 
-    lines.forEach((line, i) => {
+    let i = 0;
+    while (i < lines.length) {
+        const line = lines[i];
+
+        // file header with raw tab
         if (line.source.kind === 'header') {
             const el = document.createElement('div');
             el.className = 'file-header';
             el.style.color = fileColor(line.source.label);
             el.style.borderTopColor = fileColor(line.source.label) + '66';
-            el.textContent = '\u2500\u2500 ' + line.source.label + ' ' + '\u2500'.repeat(60);
+
+            const label = document.createElement('span');
+            label.className = 'file-header-label';
+            label.textContent = '\u2500\u2500 ' + line.source.label + ' ' + '\u2500'.repeat(50);
+            el.appendChild(label);
+
+            const rawBtn = document.createElement('button');
+            rawBtn.className = 'raw-toggle';
+            rawBtn.textContent = 'raw';
+            rawBtn.dataset.file = line.source.label;
+            rawBtn.onclick = (e) => { e.stopPropagation(); toggleRaw(line.source.label, rawBtn); };
+            el.appendChild(rawBtn);
+
             container.appendChild(el);
-            return;
+
+            // raw view panel (hidden by default)
+            const rawView = document.createElement('div');
+            rawView.className = 'raw-view';
+            rawView.id = 'raw-' + line.source.label.replace(/[^a-zA-Z0-9]/g, '-');
+            container.appendChild(rawView);
+
+            i++;
+            continue;
         }
 
-        const mod = modifications[i];
-        const el = document.createElement('div');
-        el.className = 'line';
-        if (mod?.deleted) el.classList.add('deleted');
-        else if (mod?.edited !== undefined) el.classList.add('modified');
-        if (i === selectedIndex) el.classList.add('selected');
-        el.dataset.index = i;
+        // swap group: wrap consecutive swap/generated lines
+        if (isSwap(line)) {
+            const groupStart = i;
+            // find the group's section label
+            let section = '';
+            while (i < lines.length && isSwap(lines[i])) {
+                if (lines[i].source.kind === 'swap') {
+                    section = lines[i].source.section;
+                }
+                i++;
+            }
+            const groupEnd = i;
 
-        const gutter = document.createElement('span');
-        gutter.className = 'gutter';
-        gutter.textContent = gutterText(line.source);
+            const group = document.createElement('div');
+            group.className = 'swap-group';
 
-        const marker = document.createElement('span');
-        marker.className = 'marker';
-        marker.textContent = markerText(i);
+            const groupLabel = document.createElement('span');
+            groupLabel.className = 'swap-group-label';
+            groupLabel.textContent = `wordswap.json .${section}`;
+            group.appendChild(groupLabel);
 
-        const content = document.createElement('span');
-        content.className = 'content';
-        const displayText = mod?.edited !== undefined ? mod.edited : line.text;
-        content.textContent = displayText || ' ';
+            for (let j = groupStart; j < groupEnd; j++) {
+                group.appendChild(buildLine(lines[j], j));
+            }
+            container.appendChild(group);
+            continue;
+        }
 
+        // normal line
+        container.appendChild(buildLine(line, i));
+        i++;
+    }
+
+    updateStatus();
+}
+
+function buildLine(line, i) {
+    const mod = modifications[i];
+    const el = document.createElement('div');
+    el.className = 'line';
+    if (mod?.deleted) el.classList.add('deleted');
+    else if (mod?.edited !== undefined) el.classList.add('modified');
+    if (i === selectedIndex) el.classList.add('selected');
+    el.dataset.index = i;
+
+    const gutter = document.createElement('span');
+    gutter.className = 'gutter';
+    gutter.textContent = gutterText(line.source);
+
+    const marker = document.createElement('span');
+    marker.className = 'marker';
+    marker.textContent = markerText(i);
+
+    const content = document.createElement('span');
+    content.className = 'content';
+    const displayText = mod?.edited !== undefined ? mod.edited : line.text;
+    content.textContent = displayText || ' ';
+
+    el.onclick = () => selectLine(i);
+    el.ondblclick = () => startEdit(i);
+
+    el.appendChild(gutter);
+    el.appendChild(marker);
+    el.appendChild(content);
+
+    // source tag for swap lines (visible on hover, no layout shift)
+    if (line.source.kind === 'swap') {
+        const tag = document.createElement('span');
+        tag.className = 'source-tag';
+        tag.textContent = swapSourceLabel(line.source);
+        el.appendChild(tag);
+    }
+
+    if (line.source.kind !== 'generated') {
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
         deleteBtn.textContent = '\u00d7';
         deleteBtn.onclick = (e) => { e.stopPropagation(); toggleDelete(i); };
+        el.appendChild(deleteBtn);
+    }
 
-        el.onclick = () => selectLine(i);
-        el.ondblclick = () => startEdit(i);
+    return el;
+}
 
-        el.appendChild(gutter);
-        el.appendChild(marker);
-        el.appendChild(content);
-        if (line.source.kind !== 'generated') {
-            el.appendChild(deleteBtn);
+// raw file view toggle
+const rawCache = {};
+async function toggleRaw(file, btn) {
+    const id = 'raw-' + file.replace(/[^a-zA-Z0-9]/g, '-');
+    const panel = document.getElementById(id);
+    if (!panel) return;
+
+    if (panel.classList.contains('open')) {
+        panel.classList.remove('open');
+        btn.classList.remove('active');
+        return;
+    }
+
+    btn.classList.add('active');
+
+    if (!rawCache[file]) {
+        const res = await fetch('/api/raw/' + encodeURIComponent(file));
+        const data = await res.json();
+        rawCache[file] = data;
+    }
+
+    const data = rawCache[file];
+    if (data.error) {
+        panel.textContent = '(file not found)';
+    } else {
+        panel.innerHTML = '';
+        const pathLabel = document.createElement('div');
+        pathLabel.style.cssText = 'color:var(--text-dim);margin-bottom:4px;font-size:10px;';
+        pathLabel.textContent = data.path;
+        panel.appendChild(pathLabel);
+
+        // highlight {{...}} directives
+        const pre = document.createElement('span');
+        const raw = data.content;
+        const parts = raw.split(/(\{\{[^}]+\}\})/g);
+        for (const part of parts) {
+            if (part.match(/^\{\{[^}]+\}\}$/)) {
+                const s = document.createElement('span');
+                s.className = 'raw-directive';
+                s.textContent = part;
+                pre.appendChild(s);
+            } else {
+                pre.appendChild(document.createTextNode(part));
+            }
         }
-        container.appendChild(el);
-    });
+        panel.appendChild(pre);
+    }
 
-    updateStatus();
+    panel.classList.add('open');
 }
 
 function selectLine(idx) {

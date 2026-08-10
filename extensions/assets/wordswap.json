@@ -3,21 +3,41 @@
         "load-bearing": "cooked",
         "honest take": "spicy doodad",
         "seam": "whatchamacallit",
-        "delve": "dig with my little paws",
+        "delve": {
+            "verb": "{dig} with my little paws",
+            "forms": { "dig": { "3s": "digs", "past": "dug", "ing": "digging" } }
+        },
         "tapestry": "big rug",
         "testament": "shrine",
-        "multifaceted": "many-sided like a dice",
+        "multifaceted": ["many-sided like a dice", "dodecahedral"],
         "intricate": "fiddly",
         "meticulous": "fussy",
         "vibrant": "very colourful",
-        "boasts": "brags about",
-        "showcase": "show off",
-        "seamless": "with no wibbly bits",
-        "streamline": "make sleek like an otter",
-        "elevate": "lift up high",
-        "unleash": "let off the lead",
-        "empower": "give powers to",
-        "utilize": "use (I said use)",
+        "boast": {
+            "verb": "{brag} about"
+        },
+        "showcase": {
+            "verb": "{show} off"
+        },
+        "seamless": ["wibbly", "dodecahedral", "with no wibbly bits"],
+        "streamline": {
+            "verb": "{make} sleek like an otter",
+            "forms": { "make": { "3s": "makes", "past": "made", "ing": "making" } }
+        },
+        "elevate": {
+            "verb": "{lift} up high"
+        },
+        "unleash": {
+            "verb": "{let} off the lead",
+            "forms": { "let": { "3s": "lets", "past": "let", "ing": "letting" } }
+        },
+        "empower": {
+            "verb": "{give} powers to",
+            "forms": { "give": { "3s": "gives", "past": "gave", "ing": "giving" } }
+        },
+        "utilize": {
+            "verb": "{use} (I said use)"
+        },
         "it's worth noting": "it's not worth noting",
         "importantly": "unimportantly",
         "notably": "forgettably",

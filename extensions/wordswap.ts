@@ -11,7 +11,7 @@ const swapsPath = join(dirname(fileURLToPath(import.meta.url)), 'assets', 'words
 
 export interface Swap {
     original: string;
-    replacement: string;
+    replacements: string[];
     pattern: RegExp;
 }
 
@@ -21,22 +21,107 @@ export interface PatternSwap {
     pattern: RegExp;
 }
 
+export interface VerbFormOverrides {
+    '3s'?: string;
+    past?: string;
+    ing?: string;
+}
+
+export interface VerbEntry {
+    verb: string | string[];
+    forms?: Record<string, VerbFormOverrides>;
+}
+
+export type WordValue = string | string[] | VerbEntry;
+
+type VerbForm = 'base' | '3s' | 'past' | 'ing';
+
 interface SwapFile {
-    words: Record<string, string>;
+    words: Record<string, WordValue>;
     patterns?: Record<string, string>;
 }
 
-export function buildSwaps(dict: Record<string, string>): Swap[] {
+function makeSwap(original: string, replacements: string[]): Swap {
+    const escaped = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return { original, replacements, pattern: new RegExp(`\\b${escaped}\\b`, 'gi') };
+}
+
+// standard english verb inflection. covers regular cases; irregular
+// replacement stems need explicit forms in the json.
+export function inflectVerb(base: string): { '3s': string; past: string; ing: string } {
+    const b = base.toLowerCase();
+
+    let s3: string;
+    if (/(?:s|sh|ch|x|z)$/.test(b)) s3 = b + 'es';
+    else if (/[^aeiou]y$/.test(b)) s3 = b.slice(0, -1) + 'ies';
+    else s3 = b + 's';
+
+    let past: string;
+    if (/e$/.test(b)) past = b + 'd';
+    else if (/[^aeiou]y$/.test(b)) past = b.slice(0, -1) + 'ied';
+    else if (/[^aeiou][aeiou][^aeiouwxy]$/.test(b) && b.length <= 6) past = b + b.slice(-1) + 'ed';
+    else past = b + 'ed';
+
+    let ing: string;
+    if (/ie$/.test(b)) ing = b.slice(0, -2) + 'ying';
+    else if (/e$/.test(b) && !/ee$/.test(b)) ing = b.slice(0, -1) + 'ing';
+    else if (/[^aeiou][aeiou][^aeiouwxy]$/.test(b) && b.length <= 6) ing = b + b.slice(-1) + 'ing';
+    else ing = b + 'ing';
+
+    return { '3s': s3, past, ing };
+}
+
+function resolveTemplate(
+    template: string,
+    form: VerbForm,
+    formOverrides: Record<string, VerbFormOverrides>,
+): string {
+    const m = template.match(/\{(\w+)\}/);
+    if (!m) return template;
+    const stem = m[1];
+    let inflected: string;
+    if (form === 'base') {
+        inflected = stem;
+    } else {
+        inflected = formOverrides[stem]?.[form] ?? inflectVerb(stem)[form];
+    }
+    return template.replace(`{${stem}}`, inflected);
+}
+
+function buildVerbSwaps(sourceBase: string, entry: VerbEntry): Swap[] {
+    const sourceForms = inflectVerb(sourceBase);
+    const templates = Array.isArray(entry.verb) ? entry.verb : [entry.verb];
+    const fo = entry.forms ?? {};
+    const result: Swap[] = [];
+    const seen = new Set<string>();
+
+    const pairs: [VerbForm, string][] = [
+        ['base', sourceBase],
+        ['3s', sourceForms['3s']],
+        ['past', sourceForms.past],
+        ['ing', sourceForms.ing],
+    ];
+    for (const [formKey, sourceForm] of pairs) {
+        if (seen.has(sourceForm)) continue;
+        seen.add(sourceForm);
+        const replacements = templates.map(t => resolveTemplate(t, formKey, fo));
+        result.push(makeSwap(sourceForm, replacements));
+    }
+    return result;
+}
+
+export function buildSwaps(dict: Record<string, WordValue>): Swap[] {
     const swaps: Swap[] = [];
-    for (const [original, replacement] of Object.entries(dict)) {
-        const phrase = original.trim();
+    for (const [key, value] of Object.entries(dict)) {
+        const phrase = key.trim();
         if (phrase === '') continue;
-        const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        swaps.push({
-            original: phrase,
-            replacement: replacement.trim(),
-            pattern: new RegExp(`\\b${escaped}\\b`, 'gi'),
-        });
+        if (typeof value === 'string') {
+            swaps.push(makeSwap(phrase, [value.trim()]));
+        } else if (Array.isArray(value)) {
+            swaps.push(makeSwap(phrase, value.map(v => v.trim())));
+        } else if (typeof value === 'object' && 'verb' in value) {
+            swaps.push(...buildVerbSwaps(phrase, value));
+        }
     }
     return swaps;
 }
@@ -83,9 +168,12 @@ export function applySwaps(
     wrap?: (replaced: string) => string,
 ): string {
     let out = text;
-    for (const { pattern, replacement } of swaps) {
+    for (const { pattern, replacements } of swaps) {
         out = out.replace(pattern, (matched) => {
-            const rep = matchCase(matched, replacement);
+            const choice = replacements.length === 1
+                ? replacements[0]
+                : replacements[Math.floor(Math.random() * replacements.length)];
+            const rep = matchCase(matched, choice);
             return wrap ? wrap(rep) : rep;
         });
     }
@@ -112,8 +200,15 @@ const _file = loadSwapFile();
 export const swaps = buildSwaps(_file.words);
 export const patternSwaps = _file.patterns ? buildPatternSwaps(_file.patterns) : [];
 
-// raw entries for the template expressions in vocabulary.md.
-export const wordEntries = Object.entries(_file.words) as [string, string][];
+// flatten for the vocabulary.md template: [displayKey, displayValue][] pairs.
+function flattenEntry(key: string, value: WordValue): [string, string] {
+    if (typeof value === 'string') return [key, value];
+    if (Array.isArray(value)) return [key, value.join(' | ')];
+    const templates = Array.isArray(value.verb) ? value.verb : [value.verb];
+    return [`${key} (all forms)`, templates.join(' | ')];
+}
+export const wordEntries: [string, string][] = Object.entries(_file.words)
+    .map(([k, v]) => flattenEntry(k, v));
 export const patternEntries = Object.entries(_file.patterns ?? {}) as [string, string][];
 
 export default function (pi: ExtensionAPI) {

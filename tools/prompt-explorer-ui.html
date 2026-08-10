@@ -729,7 +729,8 @@ function buildLine(line, i) {
                 wrap.textContent = span.text;
                 const label = document.createElement('span');
                 label.className = 'span-label';
-                label.textContent = `${span.source.file}:${span.source.line}:${span.source.col}`;
+                const fname = span.source.file.split('/').pop();
+                label.textContent = `${fname}:${span.source.line}:${span.source.col}`;
                 wrap.appendChild(label);
                 wrap.title = span.source.path || `${span.source.file}:${span.source.line}:${span.source.col}`;
                 content.appendChild(wrap);

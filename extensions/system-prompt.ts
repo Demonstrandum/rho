@@ -5,15 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { PromptLoader } from './lib/prompt-loader';
-import { swaps, patternSwaps, formatWordLines, formatPatternLines } from './wordswap';
+import { wordEntries, patternEntries } from './wordswap';
 
 const systemDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'system');
 
 const loader = new PromptLoader(systemDir);
-const prompt = loader.resolve({
-    WORDS: formatWordLines(swaps),
-    PATTERNS: formatPatternLines(patternSwaps),
-});
+const prompt = loader.resolve({ words: wordEntries, patterns: patternEntries });
 
 export default function (pi: ExtensionAPI) {
     pi.on('before_agent_start', async (event) => {

@@ -107,20 +107,14 @@ export function applySwaps(
     return out;
 }
 
-export function formatWordLines(items: Swap[]): string {
-    return items.map((s) => `  - "${s.original}" -> "${s.replacement}"`).join('\n');
-}
-
-export function formatPatternLines(items: PatternSwap[]): string {
-    if (items.length === 0) return '';
-    const lines = items.map((s) => `  - /${s.source}/ -> "${s.replacement}"`).join('\n');
-    return `\npattern swaps (regex, applied to coined compounds):\n\n${lines}`;
-}
-
 // loaded once at module init; /reload re-runs init and picks up edits.
 const _file = loadSwapFile();
 export const swaps = buildSwaps(_file.words);
 export const patternSwaps = _file.patterns ? buildPatternSwaps(_file.patterns) : [];
+
+// raw entries for the template expressions in vocabulary.md.
+export const wordEntries = Object.entries(_file.words) as [string, string][];
+export const patternEntries = Object.entries(_file.patterns ?? {}) as [string, string][];
 
 export default function (pi: ExtensionAPI) {
     if (swaps.length === 0 && patternSwaps.length === 0) return;

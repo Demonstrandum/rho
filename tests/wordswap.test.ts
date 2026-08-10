@@ -1,7 +1,8 @@
 import { test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildSwaps, buildPatternSwaps, applySwaps, formatWordLines, formatPatternLines } from '../extensions/wordswap';
+import { buildSwaps, buildPatternSwaps, applySwaps } from '../extensions/wordswap';
+import { SourceStr, parseSpans, stripMarkers, wrapEntries } from '../extensions/lib/source-str';
 
 const dict = { 'load-bearing': 'cooked', 'honest take': 'spicy doodad', seam: 'whatchamacallit' };
 
@@ -71,29 +72,42 @@ test('the shipped wordswap.json builds into a valid rule set', () => {
         readFileSync(join(import.meta.dir, '..', 'extensions', 'assets', 'wordswap.json'), 'utf8'),
     ) as { words: Record<string, string>; patterns?: Record<string, string> };
     const swaps = buildSwaps(shipped.words);
-    const patternSwaps = shipped.patterns ? buildPatternSwaps(shipped.patterns) : [];
     expect(swaps.length).toBeGreaterThan(0);
-    const wordLines = formatWordLines(swaps);
-    expect(wordLines).toContain('"cooked"');
-    console.log(wordLines);
+    expect(swaps[0].original).toBe('load-bearing');
 });
 
-test('formatWordLines formats one line per swap', () => {
-    const swaps = buildSwaps(dict);
-    const lines = formatWordLines(swaps);
-    expect(lines.split('\n')).toHaveLength(3);
-    expect(lines).toContain('"whatchamacallit"');
+test('SourceStr embeds markers on interpolation', () => {
+    const k = new SourceStr('tapestry', { file: 'w.json', line: 7, col: 9, path: 'words key' });
+    const v = new SourceStr('big rug', { file: 'w.json', line: 7, col: 24, path: 'words["tapestry"]' });
+    const line = `  - "${k}" -> "${v}"`;
+    console.log('marked:', JSON.stringify(line));
+    // strip gives clean text
+    expect(stripMarkers(line)).toBe('  - "tapestry" -> "big rug"');
+    // parse gives spans
+    const spans = parseSpans(line);
+    console.log('spans:', spans.map(s => `[${s.source ? s.source.path : 'tpl'}]${s.text}`).join(''));
+    expect(spans).toHaveLength(5);
+    expect(spans[0]).toEqual({ text: '  - "', source: null });
+    expect(spans[1].text).toBe('tapestry');
+    expect(spans[1].source?.path).toBe('words key');
+    expect(spans[2]).toEqual({ text: '" -> "', source: null });
+    expect(spans[3].text).toBe('big rug');
+    expect(spans[3].source?.path).toBe('words["tapestry"]');
+    expect(spans[4]).toEqual({ text: '"', source: null });
 });
 
-test('formatPatternLines includes header when non-empty', () => {
-    const pSwaps = buildPatternSwaps({ '(\\w+)-adjacent': '$1-ish-but-not' });
-    const lines = formatPatternLines(pSwaps);
-    expect(lines).toContain('pattern swaps');
-    expect(lines).toContain('$1-ish-but-not');
-});
-
-test('formatPatternLines returns empty string when no patterns', () => {
-    expect(formatPatternLines([])).toBe('');
+test('wrapEntries produces SourceStr pairs with JSON positions', () => {
+    const json = '{\n    "words": {\n        "seam": "whatchamacallit"\n    }\n}';
+    const entries: [string, string][] = [['seam', 'whatchamacallit']];
+    const wrapped = wrapEntries(entries, 'test.json', json, 'words');
+    expect(wrapped).toHaveLength(1);
+    const [k, v] = wrapped[0];
+    expect(k.valueOf()).toBe('seam');
+    expect(v.valueOf()).toBe('whatchamacallit');
+    expect(k.meta.line).toBe(3);
+    expect(v.meta.line).toBe(3);
+    console.log('key meta:', k.meta);
+    console.log('val meta:', v.meta);
 });
 
 test('buildPatternSwaps creates regex capture group swaps', () => {

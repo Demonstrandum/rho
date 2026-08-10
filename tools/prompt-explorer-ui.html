@@ -271,19 +271,7 @@ footer {
     line-height: 22px;
     z-index: 1;
 }
-.line .source-tag {
-    position: absolute;
-    right: 28px;
-    top: 0;
-    font-size: 10px;
-    color: var(--text-dim);
-    opacity: 0;
-    pointer-events: none;
-    white-space: nowrap;
-    line-height: 22px;
-    transition: opacity 0.1s;
-}
-.line:hover .source-tag { opacity: 0.8; }
+
 
 /* raw tab in file headers */
 .file-header {
@@ -309,6 +297,78 @@ footer {
 .line .directive {
     color: var(--blue);
     opacity: 0.8;
+}
+
+/* span-level source annotations (data from JSON) */
+.data-span {
+    position: relative;
+    outline: 1px solid #58a6ff30;
+    outline-offset: -1px;
+    border-radius: 2px;
+}
+.data-span .span-label {
+    position: absolute;
+    top: -14px;
+    left: 0;
+    font-size: 9px;
+    line-height: 1;
+    color: var(--blue);
+    opacity: 0;
+    pointer-events: none;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+}
+.data-span:hover { outline-color: #58a6ff66; }
+.data-span:hover .span-label { opacity: 0.8; }
+
+/* patch modal */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+.modal {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 70vw;
+    max-width: 900px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    color: var(--text-muted);
+}
+.modal-body {
+    flex: 1;
+    overflow: auto;
+    padding: 12px 16px;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre;
+}
+.modal-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+}
+.modal-footer .filename {
+    flex: 1;
+    font-size: 12px;
+    color: var(--text-dim);
 }
 
 .toast {
@@ -433,7 +493,7 @@ function toast(msg) {
 
 function gutterText(source) {
     if (source.kind === 'file') return String(source.line).padStart(4, '\u2007');
-    if (source.kind === 'swap') return '   ~';
+    if (source.kind === 'expr') return '   ~';
     return '';
 }
 
@@ -445,13 +505,14 @@ function markerText(idx) {
     return ' ';
 }
 
-function swapSourceLabel(source) {
-    if (source.kind !== 'swap') return '';
-    return `wordswap.json .${source.section}."${source.key}"`;
+function isExprLine(line) {
+    return line && line.source.kind === 'expr';
 }
 
-function isSwapOfSection(line, section) {
-    return line && line.source.kind === 'swap' && line.source.section === section;
+function isExprFromSameLine(line, exprLine) {
+    return line && line.source.kind === 'expr'
+        && line.source.path === exprLine.source.path
+        && line.source.line === exprLine.source.line;
 }
 
 function renderLines() {
@@ -488,11 +549,11 @@ function renderLines() {
             continue;
         }
 
-        // swap group: wrap consecutive swap lines of the same section
-        if (line.source.kind === 'swap') {
-            const section = line.source.section;
+        // expression group: wrap consecutive lines from the same expression
+        if (isExprLine(line) && line.spans) {
+            const exprRef = line;
             const groupStart = i;
-            while (i < lines.length && isSwapOfSection(lines[i], section)) {
+            while (i < lines.length && isExprFromSameLine(lines[i], exprRef)) {
                 i++;
             }
 
@@ -501,7 +562,7 @@ function renderLines() {
 
             const groupLabel = document.createElement('span');
             groupLabel.className = 'swap-group-label';
-            groupLabel.textContent = `wordswap.json .${section}`;
+            groupLabel.textContent = `${exprRef.source.path}:${exprRef.source.line} expr`;
             group.appendChild(groupLabel);
 
             for (let j = groupStart; j < i; j++) {
@@ -554,6 +615,24 @@ function buildLine(line, i) {
                 content.appendChild(document.createTextNode(part));
             }
         }
+    } else if (line.spans && !mod?.edited && !mod?.deleted) {
+        // render spans with source annotations
+        for (const span of line.spans) {
+            if (span.source) {
+                const wrap = document.createElement('span');
+                wrap.className = 'data-span';
+                wrap.textContent = span.text;
+                const label = document.createElement('span');
+                label.className = 'span-label';
+                label.textContent = `${span.source.file}:${span.source.line}:${span.source.col}`;
+                wrap.appendChild(label);
+                wrap.title = span.source.path || `${span.source.file}:${span.source.line}:${span.source.col}`;
+                content.appendChild(wrap);
+            } else {
+                content.appendChild(document.createTextNode(span.text));
+            }
+        }
+        if (line.spans.length === 0) content.textContent = ' ';
     } else {
         content.textContent = displayText || ' ';
     }
@@ -568,15 +647,7 @@ function buildLine(line, i) {
     el.appendChild(marker);
     el.appendChild(content);
 
-    // source tag for swap lines (visible on hover, no layout shift)
-    if (line.source.kind === 'swap') {
-        const tag = document.createElement('span');
-        tag.className = 'source-tag';
-        tag.textContent = swapSourceLabel(line.source);
-        el.appendChild(tag);
-    }
-
-    if (line.source.kind !== 'generated') {
+    if (line.source.kind !== 'header') {
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'delete-btn';
         deleteBtn.textContent = '\u00d7';
@@ -784,17 +855,96 @@ async function savePatch() {
         toast('no changes');
         return;
     }
-    const res = await fetch('/api/patch', {
+    const res = await fetch('/api/diff', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ modifications }),
     });
     const data = await res.json();
-    if (data.path) {
-        toast(`patch written: ${data.path} (${data.fileCount} file(s))`);
-    } else {
+    if (!data.diff) {
         toast('no effective changes');
+        return;
     }
+    showPatchModal(data.diff, data.fileCount);
+}
+
+function showPatchModal(diff, fileCount) {
+    // remove existing modal
+    document.querySelector('.modal-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+
+    // header
+    const header = document.createElement('div');
+    header.className = 'modal-header';
+    header.innerHTML = `<span>patch (${fileCount} file${fileCount !== 1 ? 's' : ''})</span>`;
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'close';
+    closeBtn.onclick = () => overlay.remove();
+    header.appendChild(closeBtn);
+
+    // body: rendered diff
+    const body = document.createElement('div');
+    body.className = 'modal-body';
+    for (const line of diff.split('\n')) {
+        const span = document.createElement('span');
+        if (line.startsWith('+++') || line.startsWith('---')) span.className = 'diff-file';
+        else if (line.startsWith('@@')) span.className = 'diff-hunk';
+        else if (line.startsWith('+')) span.className = 'diff-add';
+        else if (line.startsWith('-')) span.className = 'diff-del';
+        span.textContent = line + '\n';
+        body.appendChild(span);
+    }
+
+    // footer
+    const footer = document.createElement('div');
+    footer.className = 'modal-footer';
+    const filename = document.createElement('span');
+    filename.className = 'filename';
+    filename.textContent = 'prompt-explorer.patch';
+    footer.appendChild(filename);
+
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'primary';
+    downloadBtn.textContent = 'download';
+    downloadBtn.onclick = () => {
+        const blob = new Blob([diff], { type: 'text/plain' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'prompt-explorer.patch';
+        a.click();
+        URL.revokeObjectURL(a.href);
+        toast('downloaded');
+    };
+    footer.appendChild(downloadBtn);
+
+    const writeBtn = document.createElement('button');
+    writeBtn.className = 'primary';
+    writeBtn.textContent = 'write to cwd';
+    writeBtn.onclick = async () => {
+        const res = await fetch('/api/patch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ modifications }),
+        });
+        const data = await res.json();
+        if (data.path) {
+            toast(`written: ${data.path}`);
+            overlay.remove();
+        }
+    };
+    footer.appendChild(writeBtn);
+
+    modal.appendChild(header);
+    modal.appendChild(body);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
 }
 
 async function applyChanges() {

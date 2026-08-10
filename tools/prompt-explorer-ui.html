@@ -493,10 +493,12 @@ let collapsed = new Set(JSON.parse(localStorage.getItem('prompt-explorer:collaps
 function persistCollapsed() {
     localStorage.setItem('prompt-explorer:collapsed', JSON.stringify([...collapsed]));
 }
-let modifications = {};
+let modifications = {};   // { lineIdx: { deleted: true } } for line deletions
+let fileEdits = {};       // { filepath: { lineNum: 'new text' | null } } surgical edits
 let undoStack = [];
 let selectedIndex = -1;
 let editingIndex = -1;
+let editingSpan = null;   // { lineIdx, spanIdx, element } when editing a data span
 
 function headingLevel(text) {
     const m = text.match(/^(#{1,6})\s/);
@@ -583,6 +585,11 @@ function changeCount() {
     for (const [, mod] of Object.entries(modifications)) {
         if (mod.deleted) deleted++;
         else if (mod.edited !== undefined) modified++;
+    }
+    for (const file of Object.values(fileEdits)) {
+        for (const v of Object.values(file)) {
+            if (v === null) deleted++; else modified++;
+        }
     }
     return { deleted, modified };
 }
@@ -756,13 +763,16 @@ function buildLine(line, i) {
                 content.appendChild(document.createTextNode(part));
             }
         }
-    } else if (line.spans && !mod?.edited && !mod?.deleted) {
-        // render spans with source annotations
-        for (const span of line.spans) {
+    } else if (line.spans && !mod?.deleted) {
+        // render spans with source annotations; data spans are individually editable
+        for (let si = 0; si < line.spans.length; si++) {
+            const span = line.spans[si];
+            // check if this span has a fileEdit override
+            const editedText = span.source ? getFileEdit(span.source.file, span.source.line, span.source.col, span.text) : null;
             if (span.source) {
                 const wrap = document.createElement('span');
-                wrap.className = 'data-span';
-                wrap.textContent = span.text;
+                wrap.className = 'data-span' + (editedText !== null ? ' modified' : '');
+                wrap.textContent = editedText !== null ? editedText : span.text;
                 const label = document.createElement('span');
                 label.className = 'span-label';
                 const fname = span.source.file.split('/').pop();
@@ -770,7 +780,11 @@ function buildLine(line, i) {
                 wrap.appendChild(label);
                 wrap.title = span.source.path || `${span.source.file}:${span.source.line}:${span.source.col}`;
                 const srcRef = span.source;
+                const spanText = span.text;
+                const lineIdx = i;
+                const spanIdx = si;
                 wrap.onclick = (e) => { e.stopPropagation(); showSourceFile(srcRef); };
+                wrap.ondblclick = (e) => { e.stopPropagation(); startSpanEdit(lineIdx, spanIdx, wrap, srcRef, spanText); };
                 content.appendChild(wrap);
             } else {
                 content.appendChild(document.createTextNode(span.text));
@@ -785,7 +799,10 @@ function buildLine(line, i) {
         if (editingIndex === i) return;
         selectLine(i);
     };
-    el.ondblclick = () => startEdit(i);
+    // only allow whole-line editing for non-span lines
+    if (!line.spans) {
+        el.ondblclick = () => startEdit(i);
+    }
 
     el.appendChild(gutter);
     el.appendChild(marker);
@@ -859,8 +876,111 @@ function toggleDelete(idx) {
     renderLines();
 }
 
+// file edit helpers: track surgical edits to source files
+function addFileEdit(file, line, newText) {
+    if (!fileEdits[file]) fileEdits[file] = {};
+    fileEdits[file][line] = newText;
+    updateStatus();
+}
+
+function getFileEdit(file, line, col, originalText) {
+    // check if there's a fileEdit that affects this span
+    const edits = fileEdits[file];
+    if (!edits || !(line in edits)) return null;
+    const editedLine = edits[line];
+    if (editedLine === null) return null; // deleted
+    // extract the value at the original col position
+    // the col is 1-indexed, inside a JSON quote
+    const col0 = col - 1;
+    const end = editedLine.indexOf('"', col0);
+    if (end < 0) return null;
+    const extracted = editedLine.slice(col0, end);
+    return extracted !== originalText ? extracted : null;
+}
+
+// span-level editing for data spans in expression-generated lines
+function startSpanEdit(lineIdx, spanIdx, el, srcRef, originalText) {
+    if (editingSpan && editingSpan.lineIdx === lineIdx && editingSpan.spanIdx === spanIdx) return;
+    if (editingSpan) finishSpanEdit();
+    if (editingIndex >= 0) finishEdit(editingIndex);
+
+    editingSpan = { lineIdx, spanIdx, element: el, srcRef, originalText };
+
+    // remove the label temporarily so it doesn't interfere with editing
+    const label = el.querySelector('.span-label');
+    if (label) label.style.display = 'none';
+
+    el.textContent = getFileEdit(srcRef.file, srcRef.line, srcRef.col, originalText) ?? originalText;
+    el.contentEditable = 'true';
+    el.focus();
+
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    el.onkeydown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finishSpanEdit(); }
+        else if (e.key === 'Escape') { cancelSpanEdit(); }
+    };
+}
+
+function finishSpanEdit() {
+    if (!editingSpan) return;
+    const { element: el, srcRef, originalText } = editingSpan;
+    const newText = el.textContent || '';
+    el.contentEditable = 'false';
+    el.onkeydown = null;
+
+    if (newText !== originalText) {
+        // apply surgical edit: replace the value in the source line at the known col
+        // fetch the current source line (from cache or original)
+        fetchSourceLine(srcRef.file, srcRef.line).then(sourceLine => {
+            if (!sourceLine) return;
+            const col0 = srcRef.col - 1;
+            const end = sourceLine.indexOf('"', col0);
+            if (end < 0) return;
+            const newSourceLine = sourceLine.slice(0, col0) + newText + sourceLine.slice(end);
+            addFileEdit(srcRef.file, srcRef.line, newSourceLine);
+            editingSpan = null;
+            renderLines();
+        });
+        return;
+    }
+
+    editingSpan = null;
+    renderLines();
+}
+
+function cancelSpanEdit() {
+    if (!editingSpan) return;
+    editingSpan.element.contentEditable = 'false';
+    editingSpan.element.onkeydown = null;
+    editingSpan = null;
+    renderLines();
+}
+
+async function fetchSourceLine(file, lineNum) {
+    const fname = file.split('/').pop();
+    if (!sourceCache[file]) {
+        const res = await fetch('/api/raw/' + encodeURIComponent(fname));
+        const data = await res.json();
+        if (data.error) return null;
+        sourceCache[file] = data.content;
+    }
+    // check if there's already a fileEdit for this line
+    if (fileEdits[file]?.[lineNum] !== undefined) {
+        return fileEdits[file][lineNum];
+    }
+    const lines = sourceCache[file].split('\n');
+    return lines[lineNum - 1] ?? null;
+}
+
 function startEdit(idx) {
     if (editingIndex === idx) return; // already editing; let browser handle (word select, etc.)
+    if (editingSpan) finishSpanEdit();
     const line = lines[idx];
     if (line.source.kind === 'header') return;
     const mod = modifications[idx];
@@ -972,7 +1092,7 @@ async function showSourceFile(ref) {
 
     if (!sourceCache[ref.file]) {
         body.innerHTML = '<span style="color:var(--text-dim)">loading...</span>';
-        const res = await fetch('/api/raw/' + encodeURIComponent(ref.file.split('/').pop()));
+        const res = await fetch('/api/raw/' + encodeURIComponent(fname));
         const data = await res.json();
         if (data.error) {
             body.innerHTML = '<span style="color:var(--red)">file not found</span>';
@@ -981,14 +1101,27 @@ async function showSourceFile(ref) {
         sourceCache[ref.file] = data.content;
     }
 
-    const content = sourceCache[ref.file];
-    const lines = content.split('\n');
+    renderSourcePanel(ref.file, ref.line, ref.col);
+}
+
+function renderSourcePanel(filePath, highlightLine, highlightCol) {
+    const body = document.getElementById('diff-content');
+    const content = sourceCache[filePath];
+    if (!content) return;
+    const srcLines = content.split('\n');
     body.innerHTML = '';
 
-    for (let i = 0; i < lines.length; i++) {
+    for (let i = 0; i < srcLines.length; i++) {
         const lineNum = i + 1;
+        const hasEdit = fileEdits[filePath]?.[lineNum] !== undefined;
+        const lineText = hasEdit ? (fileEdits[filePath][lineNum] ?? '') : srcLines[i];
+        const isDeleted = hasEdit && fileEdits[filePath][lineNum] === null;
+
         const div = document.createElement('div');
-        div.className = 'source-line' + (lineNum === ref.line ? ' highlighted' : '');
+        div.className = 'source-line';
+        if (lineNum === highlightLine) div.classList.add('highlighted');
+        if (isDeleted) div.style.opacity = '0.3';
+        if (hasEdit && !isDeleted) div.style.background = 'var(--yellow-dim)';
 
         const gutter = document.createElement('span');
         gutter.className = 'src-gutter';
@@ -997,14 +1130,11 @@ async function showSourceFile(ref) {
         const src = document.createElement('span');
         src.className = 'src-content';
 
-        if (lineNum === ref.line && ref.col > 0) {
-            // highlight the column region
-            const text = lines[i];
-            const col0 = ref.col - 1; // 0-indexed
-            // find the extent: look for the closing quote
+        if (lineNum === highlightLine && highlightCol > 0 && !hasEdit) {
+            const text = srcLines[i];
+            const col0 = highlightCol - 1;
             let end = text.indexOf('"', col0);
             if (end < 0) end = text.length;
-
             src.appendChild(document.createTextNode(text.slice(0, col0)));
             const hl = document.createElement('span');
             hl.className = 'source-highlight-col';
@@ -1012,21 +1142,64 @@ async function showSourceFile(ref) {
             src.appendChild(hl);
             src.appendChild(document.createTextNode(text.slice(end)));
         } else {
-            src.textContent = lines[i] || ' ';
+            src.textContent = lineText || ' ';
         }
+
+        // double-click to edit this source line
+        const ln = lineNum;
+        const fp = filePath;
+        div.ondblclick = () => startSidebarEdit(fp, ln, div, src);
 
         div.appendChild(gutter);
         div.appendChild(src);
         body.appendChild(div);
     }
 
-    // scroll the highlighted line into view
     const hl = body.querySelector('.highlighted');
     if (hl) setTimeout(() => hl.scrollIntoView({ block: 'center' }), 50);
 }
 
+function startSidebarEdit(filePath, lineNum, div, srcEl) {
+    const srcLines = sourceCache[filePath]?.split('\n');
+    if (!srcLines) return;
+    const currentText = fileEdits[filePath]?.[lineNum] !== undefined
+        ? (fileEdits[filePath][lineNum] ?? '')
+        : srcLines[lineNum - 1];
+
+    srcEl.textContent = currentText;
+    srcEl.contentEditable = 'true';
+    srcEl.focus();
+
+    srcEl.onkeydown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            srcEl.contentEditable = 'false';
+            srcEl.onkeydown = null;
+            const newText = srcEl.textContent;
+            if (newText !== srcLines[lineNum - 1]) {
+                addFileEdit(filePath, lineNum, newText);
+            } else if (fileEdits[filePath]?.[lineNum] !== undefined) {
+                delete fileEdits[filePath][lineNum];
+                if (Object.keys(fileEdits[filePath]).length === 0) delete fileEdits[filePath];
+            }
+            renderLines(); // update main view
+        } else if (e.key === 'Escape') {
+            srcEl.contentEditable = 'false';
+            srcEl.onkeydown = null;
+        }
+    };
+}
+
+function hasAnyChanges() {
+    return Object.keys(modifications).length > 0 || Object.keys(fileEdits).length > 0;
+}
+
+function changesPayload() {
+    return JSON.stringify({ modifications, fileEdits });
+}
+
 async function savePatch() {
-    if (Object.keys(modifications).length === 0) {
+    if (!hasAnyChanges()) {
         toast('no changes');
         return;
     }
@@ -1034,7 +1207,7 @@ async function savePatch() {
         const res = await fetch('/api/diff', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ modifications }),
+            body: changesPayload(),
         });
         const data = await res.json();
         if (!data.diff) {
@@ -1109,7 +1282,7 @@ function showPatchModal(diff, fileCount) {
         const res = await fetch('/api/patch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ modifications }),
+            body: changesPayload(),
         });
         const data = await res.json();
         if (data.path) {
@@ -1127,13 +1300,14 @@ function showPatchModal(diff, fileCount) {
         const res = await fetch('/api/apply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ modifications }),
+            body: changesPayload(),
         });
         const data = await res.json();
         if (data.applied) {
             toast(`applied to ${data.fileCount} file(s)`);
             overlay.remove();
             modifications = {};
+            fileEdits = {};
             undoStack = [];
             sourceCache = {};
             const r = await fetch('/api/lines');

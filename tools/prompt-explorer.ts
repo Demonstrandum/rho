@@ -89,9 +89,6 @@ function loadSwapFile(): SwapFile {
     return raw as SwapFile;
 }
 
-// expression regex (same as prompt-loader, matches {{...}} but not {{include:...}})
-const EXPR_RE = /\{\{(?!include:)((?:(?!\}\}).)*?)\}\}/gs;
-
 function resolveWithSources(): SourceLine[] {
     const lines: SourceLine[] = [];
     const template = readFileSync(join(SYSTEM_DIR, 'prompt.md'), 'utf8');
@@ -99,7 +96,6 @@ function resolveWithSources(): SourceLine[] {
     const jsonText = readFileSync(SWAPS_PATH, 'utf8');
     const swapsRelPath = relative(ROOT, SWAPS_PATH);
 
-    // wrap entries as SourceStr so markers embed on interpolation
     const words = wrapEntries(
         Object.entries(swapFile.words ?? {}), swapsRelPath, jsonText, 'words',
     );
@@ -121,52 +117,63 @@ function resolveWithSources(): SourceLine[] {
         });
 
         const fileLines = content.split('\n');
-        let lineIdx = 0;
-        while (lineIdx < fileLines.length) {
+        const cond: boolean[] = [];
+
+        for (let lineIdx = 0; lineIdx < fileLines.length; lineIdx++) {
             const fLine = fileLines[lineIdx];
 
-            // check if this line contains a {{expression}}
-            if (EXPR_RE.test(fLine)) {
-                EXPR_RE.lastIndex = 0;
-                // evaluate with SourceStr-wrapped data (markers embed)
-                const exprSource: LineSource = { kind: 'expr', path: file, line: lineIdx + 1 };
+            // {{#if expr}}
+            const ifM = fLine.match(/^\s*\{\{#if\s+(.+)\}\}\s*$/);
+            if (ifM) {
                 try {
-                    const fn = new Function('words', 'patterns', `return ${fLine.replace(EXPR_RE, (_, e) => e)}`);
-                    const result = String(fn(words, patterns) ?? '');
-                    if (result === '') { lineIdx++; continue; }
-
-                    for (const outLine of result.split('\n')) {
-                        if (hasMarkers(outLine)) {
-                            const spans = parseSpans(outLine);
-                            const clean = spans.map((s) => s.text).join('');
-                            lines.push({
-                                text: clean, spans,
-                                source: exprSource,
-                                deleted: false, edited: null,
-                            });
-                        } else {
-                            lines.push({
-                                text: outLine, spans: null,
-                                source: exprSource,
-                                deleted: false, edited: null,
-                            });
-                        }
-                    }
-                } catch (e) {
-                    lines.push({
-                        text: `{{ERROR: ${(e as Error).message}}}`, spans: null,
-                        source: exprSource,
-                        deleted: false, edited: null,
-                    });
-                }
-            } else {
-                lines.push({
-                    text: fLine, spans: null,
-                    source: { kind: 'file', path: file, line: lineIdx + 1 },
-                    deleted: false, edited: null,
-                });
+                    const fn = new Function('words', 'patterns', `return !!(${ifM[1]})`);
+                    cond.push(fn(words, patterns));
+                } catch { cond.push(false); }
+                continue;
             }
-            lineIdx++;
+            if (/^\s*\{\{else\}\}\s*$/.test(fLine)) {
+                if (cond.length > 0) cond[cond.length - 1] = !cond[cond.length - 1];
+                continue;
+            }
+            if (/^\s*\{\{\/if\}\}\s*$/.test(fLine)) {
+                cond.pop();
+                continue;
+            }
+            if (cond.length > 0 && !cond.every(Boolean)) continue;
+
+            // line with {{expression}}?
+            if (fLine.includes('{{')) {
+                const exprSource: LineSource = { kind: 'expr', path: file, line: lineIdx + 1 };
+                // extract the expression body
+                const exprMatch = fLine.match(/\{\{(.+?)\}\}/);
+                if (exprMatch) {
+                    try {
+                        const fn = new Function('words', 'patterns', `return ${exprMatch[1]}`);
+                        const result = String(fn(words, patterns) ?? '');
+                        if (result === '') continue;
+
+                        for (const outLine of result.split('\n')) {
+                            if (hasMarkers(outLine)) {
+                                const spans = parseSpans(outLine);
+                                const clean = spans.map((s) => s.text).join('');
+                                lines.push({ text: clean, spans, source: exprSource, deleted: false, edited: null });
+                            } else {
+                                lines.push({ text: outLine, spans: null, source: exprSource, deleted: false, edited: null });
+                            }
+                        }
+                    } catch (e) {
+                        lines.push({ text: `{{ERROR: ${(e as Error).message}}}`, spans: null, source: exprSource, deleted: false, edited: null });
+                    }
+                    continue;
+                }
+            }
+
+            // plain line
+            lines.push({
+                text: fLine, spans: null,
+                source: { kind: 'file', path: file, line: lineIdx + 1 },
+                deleted: false, edited: null,
+            });
         }
     }
 

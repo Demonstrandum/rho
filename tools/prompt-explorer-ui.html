@@ -214,8 +214,7 @@ footer {
     flex: 1;
     padding: 0 8px;
     white-space: pre;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow: visible;
     display: flex;
     align-items: center;
     min-height: 22px;
@@ -273,6 +272,28 @@ footer {
 }
 
 
+/* collapse toggle */
+.collapse-toggle {
+    cursor: pointer;
+    user-select: none;
+    font-size: 10px;
+    width: 14px;
+    text-align: center;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    opacity: 0.6;
+    transition: opacity 0.1s;
+}
+.collapse-toggle:hover { opacity: 1; color: var(--text); }
+.line .collapse-toggle {
+    position: absolute;
+    left: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+.heading-line { cursor: pointer; }
+.heading-line:hover .collapse-toggle { opacity: 1; }
+
 /* raw tab in file headers */
 .file-header {
     display: flex;
@@ -302,24 +323,28 @@ footer {
 /* span-level source annotations (data from JSON) */
 .data-span {
     position: relative;
-    outline: 1px solid #58a6ff30;
-    outline-offset: -1px;
+    outline: 1px solid #58a6ff55;
+    outline-offset: 0px;
     border-radius: 2px;
+    padding: 0 1px;
 }
 .data-span .span-label {
     position: absolute;
-    top: -14px;
+    bottom: 100%;
     left: 0;
-    font-size: 9px;
-    line-height: 1;
-    color: var(--blue);
-    opacity: 0;
+    font-size: 8px;
+    line-height: 1.2;
+    padding: 1px 3px;
+    color: #58a6ff;
+    background: #58a6ff18;
+    border-radius: 2px 2px 0 0;
     pointer-events: none;
     white-space: nowrap;
+    opacity: 0.5;
     transition: opacity 0.15s;
 }
-.data-span:hover { outline-color: #58a6ff66; }
-.data-span:hover .span-label { opacity: 0.8; }
+.data-span:hover { outline-color: #58a6ffaa; background: #58a6ff0c; }
+.data-span:hover .span-label { opacity: 1; }
 
 /* patch modal */
 .modal-overlay {
@@ -433,10 +458,61 @@ let expandedLines = [];  // original from server, never mutated
 let lines = [];          // current display lines (rebuilt on mode switch)
 let rawFileLines = {};   // { 'file.md': SourceLine[] }, cached
 let rawMode = {};        // { 'file.md': true }
+let collapsed = new Set(); // 'file:name' or 'heading:INDEX'
 let modifications = {};
 let undoStack = [];
 let selectedIndex = -1;
 let editingIndex = -1;
+
+function headingLevel(text) {
+    const m = text.match(/^(#{1,6})\s/);
+    return m ? m[1].length : 0;
+}
+
+// compute which lines are visible given collapse state
+function computeVisibility() {
+    const vis = new Array(lines.length).fill(true);
+    let currentFile = null;
+    let fileHidden = false;
+
+    // pass 1: file-level collapse
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].source.kind === 'header') {
+            currentFile = lines[i].source.label;
+            fileHidden = collapsed.has('file:' + currentFile);
+            vis[i] = true; // header always visible
+            continue;
+        }
+        if (fileHidden) vis[i] = false;
+    }
+
+    // pass 2: heading-level collapse
+    for (let i = 0; i < lines.length; i++) {
+        if (!vis[i]) continue;
+        const level = headingLevel(lines[i].text);
+        if (level > 0 && collapsed.has('heading:' + i)) {
+            for (let j = i + 1; j < lines.length; j++) {
+                if (lines[j].source.kind === 'header') break;
+                const jLevel = headingLevel(lines[j].text);
+                if (jLevel > 0 && jLevel <= level) break;
+                vis[j] = false;
+            }
+        }
+    }
+    return vis;
+}
+
+function toggleFileCollapse(file) {
+    const key = 'file:' + file;
+    if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+    renderLines();
+}
+
+function toggleHeadingCollapse(idx) {
+    const key = 'heading:' + idx;
+    if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+    renderLines();
+}
 
 // rebuild display lines from expandedLines, swapping in raw lines for sections in raw mode
 function rebuildDisplayLines() {
@@ -518,29 +594,39 @@ function isExprFromSameLine(line, exprLine) {
 function renderLines() {
     const container = document.getElementById('lines-container');
     container.innerHTML = '';
+    const vis = computeVisibility();
 
     let i = 0;
     while (i < lines.length) {
         const line = lines[i];
 
-        // file header with raw tab
+        // file header with collapse toggle and raw tab
         if (line.source.kind === 'header') {
+            const file = line.source.label;
+            const isFileCollapsed = collapsed.has('file:' + file);
             const el = document.createElement('div');
             el.className = 'file-header';
-            el.style.color = fileColor(line.source.label);
-            el.style.borderTopColor = fileColor(line.source.label) + '66';
+            el.style.color = fileColor(file);
+            el.style.borderTopColor = fileColor(file) + '66';
+
+            const toggle = document.createElement('span');
+            toggle.className = 'collapse-toggle';
+            toggle.textContent = isFileCollapsed ? '\u25b8' : '\u25be';
+            toggle.onclick = (e) => { e.stopPropagation(); toggleFileCollapse(file); };
+            el.appendChild(toggle);
 
             const label = document.createElement('span');
             label.className = 'file-header-label';
-            label.textContent = '\u2500\u2500 ' + line.source.label + ' ' + '\u2500'.repeat(50);
+            label.textContent = '\u2500\u2500 ' + file + ' ' + '\u2500'.repeat(50);
+            label.style.cursor = 'pointer';
+            label.onclick = () => toggleFileCollapse(file);
             el.appendChild(label);
 
-            const isRaw = !!rawMode[line.source.label];
+            const isRaw = !!rawMode[file];
             const rawBtn = document.createElement('button');
             rawBtn.className = 'raw-toggle' + (isRaw ? ' active' : '');
             rawBtn.textContent = isRaw ? 'expanded' : 'raw';
-            rawBtn.dataset.file = line.source.label;
-            rawBtn.onclick = (e) => { e.stopPropagation(); toggleRaw(line.source.label, rawBtn); };
+            rawBtn.onclick = (e) => { e.stopPropagation(); toggleRaw(file, rawBtn); };
             el.appendChild(rawBtn);
 
             container.appendChild(el);
@@ -557,6 +643,11 @@ function renderLines() {
                 i++;
             }
 
+            // check if any line in group is visible
+            let anyVis = false;
+            for (let j = groupStart; j < i; j++) if (vis[j]) anyVis = true;
+            if (!anyVis) continue;
+
             const group = document.createElement('div');
             group.className = 'swap-group';
 
@@ -566,14 +657,28 @@ function renderLines() {
             group.appendChild(groupLabel);
 
             for (let j = groupStart; j < i; j++) {
-                group.appendChild(buildLine(lines[j], j));
+                if (vis[j]) group.appendChild(buildLine(lines[j], j));
             }
             container.appendChild(group);
             continue;
         }
 
-        // normal line
-        container.appendChild(buildLine(line, i));
+        // skip hidden lines
+        if (!vis[i]) { i++; continue; }
+
+        // normal line (with heading collapse toggle if it's a heading)
+        const lineEl = buildLine(line, i);
+        const hLevel = headingLevel(line.text);
+        if (hLevel > 0) {
+            lineEl.classList.add('heading-line');
+            const toggle = document.createElement('span');
+            toggle.className = 'collapse-toggle';
+            toggle.textContent = collapsed.has('heading:' + i) ? '\u25b8' : '\u25be';
+            const idx = i;
+            toggle.onclick = (e) => { e.stopPropagation(); toggleHeadingCollapse(idx); };
+            lineEl.prepend(toggle);
+        }
+        container.appendChild(lineEl);
         i++;
     }
 
@@ -716,8 +821,9 @@ function toggleDelete(idx) {
 }
 
 function startEdit(idx) {
+    if (editingIndex === idx) return; // already editing; let browser handle (word select, etc.)
     const line = lines[idx];
-    if (line.source.kind === 'generated') return;
+    if (line.source.kind === 'header') return;
     const mod = modifications[idx];
     if (mod?.deleted) return;
 

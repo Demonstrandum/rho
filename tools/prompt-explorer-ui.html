@@ -254,9 +254,11 @@ footer {
 /* swap group: faint box, no layout shift */
 .swap-group {
     position: relative;
-    box-shadow: inset 2px 0 0 var(--text-dim);
+    outline: 1px solid #484f5850;
+    outline-offset: -1px;
+    border-radius: 3px;
+    margin: 2px 0;
 }
-.swap-group .line { padding-right: 200px; }
 .swap-group-label {
     position: absolute;
     top: 0;
@@ -303,20 +305,8 @@ footer {
     background: var(--border);
     color: var(--text);
 }
-.raw-view {
-    background: var(--bg);
-    border-left: 2px solid var(--text-dim);
-    margin-left: 52px;
-    padding: 8px 12px;
-    font-size: 12px;
-    line-height: 1.6;
-    white-space: pre;
-    color: var(--text-muted);
-    overflow-x: auto;
-    display: none;
-}
-.raw-view.open { display: block; }
-.raw-view .raw-directive {
+/* raw mode: directive highlights inline */
+.line .directive {
     color: var(--blue);
     opacity: 0.8;
 }
@@ -379,11 +369,42 @@ function fileColor(path) {
     return colorMap[path];
 }
 
-let lines = [];
+let expandedLines = [];  // original from server, never mutated
+let lines = [];          // current display lines (rebuilt on mode switch)
+let rawFileLines = {};   // { 'file.md': SourceLine[] }, cached
+let rawMode = {};        // { 'file.md': true }
 let modifications = {};
 let undoStack = [];
 let selectedIndex = -1;
 let editingIndex = -1;
+
+// rebuild display lines from expandedLines, swapping in raw lines for sections in raw mode
+function rebuildDisplayLines() {
+    const result = [];
+    let i = 0;
+    while (i < expandedLines.length) {
+        const line = expandedLines[i];
+        if (line.source.kind === 'header') {
+            const file = line.source.label;
+            result.push(line);
+            i++;
+            if (rawMode[file] && rawFileLines[file]) {
+                // skip expanded lines, insert raw lines
+                while (i < expandedLines.length && expandedLines[i].source.kind !== 'header') i++;
+                for (const rl of rawFileLines[file]) result.push(rl);
+            } else {
+                while (i < expandedLines.length && expandedLines[i].source.kind !== 'header') {
+                    result.push(expandedLines[i]);
+                    i++;
+                }
+            }
+        } else {
+            result.push(line);
+            i++;
+        }
+    }
+    return result;
+}
 
 function changeCount() {
     let deleted = 0, modified = 0;
@@ -429,8 +450,8 @@ function swapSourceLabel(source) {
     return `wordswap.json .${source.section}."${source.key}"`;
 }
 
-function isSwap(line) {
-    return line && (line.source.kind === 'swap' || line.source.kind === 'generated');
+function isSwapOfSection(line, section) {
+    return line && line.source.kind === 'swap' && line.source.section === section;
 }
 
 function renderLines() {
@@ -453,37 +474,27 @@ function renderLines() {
             label.textContent = '\u2500\u2500 ' + line.source.label + ' ' + '\u2500'.repeat(50);
             el.appendChild(label);
 
+            const isRaw = !!rawMode[line.source.label];
             const rawBtn = document.createElement('button');
-            rawBtn.className = 'raw-toggle';
-            rawBtn.textContent = 'raw';
+            rawBtn.className = 'raw-toggle' + (isRaw ? ' active' : '');
+            rawBtn.textContent = isRaw ? 'expanded' : 'raw';
             rawBtn.dataset.file = line.source.label;
             rawBtn.onclick = (e) => { e.stopPropagation(); toggleRaw(line.source.label, rawBtn); };
             el.appendChild(rawBtn);
 
             container.appendChild(el);
 
-            // raw view panel (hidden by default)
-            const rawView = document.createElement('div');
-            rawView.className = 'raw-view';
-            rawView.id = 'raw-' + line.source.label.replace(/[^a-zA-Z0-9]/g, '-');
-            container.appendChild(rawView);
-
             i++;
             continue;
         }
 
-        // swap group: wrap consecutive swap/generated lines
-        if (isSwap(line)) {
+        // swap group: wrap consecutive swap lines of the same section
+        if (line.source.kind === 'swap') {
+            const section = line.source.section;
             const groupStart = i;
-            // find the group's section label
-            let section = '';
-            while (i < lines.length && isSwap(lines[i])) {
-                if (lines[i].source.kind === 'swap') {
-                    section = lines[i].source.section;
-                }
+            while (i < lines.length && isSwapOfSection(lines[i], section)) {
                 i++;
             }
-            const groupEnd = i;
 
             const group = document.createElement('div');
             group.className = 'swap-group';
@@ -493,7 +504,7 @@ function renderLines() {
             groupLabel.textContent = `wordswap.json .${section}`;
             group.appendChild(groupLabel);
 
-            for (let j = groupStart; j < groupEnd; j++) {
+            for (let j = groupStart; j < i; j++) {
                 group.appendChild(buildLine(lines[j], j));
             }
             container.appendChild(group);
@@ -528,9 +539,29 @@ function buildLine(line, i) {
     const content = document.createElement('span');
     content.className = 'content';
     const displayText = mod?.edited !== undefined ? mod.edited : line.text;
-    content.textContent = displayText || ' ';
 
-    el.onclick = () => selectLine(i);
+    // highlight {{...}} directives in raw-mode lines
+    const fileInRaw = line.source.kind === 'file' && rawMode[line.source.path];
+    if (fileInRaw && displayText.includes('{{')) {
+        const parts = displayText.split(/(\{\{[^}]+\}\})/g);
+        for (const part of parts) {
+            if (part.match(/^\{\{[^}]+\}\}$/)) {
+                const s = document.createElement('span');
+                s.className = 'directive';
+                s.textContent = part;
+                content.appendChild(s);
+            } else {
+                content.appendChild(document.createTextNode(part));
+            }
+        }
+    } else {
+        content.textContent = displayText || ' ';
+    }
+
+    el.onclick = () => {
+        if (editingIndex === i) return;
+        selectLine(i);
+    };
     el.ondblclick = () => startEdit(i);
 
     el.appendChild(gutter);
@@ -556,59 +587,38 @@ function buildLine(line, i) {
     return el;
 }
 
-// raw file view toggle
-const rawCache = {};
+// raw mode: switch a file section between expanded and raw view
 async function toggleRaw(file, btn) {
-    const id = 'raw-' + file.replace(/[^a-zA-Z0-9]/g, '-');
-    const panel = document.getElementById(id);
-    if (!panel) return;
-
-    if (panel.classList.contains('open')) {
-        panel.classList.remove('open');
-        btn.classList.remove('active');
-        return;
-    }
-
-    btn.classList.add('active');
-
-    if (!rawCache[file]) {
+    if (!rawFileLines[file]) {
+        // fetch and cache raw lines
         const res = await fetch('/api/raw/' + encodeURIComponent(file));
         const data = await res.json();
-        rawCache[file] = data;
+        if (data.error) { toast('file not found: ' + file); return; }
+        const fileLines = data.content.replace(/\n$/, '').split('\n');
+        rawFileLines[file] = fileLines.map((text, i) => ({
+            index: -1,
+            text,
+            source: { kind: 'file', path: file, line: i + 1 },
+        }));
     }
 
-    const data = rawCache[file];
-    if (data.error) {
-        panel.textContent = '(file not found)';
-    } else {
-        panel.innerHTML = '';
-        const pathLabel = document.createElement('div');
-        pathLabel.style.cssText = 'color:var(--text-dim);margin-bottom:4px;font-size:10px;';
-        pathLabel.textContent = data.path;
-        panel.appendChild(pathLabel);
+    rawMode[file] = !rawMode[file];
 
-        // highlight {{...}} directives
-        const pre = document.createElement('span');
-        const raw = data.content;
-        const parts = raw.split(/(\{\{[^}]+\}\})/g);
-        for (const part of parts) {
-            if (part.match(/^\{\{[^}]+\}\}$/)) {
-                const s = document.createElement('span');
-                s.className = 'raw-directive';
-                s.textContent = part;
-                pre.appendChild(s);
-            } else {
-                pre.appendChild(document.createTextNode(part));
-            }
-        }
-        panel.appendChild(pre);
-    }
+    // clear modifications for lines in this section (indices shift)
+    modifications = {};
+    undoStack = [];
 
-    panel.classList.add('open');
+    lines = rebuildDisplayLines();
+    selectedIndex = -1;
+    editingIndex = -1;
+    renderLines();
 }
 
 function selectLine(idx) {
-    if (editingIndex >= 0) finishEdit(editingIndex);
+    if (editingIndex >= 0) {
+        if (editingIndex !== idx) finishEdit(editingIndex);
+        return;
+    }
     selectedIndex = idx;
     document.querySelectorAll('.line.selected').forEach(el => el.classList.remove('selected'));
     const el = document.querySelector(`.line[data-index="${idx}"]`);
@@ -806,7 +816,9 @@ async function applyChanges() {
         undoStack = [];
         // reload lines from server
         const r = await fetch('/api/lines');
-        lines = await r.json();
+        expandedLines = await r.json();
+        rawFileLines = {}; // invalidate raw cache
+        lines = rebuildDisplayLines();
         renderLines();
     }
 }
@@ -880,7 +892,8 @@ function navigateLine(dir) {
 // init
 (async () => {
     const res = await fetch('/api/lines');
-    lines = await res.json();
+    expandedLines = await res.json();
+    lines = rebuildDisplayLines();
     renderLines();
 })();
 </script>

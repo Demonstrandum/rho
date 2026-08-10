@@ -76,10 +76,18 @@ function matchCase(matched: string, replacement: string): string {
     return replacement;
 }
 
-export function applySwaps(text: string, swaps: Swap[], patternSwaps: PatternSwap[] = []): string {
+export function applySwaps(
+    text: string,
+    swaps: Swap[],
+    patternSwaps: PatternSwap[] = [],
+    wrap?: (replaced: string) => string,
+): string {
     let out = text;
     for (const { pattern, replacement } of swaps) {
-        out = out.replace(pattern, (matched) => matchCase(matched, replacement));
+        out = out.replace(pattern, (matched) => {
+            const rep = matchCase(matched, replacement);
+            return wrap ? wrap(rep) : rep;
+        });
     }
     for (const { pattern, replacement } of patternSwaps) {
         out = out.replace(pattern, (...args) => {
@@ -92,7 +100,8 @@ export function applySwaps(text: string, swaps: Swap[], patternSwaps: PatternSwa
                     result = result.replace(`$${i}`, args[i] as string);
                 }
             }
-            return matchCase(matched, result);
+            const rep = matchCase(matched, result);
+            return wrap ? wrap(rep) : rep;
         });
     }
     return out;
@@ -116,6 +125,11 @@ export const patternSwaps = _file.patterns ? buildPatternSwaps(_file.patterns) :
 export default function (pi: ExtensionAPI) {
     if (swaps.length === 0 && patternSwaps.length === 0) return;
 
+    // very subtle red background on swapped text; tune RGB here.
+    const BG = '\x1b[48;2;35;10;10m';
+    const RESET = '\x1b[49m';
+    const highlight = (s: string) => `${BG}${s}${RESET}`;
+
     pi.on('message_end', async (event) => {
         const message = event.message;
         if (message.role !== 'assistant') return;
@@ -124,7 +138,7 @@ export default function (pi: ExtensionAPI) {
         let changed = false;
         const content = message.content.map((block) => {
             if (block.type !== 'text') return block;
-            const text = applySwaps(block.text, swaps, patternSwaps);
+            const text = applySwaps(block.text, swaps, patternSwaps, highlight);
             if (text === block.text) return block;
             changed = true;
             return { ...block, text };

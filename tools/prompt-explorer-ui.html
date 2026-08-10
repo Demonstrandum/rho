@@ -170,7 +170,7 @@ footer {
 .line {
     display: flex;
     align-items: stretch;
-    min-height: 26px;
+    min-height: 22px;
     cursor: pointer;
     position: relative;
 }
@@ -323,31 +323,24 @@ footer {
 /* span-level source annotations (data from JSON) */
 .data-span {
     position: relative;
-    outline: 1px solid #58a6ff55;
-    outline-offset: 0px;
+    outline: 1px solid #58a6ff30;
+    outline-offset: 1px;
     border-radius: 2px;
-    padding: 0 1px;
-    margin: 3px 0;
-    line-height: 1;
 }
 .data-span .span-label {
     position: absolute;
-    top: -5px;
-    left: 2px;
-    font-size: 8px;
+    bottom: calc(100% + 1px);
+    left: 0;
+    font-size: 7px;
     line-height: 1;
     padding: 0 2px;
-    color: #58a6ff;
-    background: var(--bg);
-    border-radius: 2px;
+    color: #58a6ff60;
     pointer-events: none;
     white-space: nowrap;
-    opacity: 1;
-    transition: opacity 0.15s;
     z-index: 1;
 }
-.data-span:hover { outline-color: #58a6ffaa; background: #58a6ff0c; }
-.data-span:hover .span-label { opacity: 1; }
+.data-span:hover { outline-color: #58a6ff66; }
+.data-span:hover .span-label { color: #58a6ff; }
 
 /* patch modal */
 .modal-overlay {

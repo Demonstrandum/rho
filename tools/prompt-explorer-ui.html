@@ -14,7 +14,7 @@
     --bg-selected: #1f6feb22;
     --border: #30363d;
     --text: #c9d1d9;
-    --text-dim: #484f58;
+    --text-dim: #6e7681;
     --text-muted: #8b949e;
     --red: #f85149;
     --red-dim: #f8514933;
@@ -28,7 +28,7 @@
 body {
     font-family: var(--mono);
     font-size: 13px;
-    line-height: 1.5;
+    line-height: 1.6;
     background: var(--bg);
     color: var(--text);
     display: flex;
@@ -170,7 +170,7 @@ footer {
 .line {
     display: flex;
     align-items: stretch;
-    min-height: 22px;
+    min-height: 24px;
     cursor: pointer;
     position: relative;
 }
@@ -713,7 +713,7 @@ function buildLine(line, i) {
     if (fileInRaw && displayText.includes('{{')) {
         const parts = displayText.split(/(\{\{.*?\}\})/g);
         for (const part of parts) {
-            if (part.match(/^\{\{[^}]+\}\}$/)) {
+            if (part.startsWith('{{') && part.endsWith('}}')) {
                 const s = document.createElement('span');
                 s.className = 'directive';
                 s.textContent = part;

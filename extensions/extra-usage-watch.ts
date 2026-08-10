@@ -22,8 +22,11 @@ export default function (pi: ExtensionAPI) {
 
         const overageUtil = parseFloat(event.headers[OVERAGE_UTIL] ?? '');
 
-        // 429 spend-limit: definite overage routing (plan exhausted or fingerprinted)
-        if (event.status === 429 && !warnedThisSession) {
+        const onPlan = PLAN_CLAIMS.has(claim);
+
+        // 429 while NOT on a plan claim: spend-limit hit on the overage pool
+        // (skip genuine rate limits, which still show a plan claim)
+        if (event.status === 429 && !onPlan && !warnedThisSession) {
             ctx.ui.notify(
                 "anthropic routed this request to extra-usage billing (spend cap hit). the prompt-defingerprint extension may need updated rules.",
                 'warning',
@@ -34,7 +37,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         // representative claim is not a plan window: overage-billed 200
-        if (!PLAN_CLAIMS.has(claim) && !warnedThisSession) {
+        if (!onPlan && !warnedThisSession) {
             ctx.ui.notify(
                 `anthropic billed this request to "${claim}" (not the plan). extra-usage metering is active.`,
                 'warning',
@@ -55,9 +58,10 @@ export default function (pi: ExtensionAPI) {
         }
         if (!isNaN(overageUtil)) lastOverageUtil = overageUtil;
 
-        // clear status if back on plan claims
-        if (PLAN_CLAIMS.has(claim) && warnedThisSession && event.status === 200) {
+        // clear status and allow re-warn if back on plan claims
+        if (onPlan && warnedThisSession && event.status === 200) {
             ctx.ui.setStatus('extra-usage', undefined);
+            warnedThisSession = false;
         }
     });
 }

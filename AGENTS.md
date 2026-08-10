@@ -6,14 +6,15 @@ machine and everything below is active when i run pi. no symlinking, no manual s
 ## what's here
 
 - `extensions/` typescript extensions (tools, commands, ui, hooks), auto-discovered
-  - `personal-rules.ts` reads `system/personal-rules.md` and injects it into the system prompt on every session
+  - `system-prompt.ts` assembles the system prompt from `system/prompt.md` (the master template) using `lib/prompt-loader.ts`. resolves `{{include:...}}` directives, fills `{{WORDS}}`/`{{PATTERNS}}` variables from wordswap exports, caches the result, appends once in `before_agent_start`
+  - `lib/prompt-loader.ts` `PromptLoader` class: reads a template, resolves includes, fills variables, caches. used by `system-prompt.ts`
   - `spinner.ts` sets the working indicator and shimmering message, driven by `assets/spinners.json`, `assets/maxims.txt`, and `assets/verbs.txt`; shimmer/glyphs/completion line adapted from pi-claude-shimmer (MIT)
-  - `wordswap.ts` + `assets/wordswap.json` rewrite overused tic phrases in finalized assistant messages: the json has `words` (literal phrase -> replacement, matched case-insensitively on word boundaries with the matched text's case carried onto the replacement) and `patterns` (regex with capture groups -> replacement template, e.g. `(\w+)-adjacent` -> `$1-ish-but-not`, for coined compounds); on `message_end` it swaps matches in `text` content blocks (this mutates the stored message, so swaps also land in the transcript and in the model's later context, unlike claude code's display-only `MessageDisplay` hook), and on `before_agent_start` it fills the `system/vocabulary.md` template with the swap list and appends it to the system prompt. inspired by jola's claude code `MessageDisplay` hook (https://jola.dev/posts/how-to-stop-claude-from-saying-load-bearing)
+  - `wordswap.ts` + `assets/wordswap.json` rewrite overused tic phrases in finalized assistant messages: the json has `words` (literal phrase -> replacement, matched case-insensitively on word boundaries with the matched text's case carried onto the replacement) and `patterns` (regex with capture groups -> replacement template, e.g. `(\w+)-adjacent` -> `$1-ish-but-not`, for coined compounds); on `message_end` it swaps matches in `text` content blocks (this mutates the stored message, so swaps also land in the transcript and in the model's later context, unlike claude code's display-only `MessageDisplay` hook). also exports swap data and formatters consumed by `system-prompt.ts` for the vocabulary section. inspired by jola's claude code `MessageDisplay` hook (https://jola.dev/posts/how-to-stop-claude-from-saying-load-bearing)
   - `startup.ts` replaces pi's built-in startup block: it persists `quietStartup=true` (idempotent global settings write) to suppress the built-in banner + bracketed `[Prompts]`-style resource listing, then draws a compact bold-inline header via `setHeader` (logo line + one line each for `prompts`/`skills`/`commands`/`themes`). resource data comes from `pi.getCommands()` (split by `source`) and `ctx.ui.getAllThemes()`; there is no API to enumerate loaded extension files, so extension-provided slash commands show under `commands` instead of an `Extensions` section
   - `silence-extra-usage-warning.ts` persists `warnings.anthropicExtraUsage=false` once, idempotently, so pi's unconditional "subscription auth ... billed per token" startup notice is suppressed; replaced by the evidence-based `extra-usage-watch.ts`
   - `extra-usage-watch.ts` monitors anthropic's unified rate-limit response headers (`representative-claim`, `overage-utilization`) on `after_provider_response` and warns once per session when requests are routed to extra-usage billing (fingerprinted as third-party or plan window exhausted); replaces the blunt startup warning suppressed by `silence-extra-usage-warning.ts`
   - `lib/settings-store.ts` shared helper (`ensureGlobalSetting`) for the idempotent nested global-settings writes used above; in a subdirectory so extension auto-discovery (top-level `*.ts` only) does not load it as an extension
-  - `writer-rules.ts` reads `system/writer-rules.md` and injects the ASD-STE100 derived prose standard into the system prompt. rule numbers are shared with the auditor skill
+  - (deleted) `personal-rules.ts`, `writer-rules.ts` replaced by `system-prompt.ts`
   - `auditor.ts` registers `/audit [audience]`, which invokes the `auditor` skill to review the last assistant prose output against the writer rules. modelled on ponytail's command-to-skill pattern (sends `/skill:auditor` via `sendUserMessage`)
   - `assets/` data files consumed by the extensions (`spinners.json`, `maxims.txt`, `verbs.txt`, `wordswap.json`); a subfolder so extension auto-discovery (top-level `*.ts` only) never treats them as extensions
   - `footer.ts` replaces the built-in footer to customise the token arrow glyphs; also flips `clearOnShrink` on live for the current session
@@ -27,10 +28,11 @@ machine and everything below is active when i run pi. no symlinking, no manual s
 - `skills/` on-demand skills (`SKILL.md` folders + top-level `.md`)
 - `prompts/` prompt templates, expanded with `/name`
 - `themes/` color themes (`.json`)
-- `system/` prompt fragments injected into the system prompt by extensions (see `system/README.md` for injection order and templating)
+- `system/` the system prompt, assembled from fragments (see `system/README.md`)
+  - `prompt.md` master template; shows the full shape with `{{include:...}}` directives
   - `personal-rules.md` conventions, design, editing, tooling, writing
   - `writer-rules.md` ASD-STE100 derived prose standard (13 rule categories)
-  - `vocabulary.md` template for the word/pattern swap list (filled from `extensions/assets/wordswap.json`)
+  - `vocabulary.md` sub-template for the word/pattern swap list (`{{WORDS}}`, `{{PATTERNS}}`)
 - `extensions/assets/spinners.json` spinner definitions keyed by name (each has `category`, `interval`, `frames`); the enabled categories live in `spinner.ts` (`chinese` by default)
 - `extensions/assets/maxims.txt` working messages, one per line, `;` comments, picked at random each turn
 - `extensions/assets/verbs.txt` completion verbs, one per line, `;` comments, picked at random for the settle line (`完 <verb> for <duration>`)

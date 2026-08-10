@@ -78,23 +78,31 @@ export function wrapEntries(
     jsonText: string,
     section: string,
 ): [SourceStr, SourceStr][] {
-    const lines = jsonText.split('\n');
+    const jsonLines = jsonText.split('\n');
+    // map from raw JSON key (with escapes) to position.
+    // also store the unescaped key for lookup from flattened entries.
     const positions: Record<string, { kl: number; kc: number; vl: number; vc: number }> = {};
 
-    for (let i = 0; i < lines.length; i++) {
-        const ln = lines[i];
-        const m = ln.match(/^(\s*)"([^"]+)"\s*:\s*"/);
+    for (let i = 0; i < jsonLines.length; i++) {
+        const ln = jsonLines[i];
+        // match "key": at the start of a line (after indent)
+        const m = ln.match(/^\s*"((?:[^"\\]|\\.)*)"\s*:/);
         if (!m) continue;
-        const key = m[1].length; // indent length
-        const keyStr = m[2];
-        const kc = ln.indexOf(`"${keyStr}"`) + 2; // 1-indexed, inside quote
+        const rawKey = m[1];
+        // unescape JSON string escapes (\\->\ etc.) for the lookup key
+        const unescaped = rawKey.replace(/\\(.)/g, '$1');
+        const kc = ln.indexOf(`"${rawKey}"`) + 2;
         const colonIdx = ln.indexOf(':', kc);
-        const vc = ln.indexOf('"', colonIdx + 1) + 2; // 1-indexed, inside quote
-        positions[keyStr] = { kl: i + 1, kc, vl: i + 1, vc };
+        const vc = ln.indexOf('"', colonIdx + 1);
+        const vcFinal = vc >= 0 ? vc + 2 : 0;
+        const pos = { kl: i + 1, kc, vl: i + 1, vc: vcFinal };
+        positions[unescaped] = pos;
+        if (rawKey !== unescaped) positions[rawKey] = pos;
     }
 
     return entries.map(([k, v]) => {
-        const pos = positions[k];
+        // try exact key, then try stripping " (all forms)" suffix for flattened entries
+        const pos = positions[k] ?? positions[k.replace(/ \(all forms\)$/, '')];
         return [
             new SourceStr(k, {
                 file, line: pos?.kl ?? 0, col: pos?.kc ?? 0,

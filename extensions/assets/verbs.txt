@@ -19,8 +19,8 @@ Clanked
 Threw up
 Bluepilled
 Astralprojected
-Drew 20 gigawatts of coal power
-Evaporated 80 cubic kilometers of water <in>
+Drew {{randint(15, 28)}} gigawatts of coal power
+Evaporated {{randint(76, 93)}} cubic kilometers of water <in>
 [₿] Mined Bitcoin
 Bikeshedded
 [▦ ] Solved a Rubik's cube <in only>

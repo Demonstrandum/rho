@@ -461,7 +461,11 @@ let expandedLines = [];  // original from server, never mutated
 let lines = [];          // current display lines (rebuilt on mode switch)
 let rawFileLines = {};   // { 'file.md': SourceLine[] }, cached
 let rawMode = {};        // { 'file.md': true }
-let collapsed = new Set(); // 'file:name' or 'heading:INDEX'
+let collapsed = new Set(JSON.parse(localStorage.getItem('prompt-explorer:collapsed') || '[]'));
+
+function persistCollapsed() {
+    localStorage.setItem('prompt-explorer:collapsed', JSON.stringify([...collapsed]));
+}
 let modifications = {};
 let undoStack = [];
 let selectedIndex = -1;
@@ -508,12 +512,14 @@ function computeVisibility() {
 function toggleFileCollapse(file) {
     const key = 'file:' + file;
     if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+    persistCollapsed();
     renderLines();
 }
 
 function toggleHeadingCollapse(idx) {
     const key = 'heading:' + idx;
     if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+    persistCollapsed();
     renderLines();
 }
 

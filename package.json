@@ -25,6 +25,7 @@
     "test": "bun test tests/",
     "typecheck": "tsc --noEmit",
     "prompt": "bun tools/prompt-explorer.ts",
+    "prompt:cli": "bun tools/prompt-explorer.ts --cli",
     "prompt:preview": "bun tools/prompt-explorer.ts --preview",
     "link": "pi install -l $(pwd)",
     "link:global": "pi install $(pwd)"

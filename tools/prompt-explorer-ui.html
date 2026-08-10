@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>prompt explorer</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+    --bg: #0d1117;
+    --bg-surface: #161b22;
+    --bg-hover: #1c2129;
+    --bg-selected: #1f6feb22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-dim: #484f58;
+    --text-muted: #8b949e;
+    --red: #f85149;
+    --red-dim: #f8514933;
+    --yellow: #d29922;
+    --yellow-dim: #d2992233;
+    --green: #3fb950;
+    --blue: #58a6ff;
+    --mono: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+}
+
+body {
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.5;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+header h1 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
+
+#search {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 4px 8px;
+    width: 200px;
+    outline: none;
+}
+#search:focus { border-color: var(--blue); }
+#search::placeholder { color: var(--text-dim); }
+
+button {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+button:hover { background: var(--bg-hover); color: var(--text); }
+button:active { background: var(--border); }
+button.danger { color: var(--red); }
+button.primary { color: var(--blue); }
+
+#status {
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+
+.layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+}
+
+aside {
+    width: 0;
+    overflow: hidden;
+    transition: width 0.2s ease;
+    border-left: 1px solid var(--border);
+    background: var(--bg-surface);
+    display: flex;
+    flex-direction: column;
+}
+aside.open { width: 45%; min-width: 400px; }
+
+.diff-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+#diff-content {
+    flex: 1;
+    overflow: auto;
+    padding: 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre;
+    tab-size: 4;
+}
+.diff-add { color: var(--green); }
+.diff-del { color: var(--red); }
+.diff-hunk { color: var(--blue); }
+.diff-file { color: var(--yellow); font-weight: 600; }
+
+footer {
+    display: flex;
+    align-items: center;
+    padding: 6px 16px;
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    gap: 16px;
+}
+
+.file-header {
+    padding: 6px 16px;
+    font-weight: 600;
+    font-size: 12px;
+    background: var(--bg-surface);
+    border-top: 2px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    user-select: none;
+}
+
+.line {
+    display: flex;
+    align-items: stretch;
+    min-height: 22px;
+    cursor: pointer;
+    position: relative;
+}
+.line:hover { background: var(--bg-hover); }
+.line.selected { background: var(--bg-selected); }
+
+.line.deleted {
+    background: var(--red-dim);
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+.line.modified { background: var(--yellow-dim); }
+
+.gutter {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: 52px;
+    min-width: 52px;
+    padding: 0 8px 0 4px;
+    color: var(--text-dim);
+    font-size: 12px;
+    user-select: none;
+    border-right: 1px solid var(--border);
+}
+
+.marker {
+    width: 16px;
+    min-width: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: var(--text-dim);
+    user-select: none;
+}
+.line.deleted .marker { color: var(--red); }
+.line.modified .marker { color: var(--yellow); }
+
+.content {
+    flex: 1;
+    padding: 0 8px;
+    white-space: pre;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    min-height: 22px;
+}
+
+.content[contenteditable="true"] {
+    outline: 1px solid var(--blue);
+    outline-offset: -1px;
+    background: var(--bg);
+    cursor: text;
+    white-space: pre-wrap;
+}
+
+.line .delete-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0;
+    background: none;
+    border: none;
+    color: var(--red);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+.line:hover .delete-btn { opacity: 0.6; }
+.line .delete-btn:hover { opacity: 1; }
+
+.search-match {
+    background: var(--yellow-dim);
+    border-radius: 2px;
+}
+
+.toast {
+    position: fixed;
+    bottom: 48px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 12px;
+    color: var(--text);
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+}
+.toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+    <h1>prompt explorer</h1>
+    <div class="actions">
+        <input type="search" id="search" placeholder="/ search...">
+        <button onclick="undo()" title="ctrl+z">undo</button>
+        <button class="primary" onclick="showDiff()" title="d">diff</button>
+        <button class="primary" onclick="savePatch()">patch</button>
+        <button class="danger" onclick="applyChanges()">apply</button>
+    </div>
+</header>
+<div class="layout">
+    <main id="lines-container"></main>
+    <aside id="diff-panel">
+        <div class="diff-header">
+            <span>diff</span>
+            <button onclick="closeDiff()">close</button>
+        </div>
+        <div id="diff-content"></div>
+    </aside>
+</div>
+<footer>
+    <span id="status">loading...</span>
+</footer>
+<div class="toast" id="toast"></div>
+
+<script>
+const FILE_COLORS = ['#58a6ff', '#d29922', '#bc8cff', '#3fb950', '#f47067', '#79c0ff'];
+let colorMap = {};
+let colorIdx = 0;
+
+function fileColor(path) {
+    if (!(path in colorMap)) {
+        colorMap[path] = FILE_COLORS[colorIdx % FILE_COLORS.length];
+        colorIdx++;
+    }
+    return colorMap[path];
+}
+
+let lines = [];
+let modifications = {};
+let undoStack = [];
+let selectedIndex = -1;
+let editingIndex = -1;
+
+function changeCount() {
+    let deleted = 0, modified = 0;
+    for (const [, mod] of Object.entries(modifications)) {
+        if (mod.deleted) deleted++;
+        else if (mod.edited !== undefined) modified++;
+    }
+    return { deleted, modified };
+}
+
+function updateStatus() {
+    const { deleted, modified } = changeCount();
+    const total = lines.filter(l => l.source.kind !== 'header').length;
+    let s = `${total} lines`;
+    if (deleted > 0) s += `  \u00b7  ${deleted} deleted`;
+    if (modified > 0) s += `  \u00b7  ${modified} modified`;
+    document.getElementById('status').textContent = s;
+}
+
+function toast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+function gutterText(source) {
+    if (source.kind === 'file') return String(source.line).padStart(4, '\u2007');
+    if (source.kind === 'swap') return '   ~';
+    return '';
+}
+
+function markerText(idx) {
+    const mod = modifications[idx];
+    if (!mod) return ' ';
+    if (mod.deleted) return '\u00d7';
+    if (mod.edited !== undefined) return '\u2022';
+    return ' ';
+}
+
+function renderLines() {
+    const container = document.getElementById('lines-container');
+    container.innerHTML = '';
+
+    lines.forEach((line, i) => {
+        if (line.source.kind === 'header') {
+            const el = document.createElement('div');
+            el.className = 'file-header';
+            el.style.color = fileColor(line.source.label);
+            el.style.borderTopColor = fileColor(line.source.label) + '66';
+            el.textContent = '\u2500\u2500 ' + line.source.label + ' ' + '\u2500'.repeat(60);
+            container.appendChild(el);
+            return;
+        }
+
+        const mod = modifications[i];
+        const el = document.createElement('div');
+        el.className = 'line';
+        if (mod?.deleted) el.classList.add('deleted');
+        else if (mod?.edited !== undefined) el.classList.add('modified');
+        if (i === selectedIndex) el.classList.add('selected');
+        el.dataset.index = i;
+
+        const gutter = document.createElement('span');
+        gutter.className = 'gutter';
+        gutter.textContent = gutterText(line.source);
+
+        const marker = document.createElement('span');
+        marker.className = 'marker';
+        marker.textContent = markerText(i);
+
+        const content = document.createElement('span');
+        content.className = 'content';
+        const displayText = mod?.edited !== undefined ? mod.edited : line.text;
+        content.textContent = displayText || ' ';
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'delete-btn';
+        deleteBtn.textContent = '\u00d7';
+        deleteBtn.onclick = (e) => { e.stopPropagation(); toggleDelete(i); };
+
+        el.onclick = () => selectLine(i);
+        el.ondblclick = () => startEdit(i);
+
+        el.appendChild(gutter);
+        el.appendChild(marker);
+        el.appendChild(content);
+        if (line.source.kind !== 'generated') {
+            el.appendChild(deleteBtn);
+        }
+        container.appendChild(el);
+    });
+
+    updateStatus();
+}
+
+function selectLine(idx) {
+    if (editingIndex >= 0) finishEdit(editingIndex);
+    selectedIndex = idx;
+    document.querySelectorAll('.line.selected').forEach(el => el.classList.remove('selected'));
+    const el = document.querySelector(`.line[data-index="${idx}"]`);
+    if (el) el.classList.add('selected');
+}
+
+function toggleDelete(idx) {
+    const line = lines[idx];
+    if (line.source.kind === 'generated') return;
+
+    const prev = modifications[idx];
+    undoStack.push({ index: idx, prev: prev ? { ...prev } : undefined });
+
+    if (prev?.deleted) {
+        if (prev.edited !== undefined) {
+            modifications[idx] = { edited: prev.edited };
+        } else {
+            delete modifications[idx];
+        }
+    } else {
+        modifications[idx] = { ...(prev || {}), deleted: true };
+    }
+    renderLines();
+}
+
+function startEdit(idx) {
+    const line = lines[idx];
+    if (line.source.kind === 'generated') return;
+    const mod = modifications[idx];
+    if (mod?.deleted) return;
+
+    editingIndex = idx;
+    selectedIndex = idx;
+
+    const el = document.querySelector(`.line[data-index="${idx}"] .content`);
+    if (!el) return;
+
+    const currentText = mod?.edited !== undefined ? mod.edited : line.text;
+    el.textContent = currentText;
+    el.contentEditable = 'true';
+    el.focus();
+
+    // move cursor to end
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    el.onkeydown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            finishEdit(idx);
+        } else if (e.key === 'Escape') {
+            cancelEdit(idx);
+        }
+    };
+    el.onblur = () => {
+        // small delay so click on other elements works
+        setTimeout(() => { if (editingIndex === idx) finishEdit(idx); }, 100);
+    };
+}
+
+function finishEdit(idx) {
+    const el = document.querySelector(`.line[data-index="${idx}"] .content`);
+    if (!el) { editingIndex = -1; return; }
+
+    el.contentEditable = 'false';
+    el.onkeydown = null;
+    el.onblur = null;
+
+    const newText = el.textContent || '';
+    const original = lines[idx].text;
+    const prev = modifications[idx];
+    undoStack.push({ index: idx, prev: prev ? { ...prev } : undefined });
+
+    if (newText === original) {
+        if (prev) {
+            delete modifications[idx].edited;
+            if (Object.keys(modifications[idx]).length === 0) delete modifications[idx];
+        }
+    } else {
+        modifications[idx] = { ...(prev || {}), edited: newText };
+    }
+
+    editingIndex = -1;
+    renderLines();
+}
+
+function cancelEdit(idx) {
+    const el = document.querySelector(`.line[data-index="${idx}"] .content`);
+    if (el) {
+        el.contentEditable = 'false';
+        el.onkeydown = null;
+        el.onblur = null;
+    }
+    editingIndex = -1;
+    renderLines();
+}
+
+function undo() {
+    const op = undoStack.pop();
+    if (!op) { toast('nothing to undo'); return; }
+    if (op.prev === undefined) {
+        delete modifications[op.index];
+    } else {
+        modifications[op.index] = op.prev;
+    }
+    selectedIndex = op.index;
+    renderLines();
+    const el = document.querySelector(`.line[data-index="${op.index}"]`);
+    if (el) el.scrollIntoView({ block: 'center' });
+}
+
+async function showDiff() {
+    const panel = document.getElementById('diff-panel');
+    const content = document.getElementById('diff-content');
+
+    if (Object.keys(modifications).length === 0) {
+        toast('no changes');
+        return;
+    }
+
+    content.innerHTML = '<span style="color:var(--text-dim)">generating...</span>';
+    panel.classList.add('open');
+
+    const res = await fetch('/api/diff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modifications }),
+    });
+    const data = await res.json();
+
+    if (!data.diff) {
+        content.innerHTML = '<span style="color:var(--text-dim)">no effective changes</span>';
+        return;
+    }
+
+    content.innerHTML = '';
+    for (const line of data.diff.split('\n')) {
+        const span = document.createElement('span');
+        if (line.startsWith('+++') || line.startsWith('---')) {
+            span.className = 'diff-file';
+        } else if (line.startsWith('@@')) {
+            span.className = 'diff-hunk';
+        } else if (line.startsWith('+')) {
+            span.className = 'diff-add';
+        } else if (line.startsWith('-')) {
+            span.className = 'diff-del';
+        }
+        span.textContent = line + '\n';
+        content.appendChild(span);
+    }
+}
+
+function closeDiff() {
+    document.getElementById('diff-panel').classList.remove('open');
+}
+
+async function savePatch() {
+    if (Object.keys(modifications).length === 0) {
+        toast('no changes');
+        return;
+    }
+    const res = await fetch('/api/patch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modifications }),
+    });
+    const data = await res.json();
+    if (data.path) {
+        toast(`patch written: ${data.path} (${data.fileCount} file(s))`);
+    } else {
+        toast('no effective changes');
+    }
+}
+
+async function applyChanges() {
+    if (Object.keys(modifications).length === 0) {
+        toast('no changes');
+        return;
+    }
+    if (!confirm(`apply changes directly to source files?`)) return;
+
+    const res = await fetch('/api/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modifications }),
+    });
+    const data = await res.json();
+    if (data.applied) {
+        toast(`applied to ${data.fileCount} file(s)`);
+        modifications = {};
+        undoStack = [];
+        // reload lines from server
+        const r = await fetch('/api/lines');
+        lines = await r.json();
+        renderLines();
+    }
+}
+
+function doSearch() {
+    const query = document.getElementById('search').value.toLowerCase();
+    document.querySelectorAll('.search-match').forEach(el => {
+        el.outerHTML = el.textContent;
+    });
+    if (!query) return;
+
+    document.querySelectorAll('.line .content').forEach(el => {
+        if (el.contentEditable === 'true') return;
+        const text = el.textContent;
+        const lower = text.toLowerCase();
+        const idx = lower.indexOf(query);
+        if (idx < 0) return;
+
+        const before = text.slice(0, idx);
+        const match = text.slice(idx, idx + query.length);
+        const after = text.slice(idx + query.length);
+        el.innerHTML = '';
+        el.appendChild(document.createTextNode(before));
+        const mark = document.createElement('mark');
+        mark.className = 'search-match';
+        mark.textContent = match;
+        el.appendChild(mark);
+        el.appendChild(document.createTextNode(after));
+    });
+
+    // scroll to first match
+    const first = document.querySelector('.search-match');
+    if (first) first.scrollIntoView({ block: 'center' });
+}
+
+// keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    // skip if editing or in search
+    if (editingIndex >= 0) return;
+    if (document.activeElement === document.getElementById('search')) {
+        if (e.key === 'Enter') { doSearch(); e.preventDefault(); }
+        if (e.key === 'Escape') { document.getElementById('search').blur(); }
+        return;
+    }
+
+    if (e.key === 'd' && selectedIndex >= 0) { toggleDelete(selectedIndex); e.preventDefault(); }
+    else if (e.key === 'e' && selectedIndex >= 0) { startEdit(selectedIndex); e.preventDefault(); }
+    else if (e.key === '/' || (e.ctrlKey && e.key === 'f')) {
+        document.getElementById('search').focus();
+        e.preventDefault();
+    }
+    else if (e.ctrlKey && e.key === 'z') { undo(); e.preventDefault(); }
+    else if (e.key === 'Escape') { closeDiff(); }
+    else if (e.key === 'j' || e.key === 'ArrowDown') { navigateLine(1); e.preventDefault(); }
+    else if (e.key === 'k' || e.key === 'ArrowUp') { navigateLine(-1); e.preventDefault(); }
+});
+
+function navigateLine(dir) {
+    let i = selectedIndex + dir;
+    while (i >= 0 && i < lines.length) {
+        if (lines[i].source.kind !== 'header') {
+            selectLine(i);
+            const el = document.querySelector(`.line[data-index="${i}"]`);
+            if (el) el.scrollIntoView({ block: 'nearest' });
+            return;
+        }
+        i += dir;
+    }
+}
+
+// init
+(async () => {
+    const res = await fetch('/api/lines');
+    lines = await res.json();
+    renderLines();
+})();
+</script>
+</body>
+</html>

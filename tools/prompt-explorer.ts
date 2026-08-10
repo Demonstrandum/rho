@@ -1,12 +1,13 @@
 #!/usr/bin/env bun
 // prompt-explorer: preview, edit, and patch the assembled system prompt.
 //
-// interactive mode (default):  bun tools/prompt-explorer.ts
-// preview mode (no tui):       bun tools/prompt-explorer.ts --preview
+// web ui (default):   bun tools/prompt-explorer.ts
+// terminal tui:       bun tools/prompt-explorer.ts --cli
+// print to stdout:    bun tools/prompt-explorer.ts --preview
 //
 // the view expands the master template with source annotations. every line
 // traces back to its origin file and line number. edits and deletions
-// generate per-file patches on quit.
+// generate per-file patches.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -715,14 +716,95 @@ class Explorer {
     }
 }
 
+// ── web server ─────────────────────────────────────────────
+
+function applyClientChanges(
+    lines: SourceLine[],
+    modifications: Record<string, { deleted?: boolean; edited?: string | null }>,
+): SourceLine[] {
+    return lines.map((l, i) => {
+        const mod = modifications[String(i)];
+        if (!mod) return l;
+        return { ...l, deleted: mod.deleted ?? false, edited: mod.edited ?? null };
+    });
+}
+
+async function runWeb(): Promise<void> {
+    const lines = resolveWithSources();
+    const htmlPath = join(import.meta.dir, 'prompt-explorer-ui.html');
+    const html = readFileSync(htmlPath, 'utf8');
+    const port = 3219;
+
+    Bun.serve({
+        port,
+        async fetch(req) {
+            const url = new URL(req.url);
+
+            if (url.pathname === '/') {
+                return new Response(html, {
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                });
+            }
+
+            if (url.pathname === '/api/lines') {
+                return Response.json(
+                    lines.map((l, i) => ({ index: i, text: l.text, source: l.source })),
+                );
+            }
+
+            if (url.pathname === '/api/diff' && req.method === 'POST') {
+                const body = (await req.json()) as { modifications: Record<string, { deleted?: boolean; edited?: string | null }> };
+                const modified = applyClientChanges(lines, body.modifications);
+                const changes = collectFileChanges(modified);
+                const diff = changes.length > 0 ? generateDiffs(changes) : '';
+                return Response.json({ diff, fileCount: changes.length });
+            }
+
+            if (url.pathname === '/api/patch' && req.method === 'POST') {
+                const body = (await req.json()) as { modifications: Record<string, { deleted?: boolean; edited?: string | null }> };
+                const modified = applyClientChanges(lines, body.modifications);
+                const changes = collectFileChanges(modified);
+                if (changes.length > 0) {
+                    const diff = generateDiffs(changes);
+                    const patchFile = join(ROOT, 'prompt-explorer.patch');
+                    writeFileSync(patchFile, diff);
+                    return Response.json({ path: 'prompt-explorer.patch', fileCount: changes.length });
+                }
+                return Response.json({ path: null, fileCount: 0 });
+            }
+
+            if (url.pathname === '/api/apply' && req.method === 'POST') {
+                const body = (await req.json()) as { modifications: Record<string, { deleted?: boolean; edited?: string | null }> };
+                const modified = applyClientChanges(lines, body.modifications);
+                const changes = collectFileChanges(modified);
+                for (const c of changes) {
+                    writeFileSync(join(ROOT, c.originalPath), c.modifiedContent);
+                }
+                return Response.json({ applied: true, fileCount: changes.length });
+            }
+
+            return new Response('not found', { status: 404 });
+        },
+    });
+
+    console.log(`prompt explorer: http://localhost:${port}`);
+    try {
+        execSync(`open http://localhost:${port}`, { stdio: 'ignore' });
+    } catch {
+        try { execSync(`xdg-open http://localhost:${port}`, { stdio: 'ignore' }); } catch { /* manual */ }
+    }
+}
+
 // ── main ───────────────────────────────────────────────────
 
-const lines = resolveWithSources();
-
 if (process.argv.includes('--preview')) {
-    preview(lines);
+    preview(resolveWithSources());
     process.exit(0);
 }
 
-const explorer = new Explorer(lines);
-await explorer.run();
+if (process.argv.includes('--cli')) {
+    const explorer = new Explorer(resolveWithSources());
+    await explorer.run();
+} else {
+    await runWeb();
+}

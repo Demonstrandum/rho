@@ -339,8 +339,40 @@ footer {
     white-space: nowrap;
     z-index: 1;
 }
+.data-span { cursor: pointer; }
 .data-span:hover { outline-color: #58a6ff66; }
 .data-span:hover .span-label { color: #58a6ff; }
+
+/* source viewer in aside panel */
+.source-line {
+    display: flex;
+    min-height: 20px;
+    font-size: 12px;
+    line-height: 1.6;
+}
+.source-line .src-gutter {
+    width: 40px;
+    min-width: 40px;
+    text-align: right;
+    padding-right: 8px;
+    color: var(--text-dim);
+    user-select: none;
+}
+.source-line .src-content {
+    flex: 1;
+    white-space: pre;
+    padding-right: 8px;
+}
+.source-line.highlighted {
+    background: var(--bg-selected);
+}
+.source-line.highlighted .src-gutter {
+    color: var(--blue);
+}
+.source-highlight-col {
+    background: #58a6ff33;
+    border-radius: 2px;
+}
 
 /* patch modal */
 .modal-overlay {
@@ -735,6 +767,8 @@ function buildLine(line, i) {
                 label.textContent = `${fname}:${span.source.line}:${span.source.col}`;
                 wrap.appendChild(label);
                 wrap.title = span.source.path || `${span.source.file}:${span.source.line}:${span.source.col}`;
+                const srcRef = span.source;
+                wrap.onclick = (e) => { e.stopPropagation(); showSourceFile(srcRef); };
                 content.appendChild(wrap);
             } else {
                 content.appendChild(document.createTextNode(span.text));
@@ -957,6 +991,72 @@ async function showDiff() {
 
 function closeDiff() {
     document.getElementById('diff-panel').classList.remove('open');
+}
+
+const sourceCache = {};
+async function showSourceFile(ref) {
+    const panel = document.getElementById('diff-panel');
+    const header = panel.querySelector('.diff-header span');
+    const body = document.getElementById('diff-content');
+
+    const fname = ref.file.split('/').pop();
+    header.textContent = `${fname}:${ref.line}:${ref.col}`;
+    if (ref.path) header.textContent += ` (${ref.path})`;
+    panel.classList.add('open');
+
+    if (!sourceCache[ref.file]) {
+        body.innerHTML = '<span style="color:var(--text-dim)">loading...</span>';
+        const res = await fetch('/api/raw/' + encodeURIComponent(ref.file.split('/').pop()));
+        const data = await res.json();
+        if (data.error) {
+            body.innerHTML = '<span style="color:var(--red)">file not found</span>';
+            return;
+        }
+        sourceCache[ref.file] = data.content;
+    }
+
+    const content = sourceCache[ref.file];
+    const lines = content.split('\n');
+    body.innerHTML = '';
+
+    for (let i = 0; i < lines.length; i++) {
+        const lineNum = i + 1;
+        const div = document.createElement('div');
+        div.className = 'source-line' + (lineNum === ref.line ? ' highlighted' : '');
+
+        const gutter = document.createElement('span');
+        gutter.className = 'src-gutter';
+        gutter.textContent = String(lineNum);
+
+        const src = document.createElement('span');
+        src.className = 'src-content';
+
+        if (lineNum === ref.line && ref.col > 0) {
+            // highlight the column region
+            const text = lines[i];
+            const col0 = ref.col - 1; // 0-indexed
+            // find the extent: look for the closing quote
+            let end = text.indexOf('"', col0);
+            if (end < 0) end = text.length;
+
+            src.appendChild(document.createTextNode(text.slice(0, col0)));
+            const hl = document.createElement('span');
+            hl.className = 'source-highlight-col';
+            hl.textContent = text.slice(col0, end);
+            src.appendChild(hl);
+            src.appendChild(document.createTextNode(text.slice(end)));
+        } else {
+            src.textContent = lines[i] || ' ';
+        }
+
+        div.appendChild(gutter);
+        div.appendChild(src);
+        body.appendChild(div);
+    }
+
+    // scroll the highlighted line into view
+    const hl = body.querySelector('.highlighted');
+    if (hl) setTimeout(() => hl.scrollIntoView({ block: 'center' }), 50);
 }
 
 async function savePatch() {

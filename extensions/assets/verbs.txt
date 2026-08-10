@@ -19,7 +19,7 @@ Clanked
 Threw up
 Bluepilled
 Astralprojected
-Drew {{randint(15, 28)}} gigawatts of coal power
+Burned {{randint(15, 28)}} gigawatt-hours of coal
 Evaporated {{randint(76, 93)}} cubic kilometers of water <in>
 [₿] Mined Bitcoin
 Bikeshedded

@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripMarkers } from './source-str';
+import { evalTemplates } from './template';
 
 export class PromptLoader {
     private readonly dir: string;
@@ -62,15 +63,7 @@ export class PromptLoader {
                 if (cond.length > 0 && !cond.every(Boolean)) continue;
 
                 // evaluate {{expr}} in this line
-                const processed = line.replace(/\{\{(.+?)\}\}/g, (_, expr: string) => {
-                    try {
-                        const fn = new Function(...keys, `return ${expr}`);
-                        const result = fn(...vals);
-                        return String(result ?? '');
-                    } catch (e) {
-                        return `{{ERROR: ${(e as Error).message}}}`;
-                    }
-                });
+                const processed = evalTemplates(line, variables);
                 out.push(processed);
             }
             text = out.join('\n');

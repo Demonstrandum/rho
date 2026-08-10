@@ -773,6 +773,22 @@ async function runWeb(): Promise<void> {
                 return Response.json({ path: null, fileCount: 0 });
             }
 
+            if (url.pathname.startsWith('/api/raw/')) {
+                const file = decodeURIComponent(url.pathname.slice('/api/raw/'.length));
+                // serve raw files from system/ or extensions/assets/
+                const candidates = [
+                    join(SYSTEM_DIR, file),
+                    join(ROOT, 'extensions', 'assets', file),
+                ];
+                for (const p of candidates) {
+                    try {
+                        const content = readFileSync(p, 'utf8');
+                        return Response.json({ path: relative(ROOT, p), content });
+                    } catch { /* try next */ }
+                }
+                return Response.json({ error: 'not found' }, { status: 404 });
+            }
+
             if (url.pathname === '/api/apply' && req.method === 'POST') {
                 const body = (await req.json()) as { modifications: Record<string, { deleted?: boolean; edited?: string | null }> };
                 const modified = applyClientChanges(lines, body.modifications);

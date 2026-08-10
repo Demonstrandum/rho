@@ -14,6 +14,13 @@ import { join, relative } from 'node:path';
 import { execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
+import {
+    type Span,
+    type SourceMeta,
+    wrapEntries,
+    parseSpans,
+    hasMarkers,
+} from '../extensions/lib/source-str';
 
 // ── paths ──────────────────────────────────────────────────
 
@@ -25,12 +32,12 @@ const SWAPS_PATH = join(ROOT, 'extensions', 'assets', 'wordswap.json');
 
 type LineSource =
     | { kind: 'file'; path: string; line: number }
-    | { kind: 'swap'; section: 'words' | 'patterns'; key: string }
     | { kind: 'header'; label: string }
-    | { kind: 'generated'; label: string };
+    | { kind: 'expr'; path: string; line: number };
 
 interface SourceLine {
     text: string;
+    spans: Span[] | null; // non-null for expression-generated lines
     source: LineSource;
     deleted: boolean;
     edited: string | null;
@@ -82,76 +89,84 @@ function loadSwapFile(): SwapFile {
     return raw as SwapFile;
 }
 
+// expression regex (same as prompt-loader, matches {{...}} but not {{include:...}})
+const EXPR_RE = /\{\{(?!include:)((?:(?!\}\}).)*?)\}\}/gs;
+
 function resolveWithSources(): SourceLine[] {
     const lines: SourceLine[] = [];
     const template = readFileSync(join(SYSTEM_DIR, 'prompt.md'), 'utf8');
     const swapFile = loadSwapFile();
-    const words = swapFile.words ?? {};
-    const patterns = swapFile.patterns ?? {};
+    const jsonText = readFileSync(SWAPS_PATH, 'utf8');
+    const swapsRelPath = relative(ROOT, SWAPS_PATH);
+
+    // wrap entries as SourceStr so markers embed on interpolation
+    const words = wrapEntries(
+        Object.entries(swapFile.words ?? {}), swapsRelPath, jsonText, 'words',
+    );
+    const patterns = wrapEntries(
+        Object.entries(swapFile.patterns ?? {}), swapsRelPath, jsonText, 'patterns',
+    );
 
     for (const tLine of template.split('\n')) {
         const m = tLine.match(/\{\{include:([^}]+)\}\}/);
-        if (!m) continue; // skip blank lines between includes
+        if (!m) continue;
 
         const file = m[1].trim();
         const content = readFileSync(join(SYSTEM_DIR, file), 'utf8').trim();
 
-        // file header
         lines.push({
-            text: '',
+            text: '', spans: null,
             source: { kind: 'header', label: file },
-            deleted: false,
-            edited: null,
+            deleted: false, edited: null,
         });
 
-        for (const [i, fLine] of content.split('\n').entries()) {
-            if (fLine.includes('{{WORDS}}')) {
-                // expand word swaps, each line traced to wordswap.json
-                for (const [key, value] of Object.entries(words)) {
-                    lines.push({
-                        text: `  - "${key}" -> "${value}"`,
-                        source: { kind: 'swap', section: 'words', key },
-                        deleted: false,
-                        edited: null,
-                    });
-                }
-            } else if (fLine.includes('{{PATTERNS}}')) {
-                if (Object.keys(patterns).length > 0) {
-                    lines.push({
-                        text: '',
-                        source: { kind: 'generated', label: 'patterns-spacer' },
-                        deleted: false,
-                        edited: null,
-                    });
-                    lines.push({
-                        text: 'pattern swaps (regex, applied to coined compounds):',
-                        source: { kind: 'generated', label: 'patterns-header' },
-                        deleted: false,
-                        edited: null,
-                    });
-                    lines.push({
-                        text: '',
-                        source: { kind: 'generated', label: 'patterns-spacer' },
-                        deleted: false,
-                        edited: null,
-                    });
-                    for (const [src, repl] of Object.entries(patterns)) {
-                        lines.push({
-                            text: `  - /${src}/ -> "${repl}"`,
-                            source: { kind: 'swap', section: 'patterns', key: src },
-                            deleted: false,
-                            edited: null,
-                        });
+        const fileLines = content.split('\n');
+        let lineIdx = 0;
+        while (lineIdx < fileLines.length) {
+            const fLine = fileLines[lineIdx];
+
+            // check if this line contains a {{expression}}
+            if (EXPR_RE.test(fLine)) {
+                EXPR_RE.lastIndex = 0;
+                // evaluate with SourceStr-wrapped data (markers embed)
+                const exprSource: LineSource = { kind: 'expr', path: file, line: lineIdx + 1 };
+                try {
+                    const fn = new Function('words', 'patterns', `return ${fLine.replace(EXPR_RE, (_, e) => e)}`);
+                    const result = String(fn(words, patterns) ?? '');
+                    if (result === '') { lineIdx++; continue; }
+
+                    for (const outLine of result.split('\n')) {
+                        if (hasMarkers(outLine)) {
+                            const spans = parseSpans(outLine);
+                            const clean = spans.map((s) => s.text).join('');
+                            lines.push({
+                                text: clean, spans,
+                                source: exprSource,
+                                deleted: false, edited: null,
+                            });
+                        } else {
+                            lines.push({
+                                text: outLine, spans: null,
+                                source: exprSource,
+                                deleted: false, edited: null,
+                            });
+                        }
                     }
+                } catch (e) {
+                    lines.push({
+                        text: `{{ERROR: ${(e as Error).message}}}`, spans: null,
+                        source: exprSource,
+                        deleted: false, edited: null,
+                    });
                 }
             } else {
                 lines.push({
-                    text: fLine,
-                    source: { kind: 'file', path: file, line: i + 1 },
-                    deleted: false,
-                    edited: null,
+                    text: fLine, spans: null,
+                    source: { kind: 'file', path: file, line: lineIdx + 1 },
+                    deleted: false, edited: null,
                 });
             }
+            lineIdx++;
         }
     }
 
@@ -164,12 +179,10 @@ function sourceLabel(src: LineSource): string {
     switch (src.kind) {
         case 'file':
             return `${src.path}:${src.line}`;
-        case 'swap':
-            return `wordswap.json:${src.section}.${src.key}`;
+        case 'expr':
+            return `${src.path}:${src.line} (expr)`;
         case 'header':
             return src.label;
-        case 'generated':
-            return `(${src.label})`;
     }
 }
 
@@ -235,32 +248,38 @@ function collectFileChanges(lines: SourceLine[]): FileChange[] {
         }
     }
 
-    // wordswap.json changes
-    const swapChanges = lines.filter(
-        (l) => l.source.kind === 'swap' && (l.deleted || l.edited !== null),
+    // expression-generated lines: edits/deletions to lines with spans
+    // affect wordswap.json (the data source in the span metadata).
+    const exprChanges = lines.filter(
+        (l) => l.source.kind === 'expr' && l.spans && (l.deleted || l.edited !== null),
     );
-    if (swapChanges.length > 0) {
+    if (exprChanges.length > 0) {
         const original = readFileSync(SWAPS_PATH, 'utf8');
         const swapFile = loadSwapFile();
         const newWords = { ...swapFile.words };
         const newPatterns = { ...(swapFile.patterns ?? {}) };
 
-        for (const l of swapChanges) {
-            const src = l.source as { kind: 'swap'; section: 'words' | 'patterns'; key: string };
+        for (const l of exprChanges) {
+            // find the data spans to identify which entry this line represents.
+            // the first data span with a 'key' path identifies the section and key.
+            const dataSpans = (l.spans ?? []).filter((s) => s.source !== null);
+            const keySpan = dataSpans.find((s) => s.source!.path?.endsWith(' key'));
+            const valSpan = dataSpans.find((s) => s.source!.path && !s.source!.path.endsWith(' key'));
+            if (!keySpan?.source) continue;
+
+            const section = keySpan.source.path!.replace(' key', '');
+            const origKey = keySpan.text;
+            const isWords = section === 'words';
+            const dict = isWords ? newWords : newPatterns;
+
             if (l.deleted) {
-                if (src.section === 'words') delete newWords[src.key];
-                else delete newPatterns[src.key];
+                delete dict[origKey];
             } else if (l.edited !== null) {
-                // parse edited line to extract new key/value
-                const parsed = parseSwapLine(l.edited, src.section);
+                // parse the edited line to extract new key/value
+                const parsed = parseSwapLine(l.edited, isWords ? 'words' : 'patterns');
                 if (parsed) {
-                    if (src.section === 'words') {
-                        delete newWords[src.key];
-                        newWords[parsed.key] = parsed.value;
-                    } else {
-                        delete newPatterns[src.key];
-                        newPatterns[parsed.key] = parsed.value;
-                    }
+                    delete dict[origKey];
+                    dict[parsed.key] = parsed.value;
                 }
             }
         }
@@ -748,7 +767,10 @@ async function runWeb(): Promise<void> {
 
             if (url.pathname === '/api/lines') {
                 return Response.json(
-                    lines.map((l, i) => ({ index: i, text: l.text, source: l.source })),
+                    lines.map((l, i) => ({
+                        index: i, text: l.text, source: l.source,
+                        spans: l.spans,
+                    })),
                 );
             }
 

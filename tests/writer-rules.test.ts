@@ -40,24 +40,25 @@ test('writer-rules.md references the auditor and the filter', () => {
     expect(content).toContain('## Filter');
 });
 
-test('PromptLoader resolves includes from the master template', () => {
+test('PromptLoader resolves includes and evaluates expressions', () => {
     const loader = new PromptLoader(systemDir);
-    const result = loader.resolve({ WORDS: '  - test -> test', PATTERNS: '' });
+    const words: [string, string][] = [['test-key', 'test-val']];
+    const result = loader.resolve({ words, patterns: [] });
     expect(result).toContain('# personal rules');
     expect(result).toContain('# technical prose');
     expect(result).toContain('## vocabulary');
-    expect(result).toContain('  - test -> test');
+    expect(result).toContain('"test-key" -> "test-val"');
 });
 
 test('PromptLoader caches the resolved result', () => {
     const loader = new PromptLoader(systemDir);
-    const first = loader.resolve({ WORDS: '  - a -> b', PATTERNS: '' });
-    const second = loader.resolve({ WORDS: '  - x -> y', PATTERNS: '' });
+    const first = loader.resolve({ words: [['a', 'b']], patterns: [] });
+    const second = loader.resolve({ words: [['x', 'y']], patterns: [] });
     expect(first).toBe(second);
 });
 
 test('PromptLoader collapses triple blank lines', () => {
     const loader = new PromptLoader(systemDir);
-    const result = loader.resolve({ WORDS: '  - a -> b', PATTERNS: '' });
+    const result = loader.resolve({ words: [['a', 'b']], patterns: [] });
     expect(result).not.toMatch(/\n{3,}/);
 });

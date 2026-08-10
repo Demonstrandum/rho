@@ -142,10 +142,12 @@ export default function (pi: ExtensionAPI) {
         const content = message.content.map((block) => {
             if (block.type !== 'text') return block;
             let text = block.text;
-            // always strip the marker, even when bypassing
-            const stripped = text.replace(BYPASS_MARKER, '');
-            if (stripped !== text) {
-                text = stripped;
+            // dim the marker so it stays in the text (KV cache) but is unobtrusive
+            const DIM = '\x1b[2m';
+            const RESET = '\x1b[22m';
+            const dimmed = text.replace(BYPASS_MARKER, `${DIM}/noswap${RESET}`);
+            if (dimmed !== text) {
+                text = dimmed;
                 changed = true;
             }
             if (!bypass) {

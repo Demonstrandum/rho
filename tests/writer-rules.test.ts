@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { PromptLoader } from '../extensions/lib/prompt-loader';
 
 const systemDir = join(import.meta.dir, '..', 'system');
 const rulesPath = join(systemDir, 'writer-rules.md');
@@ -39,13 +40,24 @@ test('writer-rules.md references the auditor and the filter', () => {
     expect(content).toContain('## Filter');
 });
 
-test('writer-rules extension appends rules to system prompt', async () => {
-    const rules = readFileSync(rulesPath, 'utf8').trim();
-
-    // simulate what writer-rules.ts does in before_agent_start
-    const base = 'existing system prompt';
-    const result = `${base}\n\n${rules}`;
-    expect(result).toStartWith('existing system prompt');
+test('PromptLoader resolves includes from the master template', () => {
+    const loader = new PromptLoader(systemDir);
+    const result = loader.resolve({ WORDS: '  - test -> test', PATTERNS: '' });
+    expect(result).toContain('# personal rules');
     expect(result).toContain('# technical prose');
-    expect(result).toContain('## 1. Assertions');
+    expect(result).toContain('## vocabulary');
+    expect(result).toContain('  - test -> test');
+});
+
+test('PromptLoader caches the resolved result', () => {
+    const loader = new PromptLoader(systemDir);
+    const first = loader.resolve({ WORDS: '  - a -> b', PATTERNS: '' });
+    const second = loader.resolve({ WORDS: '  - x -> y', PATTERNS: '' });
+    expect(first).toBe(second);
+});
+
+test('PromptLoader collapses triple blank lines', () => {
+    const loader = new PromptLoader(systemDir);
+    const result = loader.resolve({ WORDS: '  - a -> b', PATTERNS: '' });
+    expect(result).not.toMatch(/\n{3,}/);
 });

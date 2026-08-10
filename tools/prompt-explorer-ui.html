@@ -28,7 +28,7 @@
 body {
     font-family: var(--mono);
     font-size: 13px;
-    line-height: 1.6;
+    line-height: 1.8;
     background: var(--bg);
     color: var(--text);
     display: flex;
@@ -170,7 +170,7 @@ footer {
 .line {
     display: flex;
     align-items: stretch;
-    min-height: 24px;
+    min-height: 28px;
     cursor: pointer;
     position: relative;
 }
@@ -329,12 +329,13 @@ footer {
 }
 .data-span .span-label {
     position: absolute;
-    bottom: calc(100% + 1px);
-    left: 0;
+    top: -4px;
+    left: 2px;
     font-size: 7px;
     line-height: 1;
     padding: 0 2px;
     color: #58a6ff60;
+    background: var(--bg);
     pointer-events: none;
     white-space: nowrap;
     z-index: 1;
@@ -948,52 +949,16 @@ function undo() {
     if (el) el.scrollIntoView({ block: 'center' });
 }
 
+// both diff and patch buttons use the same modal
 async function showDiff() {
-    const panel = document.getElementById('diff-panel');
-    const content = document.getElementById('diff-content');
-
-    if (Object.keys(modifications).length === 0) {
-        toast('no changes');
-        return;
-    }
-
-    content.innerHTML = '<span style="color:var(--text-dim)">generating...</span>';
-    panel.classList.add('open');
-
-    const res = await fetch('/api/diff', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modifications }),
-    });
-    const data = await res.json();
-
-    if (!data.diff) {
-        content.innerHTML = '<span style="color:var(--text-dim)">no effective changes</span>';
-        return;
-    }
-
-    content.innerHTML = '';
-    for (const line of data.diff.split('\n')) {
-        const span = document.createElement('span');
-        if (line.startsWith('+++') || line.startsWith('---')) {
-            span.className = 'diff-file';
-        } else if (line.startsWith('@@')) {
-            span.className = 'diff-hunk';
-        } else if (line.startsWith('+')) {
-            span.className = 'diff-add';
-        } else if (line.startsWith('-')) {
-            span.className = 'diff-del';
-        }
-        span.textContent = line + '\n';
-        content.appendChild(span);
-    }
+    return savePatch();
 }
 
 function closeDiff() {
     document.getElementById('diff-panel').classList.remove('open');
 }
 
-const sourceCache = {};
+let sourceCache = {};
 async function showSourceFile(ref) {
     const panel = document.getElementById('diff-panel');
     const header = panel.querySelector('.diff-header span');
@@ -1064,17 +1029,21 @@ async function savePatch() {
         toast('no changes');
         return;
     }
-    const res = await fetch('/api/diff', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modifications }),
-    });
-    const data = await res.json();
-    if (!data.diff) {
-        toast('no effective changes');
-        return;
+    try {
+        const res = await fetch('/api/diff', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ modifications }),
+        });
+        const data = await res.json();
+        if (!data.diff) {
+            toast('no effective changes');
+            return;
+        }
+        showPatchModal(data.diff, data.fileCount);
+    } catch (e) {
+        toast('error: ' + e.message);
     }
-    showPatchModal(data.diff, data.fileCount);
 }
 
 function showPatchModal(diff, fileCount) {
@@ -1149,6 +1118,32 @@ function showPatchModal(diff, fileCount) {
     };
     footer.appendChild(writeBtn);
 
+    const applyBtn = document.createElement('button');
+    applyBtn.className = 'danger';
+    applyBtn.textContent = 'apply to files';
+    applyBtn.onclick = async () => {
+        if (!confirm('apply changes directly to source files?')) return;
+        const res = await fetch('/api/apply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ modifications }),
+        });
+        const data = await res.json();
+        if (data.applied) {
+            toast(`applied to ${data.fileCount} file(s)`);
+            overlay.remove();
+            modifications = {};
+            undoStack = [];
+            sourceCache = {};
+            const r = await fetch('/api/lines');
+            expandedLines = await r.json();
+            rawFileLines = {};
+            lines = rebuildDisplayLines();
+            renderLines();
+        }
+    };
+    footer.appendChild(applyBtn);
+
     modal.appendChild(header);
     modal.appendChild(body);
     modal.appendChild(footer);
@@ -1156,31 +1151,8 @@ function showPatchModal(diff, fileCount) {
     document.body.appendChild(overlay);
 }
 
-async function applyChanges() {
-    if (Object.keys(modifications).length === 0) {
-        toast('no changes');
-        return;
-    }
-    if (!confirm(`apply changes directly to source files?`)) return;
-
-    const res = await fetch('/api/apply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modifications }),
-    });
-    const data = await res.json();
-    if (data.applied) {
-        toast(`applied to ${data.fileCount} file(s)`);
-        modifications = {};
-        undoStack = [];
-        // reload lines from server
-        const r = await fetch('/api/lines');
-        expandedLines = await r.json();
-        rawFileLines = {}; // invalidate raw cache
-        lines = rebuildDisplayLines();
-        renderLines();
-    }
-}
+// keep for the header button; just forwards to the modal
+async function applyChanges() { return savePatch(); }
 
 function doSearch() {
     const query = document.getElementById('search').value.toLowerCase();

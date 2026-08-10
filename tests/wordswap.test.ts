@@ -139,6 +139,22 @@ test('verb entries with irregular source forms use source overrides', () => {
     expect(originals).not.toContain('runing');
 });
 
+test('irregular source and irregular replacement inflect independently', () => {
+    const dict: Record<string, WordValue> = {
+        'run': {
+            verb: '{spring}',
+            source: { past: 'ran', ing: 'running' },
+            forms: { spring: { '3s': 'springs', past: 'sprung', ing: 'springing' } },
+        },
+    };
+    const swaps = buildSwaps(dict);
+    const find = (src: string) => swaps.find(s => s.original === src)!;
+    expect(find('run').replacements[0]).toBe('spring');
+    expect(find('runs').replacements[0]).toBe('springs');
+    expect(find('ran').replacements[0]).toBe('sprung');
+    expect(find('running').replacements[0]).toBe('springing');
+});
+
 test('inflectVerb handles regular verbs', () => {
     expect(inflectVerb('show')).toEqual({ '3s': 'shows', past: 'showed', ing: 'showing' });
     expect(inflectVerb('showcase')).toEqual({ '3s': 'showcases', past: 'showcased', ing: 'showcasing' });

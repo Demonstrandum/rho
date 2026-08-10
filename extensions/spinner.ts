@@ -176,11 +176,29 @@ function loadVerbs(): Verb[] {
     return loadLines(verbsPath).map(parseVerb);
 }
 
+// helpers available inside {{...}} expressions in verbs.txt.
+const templateHelpers = {
+    randint: (min: number, max: number) => min + Math.floor(Math.random() * (max - min + 1)),
+};
+const helperNames = Object.keys(templateHelpers);
+const helperValues = Object.values(templateHelpers);
+
+function evalVerbTemplate(text: string): string {
+    return text.replace(/\{\{(.*?)\}\}/g, (_, expr: string) => {
+        try {
+            const fn = new Function(...helperNames, `return ${expr}`);
+            return String(fn(...helperValues));
+        } catch {
+            return expr;
+        }
+    });
+}
+
 // assets are read and parsed once at load; they never change mid-session, and
 // /reload re-runs module init to pick up edits. pick() samples fresh each turn.
 const SPINNERS = loadSpinners();
 const MAXIMS = loadMaxims();
-const VERBS = loadVerbs();
+const VERB_LINES = loadLines(verbsPath);
 
 function pick<T>(items: T[]): T | undefined {
     return items.length > 0 ? items[Math.floor(Math.random() * items.length)] : undefined;
@@ -303,7 +321,8 @@ export default function (pi: ExtensionAPI) {
         const elapsed = Date.now() - (agentStart || Date.now());
         agentStart = 0;
         verb = '';
-        const done = pick(VERBS) ?? COMPLETION_FALLBACK;
+        const rawLine = pick(VERB_LINES);
+        const done = rawLine ? parseVerb(evalVerbTemplate(rawLine)) : COMPLETION_FALLBACK;
         if (ctx !== undefined) {
             ctx.ui.notify(formatVerb(ctx.ui.theme, done, elapsed), 'info');
         }

@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
 import { themeRgb, blend, ansiFg, RESET, type Rgb } from './lib/utils';
+import { evalTemplates } from './lib/template';
 
 // edit to switch spinner sets. categories are defined per spinner in spinners.json.
 const ENABLED_CATEGORIES = ['chinese'];
@@ -176,23 +177,7 @@ function loadVerbs(): Verb[] {
     return loadLines(verbsPath).map(parseVerb);
 }
 
-// helpers available inside {{...}} expressions in verbs.txt.
-const templateHelpers = {
-    randint: (min: number, max: number) => min + Math.floor(Math.random() * (max - min + 1)),
-};
-const helperNames = Object.keys(templateHelpers);
-const helperValues = Object.values(templateHelpers);
 
-function evalVerbTemplate(text: string): string {
-    return text.replace(/\{\{(.*?)\}\}/g, (_, expr: string) => {
-        try {
-            const fn = new Function(...helperNames, `return ${expr}`);
-            return String(fn(...helperValues));
-        } catch {
-            return expr;
-        }
-    });
-}
 
 // assets are read and parsed once at load; they never change mid-session, and
 // /reload re-runs module init to pick up edits. pick() samples fresh each turn.
@@ -322,7 +307,7 @@ export default function (pi: ExtensionAPI) {
         agentStart = 0;
         verb = '';
         const rawLine = pick(VERB_LINES);
-        const done = rawLine ? parseVerb(evalVerbTemplate(rawLine)) : COMPLETION_FALLBACK;
+        const done = rawLine ? parseVerb(evalTemplates(rawLine)) : COMPLETION_FALLBACK;
         if (ctx !== undefined) {
             ctx.ui.notify(formatVerb(ctx.ui.theme, done, elapsed), 'info');
         }

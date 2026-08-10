@@ -1,14 +1,15 @@
 import { test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildSwaps, buildPatternSwaps, applySwaps } from '../extensions/wordswap';
+import { buildSwaps, buildPatternSwaps, applySwaps, inflectVerb } from '../extensions/wordswap';
+import type { WordValue } from '../extensions/wordswap';
 import { SourceStr, parseSpans, stripMarkers, wrapEntries } from '../extensions/lib/source-str';
 
 const dict = { 'load-bearing': 'cooked', 'honest take': 'spicy doodad', seam: 'whatchamacallit' };
 
 test('buildSwaps yields one case-insensitive, word-bounded rule per entry', () => {
     const swaps = buildSwaps(dict);
-    console.log('rules:', swaps.map((s) => `${s.original}->${s.replacement}`).join(', '));
+    console.log('rules:', swaps.map((s) => `${s.original}->${s.replacements[0]}`).join(', '));
     expect(swaps).toHaveLength(3);
     for (const s of swaps) expect(s.pattern.flags).toBe('gi');
 });
@@ -74,6 +75,59 @@ test('the shipped wordswap.json builds into a valid rule set', () => {
     const swaps = buildSwaps(shipped.words);
     expect(swaps.length).toBeGreaterThan(0);
     expect(swaps[0].original).toBe('load-bearing');
+});
+
+test('verb entries generate inflected swaps', () => {
+    const dict: Record<string, WordValue> = {
+        'showcase': { verb: '{show} off' },
+    };
+    const swaps = buildSwaps(dict);
+    const originals = swaps.map(s => s.original);
+    console.log('verb forms:', originals.join(', '));
+    expect(originals).toContain('showcase');
+    expect(originals).toContain('showcases');
+    expect(originals).toContain('showcased');
+    expect(originals).toContain('showcasing');
+
+    const base = swaps.find(s => s.original === 'showcase')!;
+    expect(base.replacements[0]).toBe('show off');
+    const s3 = swaps.find(s => s.original === 'showcases')!;
+    expect(s3.replacements[0]).toBe('shows off');
+    const past = swaps.find(s => s.original === 'showcased')!;
+    expect(past.replacements[0]).toBe('showed off');
+    const ing = swaps.find(s => s.original === 'showcasing')!;
+    expect(ing.replacements[0]).toBe('showing off');
+});
+
+test('verb entries with irregular forms use overrides', () => {
+    const dict: Record<string, WordValue> = {
+        'delve': {
+            verb: '{dig} with my little paws',
+            forms: { dig: { '3s': 'digs', past: 'dug', ing: 'digging' } },
+        },
+    };
+    const swaps = buildSwaps(dict);
+    const past = swaps.find(s => s.original === 'delved')!;
+    expect(past.replacements[0]).toBe('dug with my little paws');
+    const ing = swaps.find(s => s.original === 'delving')!;
+    expect(ing.replacements[0]).toBe('digging with my little paws');
+});
+
+test('alternatives produce multiple replacements', () => {
+    const dict: Record<string, WordValue> = {
+        'seamless': ['wibbly', 'dodecahedral', 'with no wibbly bits'],
+    };
+    const swaps = buildSwaps(dict);
+    expect(swaps).toHaveLength(1);
+    expect(swaps[0].replacements).toEqual(['wibbly', 'dodecahedral', 'with no wibbly bits']);
+});
+
+test('inflectVerb handles regular verbs', () => {
+    expect(inflectVerb('show')).toEqual({ '3s': 'shows', past: 'showed', ing: 'showing' });
+    expect(inflectVerb('showcase')).toEqual({ '3s': 'showcases', past: 'showcased', ing: 'showcasing' });
+    expect(inflectVerb('unleash')).toEqual({ '3s': 'unleashes', past: 'unleashed', ing: 'unleashing' });
+    expect(inflectVerb('brag')).toEqual({ '3s': 'brags', past: 'bragged', ing: 'bragging' });
+    expect(inflectVerb('carry')).toEqual({ '3s': 'carries', past: 'carried', ing: 'carrying' });
 });
 
 test('SourceStr embeds markers on interpolation', () => {

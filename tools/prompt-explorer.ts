@@ -747,6 +747,11 @@ class Explorer {
 
 // ── web server ─────────────────────────────────────────────
 
+interface ClientPayload {
+    modifications: Record<string, { deleted?: boolean; edited?: string | null }>;
+    fileEdits?: Record<string, Record<string, string | null>>;
+}
+
 function applyClientChanges(
     lines: SourceLine[],
     modifications: Record<string, { deleted?: boolean; edited?: string | null }>,
@@ -756,6 +761,69 @@ function applyClientChanges(
         if (!mod) return l;
         return { ...l, deleted: mod.deleted ?? false, edited: mod.edited ?? null };
     });
+}
+
+// resolve a filename to its full path
+function resolveFilePath(name: string): string | null {
+    const candidates = [
+        join(SYSTEM_DIR, name),
+        join(ROOT, 'extensions', 'assets', name),
+        join(ROOT, name),
+    ];
+    for (const p of candidates) {
+        try { readFileSync(p); return p; } catch { /* next */ }
+    }
+    return null;
+}
+
+// apply fileEdits as surgical line replacements, return FileChange[]
+function collectFileEdits(fileEdits: Record<string, Record<string, string | null>>): FileChange[] {
+    const changes: FileChange[] = [];
+
+    for (const [filePath, lineEdits] of Object.entries(fileEdits)) {
+        // find the file on disk
+        const fname = filePath.split('/').pop() ?? filePath;
+        const fullPath = resolveFilePath(fname) ?? resolveFilePath(filePath);
+        if (!fullPath) continue;
+
+        const original = readFileSync(fullPath, 'utf8');
+        const lines = original.split('\n');
+
+        // collect line numbers to edit, process in reverse order for deletions
+        const edits = Object.entries(lineEdits)
+            .map(([ln, val]) => ({ line: Number(ln), value: val }))
+            .sort((a, b) => b.line - a.line);
+
+        for (const edit of edits) {
+            const idx = edit.line - 1;
+            if (idx < 0 || idx >= lines.length) continue;
+            if (edit.value === null) {
+                // deletion: remove the line, handle trailing comma in JSON
+                const removed = lines.splice(idx, 1)[0];
+                // if removed line had trailing comma and now the new last-in-block line
+                // ends with comma before a closing brace, remove the comma
+                if (idx > 0 && idx < lines.length) {
+                    const next = lines[idx]?.trim();
+                    if (next === '}' || next === '},') {
+                        lines[idx - 1] = lines[idx - 1].replace(/,\s*$/, '');
+                    }
+                }
+            } else {
+                lines[idx] = edit.value;
+            }
+        }
+
+        const modified = lines.join('\n');
+        if (original !== modified) {
+            changes.push({
+                originalPath: relative(ROOT, fullPath),
+                originalContent: original,
+                modifiedContent: modified,
+            });
+        }
+    }
+
+    return changes;
 }
 
 async function runWeb(): Promise<void> {
@@ -785,17 +853,23 @@ async function runWeb(): Promise<void> {
             }
 
             if (url.pathname === '/api/diff' && req.method === 'POST') {
-                const body = (await req.json()) as { modifications: Record<string, { deleted?: boolean; edited?: string | null }> };
+                const body = (await req.json()) as ClientPayload;
                 const modified = applyClientChanges(lines, body.modifications);
-                const changes = collectFileChanges(modified);
+                const changes = [
+                    ...collectFileChanges(modified),
+                    ...collectFileEdits(body.fileEdits ?? {}),
+                ];
                 const diff = changes.length > 0 ? generateDiffs(changes) : '';
                 return Response.json({ diff, fileCount: changes.length });
             }
 
             if (url.pathname === '/api/patch' && req.method === 'POST') {
-                const body = (await req.json()) as { modifications: Record<string, { deleted?: boolean; edited?: string | null }> };
+                const body = (await req.json()) as ClientPayload;
                 const modified = applyClientChanges(lines, body.modifications);
-                const changes = collectFileChanges(modified);
+                const changes = [
+                    ...collectFileChanges(modified),
+                    ...collectFileEdits(body.fileEdits ?? {}),
+                ];
                 if (changes.length > 0) {
                     const diff = generateDiffs(changes);
                     const patchFile = join(ROOT, 'prompt-explorer.patch');
@@ -822,9 +896,12 @@ async function runWeb(): Promise<void> {
             }
 
             if (url.pathname === '/api/apply' && req.method === 'POST') {
-                const body = (await req.json()) as { modifications: Record<string, { deleted?: boolean; edited?: string | null }> };
+                const body = (await req.json()) as ClientPayload;
                 const modified = applyClientChanges(lines, body.modifications);
-                const changes = collectFileChanges(modified);
+                const changes = [
+                    ...collectFileChanges(modified),
+                    ...collectFileEdits(body.fileEdits ?? {}),
+                ];
                 for (const c of changes) {
                     writeFileSync(join(ROOT, c.originalPath), c.modifiedContent);
                 }

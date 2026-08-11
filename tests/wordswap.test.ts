@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildSwaps, buildPatternSwaps, applySwaps, inflectVerb } from '../extensions/wordswap';
 import type { WordValue } from '../extensions/wordswap';
-import { SourceStr, parseSpans, stripMarkers, wrapEntries } from '../extensions/lib/source-str';
+import { SourceStr, parseSpans, stripMarkers, wrapRawDict, mark } from '../extensions/lib/source-str';
 
 const dict = { 'load-bearing': 'cooked', 'honest take': 'spicy doodad', seam: 'whatchamacallit' };
 
@@ -183,18 +183,37 @@ test('SourceStr embeds markers on interpolation', () => {
     expect(spans[4]).toEqual({ text: '"', source: null });
 });
 
-test('wrapEntries produces SourceStr pairs with JSON positions', () => {
+test('wrapRawDict produces SourceStr pairs with JSON positions', () => {
     const json = '{\n    "words": {\n        "seam": "whatchamacallit"\n    }\n}';
-    const entries: [string, string][] = [['seam', 'whatchamacallit']];
-    const wrapped = wrapEntries(entries, 'test.json', json, 'words');
+    const dict = { seam: 'whatchamacallit' };
+    const wrapped = wrapRawDict(dict, 'test.json', json, 'words');
     expect(wrapped).toHaveLength(1);
     const [k, v] = wrapped[0];
-    expect(k.valueOf()).toBe('seam');
-    expect(v.valueOf()).toBe('whatchamacallit');
-    expect(k.meta.line).toBe(3);
-    expect(v.meta.line).toBe(3);
-    console.log('key meta:', k.meta);
-    console.log('val meta:', v.meta);
+    expect((k as SourceStr).valueOf()).toBe('seam');
+    expect((v as SourceStr).valueOf()).toBe('whatchamacallit');
+    expect((k as SourceStr).meta.line).toBe(3);
+    expect((v as SourceStr).meta.line).toBe(3);
+    console.log('key meta:', (k as SourceStr).meta);
+    console.log('val meta:', (v as SourceStr).meta);
+});
+
+test('wrapRawDict handles array values with per-element markers', () => {
+    const json = '{\n    "words": {\n        "multi": [\n            "alpha",\n            "beta"\n        ]\n    }\n}';
+    const dict = { multi: ['alpha', 'beta'] };
+    const wrapped = wrapRawDict(dict, 'test.json', json, 'words');
+    expect(wrapped).toHaveLength(1);
+    const [, v] = wrapped[0];
+    // v is a pre-marked string, not a SourceStr
+    expect(typeof v).toBe('string');
+    const spans = parseSpans(v as string);
+    console.log('array spans:', spans.map(s => `[${s.source?.path ?? 'tpl'}]${s.text}`).join(''));
+    // should have: marker(alpha) + " | " + marker(beta)
+    const dataSpans = spans.filter(s => s.source !== null);
+    expect(dataSpans).toHaveLength(2);
+    expect(dataSpans[0].text).toBe('alpha');
+    expect(dataSpans[0].source?.path).toBe('words["multi"][0]');
+    expect(dataSpans[1].text).toBe('beta');
+    expect(dataSpans[1].source?.path).toBe('words["multi"][1]');
 });
 
 test('buildPatternSwaps creates regex capture group swaps', () => {

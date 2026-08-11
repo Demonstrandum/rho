@@ -44,3 +44,21 @@ export function ansiFg(rgb: Rgb): string {
 }
 
 export const RESET = '\x1b[0m';
+
+// template helpers: standard namespace available inside {{...}} expressions.
+
+/** random integer in [min, max] inclusive */
+export function randint(min: number, max: number): number {
+    return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+/** random float in [min, max), rounded to `decimals` places (default 2) */
+export function randfloat(min: number, max: number, decimals = 2): number {
+    const v = min + Math.random() * (max - min);
+    return Number(v.toFixed(decimals));
+}
+
+/** pick one element from an array at random */
+export function pick<T>(items: T[]): T {
+    return items[Math.floor(Math.random() * items.length)];
+}

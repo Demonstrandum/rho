@@ -182,7 +182,7 @@ function loadVerbs(): Verb[] {
 // assets are read and parsed once at load; they never change mid-session, and
 // /reload re-runs module init to pick up edits. pick() samples fresh each turn.
 const SPINNERS = loadSpinners();
-const MAXIMS = loadMaxims();
+const MAXIM_LINES = loadLines(maximsPath);
 const VERB_LINES = loadLines(verbsPath);
 
 function pick<T>(items: T[]): T | undefined {
@@ -265,7 +265,7 @@ export default function (pi: ExtensionAPI) {
 
     const beginTurn = (next: ExtensionContext) => {
         ctx = next;
-        verb = pick(MAXIMS) ?? 'working';
+        verb = evalTemplates(pick(MAXIM_LINES) ?? 'working');
         frame = 0;
         baseRgb = themeRgb(ctx.ui.theme, MAXIM_BASE);
         shimmerRgb = themeRgb(ctx.ui.theme, MAXIM_SHIMMER);

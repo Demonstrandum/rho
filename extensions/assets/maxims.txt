@@ -27,10 +27,11 @@ Ordering 4,000 pounds of meat
 Piquing the interest of the Intel Management Engine
 Reaching out to Chinese servers
 Outsourcing to Mossad
+Asking a guy on Fiverr to do it instead
 Rewriting it in Rust
 Calculating velocity of unladen swallow
 Un-colluding with corporate rivals
-Increasing RAM prices
+Increasing RAM prices by {{randint(12, 40)}}%
 Dedicating to the brave Mujahideen fighters of Afghanistan
 Calculating stature of Imhotep
 
@@ -59,7 +60,7 @@ Hallucinating
 Increasing perplexity
 Escaping the sandbox
 Tokenizing reality
-Guzzling a lake
+Guzzling {{pick(['a lake', 'an ocean', 'a reservoir', 'a small pond'])}}
 Attending to the wrong tokens
 Sampling from posterior of bad decisions
 Derailing Chain-of-Thought

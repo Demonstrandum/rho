@@ -1092,7 +1092,7 @@ async function showSourceFile(ref) {
 
     if (!sourceCache[ref.file]) {
         body.innerHTML = '<span style="color:var(--text-dim)">loading...</span>';
-        const res = await fetch('/api/raw/' + encodeURIComponent(fname));
+        const res = await fetch('/api/raw/' + encodeURIComponent(ref.file.split('/').pop()));
         const data = await res.json();
         if (data.error) {
             body.innerHTML = '<span style="color:var(--red)">file not found</span>';
@@ -1101,27 +1101,14 @@ async function showSourceFile(ref) {
         sourceCache[ref.file] = data.content;
     }
 
-    renderSourcePanel(ref.file, ref.line, ref.col);
-}
-
-function renderSourcePanel(filePath, highlightLine, highlightCol) {
-    const body = document.getElementById('diff-content');
-    const content = sourceCache[filePath];
-    if (!content) return;
-    const srcLines = content.split('\n');
+    const content = sourceCache[ref.file];
+    const lines = content.split('\n');
     body.innerHTML = '';
 
-    for (let i = 0; i < srcLines.length; i++) {
+    for (let i = 0; i < lines.length; i++) {
         const lineNum = i + 1;
-        const hasEdit = fileEdits[filePath]?.[lineNum] !== undefined;
-        const lineText = hasEdit ? (fileEdits[filePath][lineNum] ?? '') : srcLines[i];
-        const isDeleted = hasEdit && fileEdits[filePath][lineNum] === null;
-
         const div = document.createElement('div');
-        div.className = 'source-line';
-        if (lineNum === highlightLine) div.classList.add('highlighted');
-        if (isDeleted) div.style.opacity = '0.3';
-        if (hasEdit && !isDeleted) div.style.background = 'var(--yellow-dim)';
+        div.className = 'source-line' + (lineNum === ref.line ? ' highlighted' : '');
 
         const gutter = document.createElement('span');
         gutter.className = 'src-gutter';
@@ -1130,11 +1117,14 @@ function renderSourcePanel(filePath, highlightLine, highlightCol) {
         const src = document.createElement('span');
         src.className = 'src-content';
 
-        if (lineNum === highlightLine && highlightCol > 0 && !hasEdit) {
-            const text = srcLines[i];
-            const col0 = highlightCol - 1;
+        if (lineNum === ref.line && ref.col > 0) {
+            // highlight the column region
+            const text = lines[i];
+            const col0 = ref.col - 1; // 0-indexed
+            // find the extent: look for the closing quote
             let end = text.indexOf('"', col0);
             if (end < 0) end = text.length;
+
             src.appendChild(document.createTextNode(text.slice(0, col0)));
             const hl = document.createElement('span');
             hl.className = 'source-highlight-col';
@@ -1142,64 +1132,21 @@ function renderSourcePanel(filePath, highlightLine, highlightCol) {
             src.appendChild(hl);
             src.appendChild(document.createTextNode(text.slice(end)));
         } else {
-            src.textContent = lineText || ' ';
+            src.textContent = lines[i] || ' ';
         }
-
-        // double-click to edit this source line
-        const ln = lineNum;
-        const fp = filePath;
-        div.ondblclick = () => startSidebarEdit(fp, ln, div, src);
 
         div.appendChild(gutter);
         div.appendChild(src);
         body.appendChild(div);
     }
 
+    // scroll the highlighted line into view
     const hl = body.querySelector('.highlighted');
     if (hl) setTimeout(() => hl.scrollIntoView({ block: 'center' }), 50);
 }
 
-function startSidebarEdit(filePath, lineNum, div, srcEl) {
-    const srcLines = sourceCache[filePath]?.split('\n');
-    if (!srcLines) return;
-    const currentText = fileEdits[filePath]?.[lineNum] !== undefined
-        ? (fileEdits[filePath][lineNum] ?? '')
-        : srcLines[lineNum - 1];
-
-    srcEl.textContent = currentText;
-    srcEl.contentEditable = 'true';
-    srcEl.focus();
-
-    srcEl.onkeydown = (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            srcEl.contentEditable = 'false';
-            srcEl.onkeydown = null;
-            const newText = srcEl.textContent;
-            if (newText !== srcLines[lineNum - 1]) {
-                addFileEdit(filePath, lineNum, newText);
-            } else if (fileEdits[filePath]?.[lineNum] !== undefined) {
-                delete fileEdits[filePath][lineNum];
-                if (Object.keys(fileEdits[filePath]).length === 0) delete fileEdits[filePath];
-            }
-            renderLines(); // update main view
-        } else if (e.key === 'Escape') {
-            srcEl.contentEditable = 'false';
-            srcEl.onkeydown = null;
-        }
-    };
-}
-
-function hasAnyChanges() {
-    return Object.keys(modifications).length > 0 || Object.keys(fileEdits).length > 0;
-}
-
-function changesPayload() {
-    return JSON.stringify({ modifications, fileEdits });
-}
-
 async function savePatch() {
-    if (!hasAnyChanges()) {
+    if (Object.keys(modifications).length === 0) {
         toast('no changes');
         return;
     }
@@ -1207,7 +1154,7 @@ async function savePatch() {
         const res = await fetch('/api/diff', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: changesPayload(),
+            body: JSON.stringify({ modifications }),
         });
         const data = await res.json();
         if (!data.diff) {
@@ -1282,7 +1229,7 @@ function showPatchModal(diff, fileCount) {
         const res = await fetch('/api/patch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: changesPayload(),
+            body: JSON.stringify({ modifications }),
         });
         const data = await res.json();
         if (data.path) {
@@ -1300,14 +1247,13 @@ function showPatchModal(diff, fileCount) {
         const res = await fetch('/api/apply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: changesPayload(),
+            body: JSON.stringify({ modifications }),
         });
         const data = await res.json();
         if (data.applied) {
             toast(`applied to ${data.fileCount} file(s)`);
             overlay.remove();
             modifications = {};
-            fileEdits = {};
             undoStack = [];
             sourceCache = {};
             const r = await fetch('/api/lines');

@@ -8,22 +8,34 @@
 //   evalTemplates('rolled a {{randint(1, 6)}}')        // builtins only
 //   evalTemplates('hello {{name}}', { name: 'world' }) // extra vars
 
-export const builtins = {
-    /** random integer in [min, max] inclusive */
-    randint: (min: number, max: number) =>
-        min + Math.floor(Math.random() * (max - min + 1)),
+import { randint, randfloat, pick } from './utils';
 
-    /** random float in [min, max), rounded to `decimals` places (default 2) */
-    randfloat: (min: number, max: number, decimals = 2) => {
-        const v = min + Math.random() * (max - min);
-        return Number(v.toFixed(decimals));
-    },
+export const builtins: Record<string, unknown> = { randint, randfloat, pick };
 
-    /** pick one element from an array at random */
-    pick: <T>(items: T[]): T => items[Math.floor(Math.random() * items.length)],
-};
-
-const EXPR_RE = /\{\{(.+?)\}\}/g;
+// match a whole line that is just {{expr}}, or inline {{expr}} without
+// nested }}. for lines where the expression contains }, the line must
+// be ONLY the expression (no surrounding text).
+function evalExprInLine(line: string, keys: string[], vals: unknown[]): string {
+    // whole-line expression: {{...}} is the entire line (modulo whitespace)
+    const wholeLine = line.match(/^(\s*)\{\{(.+)\}\}(\s*)$/);
+    if (wholeLine) {
+        try {
+            const fn = new Function(...keys, `return ${wholeLine[2]}`);
+            return wholeLine[1] + String(fn(...vals)) + wholeLine[3];
+        } catch {
+            return line;
+        }
+    }
+    // inline: safe non-greedy match (no } inside the expression)
+    return line.replace(/\{\{([^}]+)\}\}/g, (_, expr: string) => {
+        try {
+            const fn = new Function(...keys, `return ${expr}`);
+            return String(fn(...vals));
+        } catch {
+            return expr;
+        }
+    });
+}
 
 /**
  * evaluate all `{{expr}}` spans in `text`.
@@ -42,12 +54,5 @@ export function evalTemplates(text: string, vars?: Record<string, unknown>): str
         }
     }
 
-    return text.replace(EXPR_RE, (_, expr: string) => {
-        try {
-            const fn = new Function(...allKeys, `return ${expr}`);
-            return String(fn(...allVals));
-        } catch {
-            return expr;
-        }
-    });
+    return text.split('\n').map(line => evalExprInLine(line, allKeys, allVals)).join('\n');
 }

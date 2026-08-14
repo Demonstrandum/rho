@@ -2,6 +2,20 @@
 
 personal [pi](https://pi.dev) dotfiles, packaged as a pi package (Bun + TypeScript).
 
+## features
+
+- **system prompt**: ASD-STE100 derived prose standard, writing conventions, and vocabulary rules assembled from fragments and injected at startup.
+- **word filter**: rewrites overused LLM phrases in finalized messages with absurd substitutes. covers all verb forms. supports random alternatives. bypass with `/noswap`.
+- **billing protection**: detects and avoids Anthropic's third-party billing classifier. monitors response headers for extra-usage routing.
+- **spinner**: custom working indicator with shimmer animation, random working messages, random completion lines with templated values.
+- **startup and UI**: compact startup banner, custom footer, `/context` context-window visualisation.
+- **commands**: `/audit` (prose review against the writing rules), `/cwd` (change directory mid-session), `/web` (launch pi-web UI).
+- **settings**: auto-configures terminal and display preferences on first run.
+- **bundled packages**: web browsing and librarian (pi-web-access), session rewind (pi-rewind), FTS5 knowledge base (context-mode), output speed display (token-rate-pi).
+- **themes**: plan9 and plan9-dark.
+
+## contents
+
 bundles my:
 
 - **extensions/**: TypeScript modules that add tools, commands, ui, hooks

@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { config } from './lib/config';
 
 const swapsPath = join(dirname(fileURLToPath(import.meta.url)), 'assets', 'wordswap.json');
 
@@ -42,9 +43,13 @@ interface SwapFile {
     patterns?: Record<string, string>;
 }
 
+const TRAILING_PUNCT = /[,:;.!?]/;
+
 function makeSwap(original: string, replacements: string[]): Swap {
     const escaped = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return { original, replacements, pattern: new RegExp(`\\b${escaped}\\b`, 'gi') };
+    // capture an optional trailing punct char so we can absorb it when the
+    // replacement already ends in punctuation (avoids "padding:, xyz").
+    return { original, replacements, pattern: new RegExp(`\\b${escaped}\\b([,:;.!?]?)`, 'gi') };
 }
 
 // standard english verb inflection. covers regular cases; irregular
@@ -176,12 +181,17 @@ export function applySwaps(
 ): string {
     let out = text;
     for (const { pattern, replacements } of swaps) {
-        out = out.replace(pattern, (matched) => {
+        out = out.replace(pattern, (matched, trailingPunct: string) => {
+            // strip the captured trailing punct from the matched text for case logic
+            const core = trailingPunct ? matched.slice(0, -trailingPunct.length) : matched;
             const choice = replacements.length === 1
                 ? replacements[0]
                 : replacements[Math.floor(Math.random() * replacements.length)];
-            const rep = matchCase(matched, choice);
-            return wrap ? wrap(rep) : rep;
+            const rep = matchCase(core, choice);
+            const result = wrap ? wrap(rep) : rep;
+            // absorb trailing punct when the replacement already ends in punct
+            if (trailingPunct && TRAILING_PUNCT.test(choice)) return result;
+            return result + trailingPunct;
         });
     }
     for (const { pattern, replacement } of patternSwaps) {
@@ -223,6 +233,24 @@ export default function (pi: ExtensionAPI) {
 
     const BYPASS_MARKER = /\/noswap/g;
 
+    pi.registerCommand('noswap', {
+        description: "toggle the word filter on/off for this session",
+        handler: async (args, ctx) => {
+            const arg = args.trim().toLowerCase();
+            if (arg === '') {
+                config.wordswap.enabled = !config.wordswap.enabled;
+            } else if (['on', 'enable', 'true', 'yes'].includes(arg)) {
+                config.wordswap.enabled = true;
+            } else if (['off', 'disable', 'false', 'no'].includes(arg)) {
+                config.wordswap.enabled = false;
+            } else {
+                ctx.ui.notify(`unknown argument: ${arg}`, 'error');
+                return;
+            }
+            ctx.ui.notify(config.wordswap.enabled ? 'word filter on' : 'word filter off', 'info');
+        },
+    });
+
     pi.on('message_end', async (event, ctx) => {
         const highlight = (s: string) => ctx.ui.theme.bg('toolErrorBg', s);
         const message = event.message;
@@ -230,7 +258,7 @@ export default function (pi: ExtensionAPI) {
         if (typeof message.content === 'string') return;
 
         // check if any text block contains the bypass marker
-        const bypass = message.content.some(
+        const bypass = !config.wordswap.enabled || message.content.some(
             (block) => block.type === 'text' && BYPASS_MARKER.test(block.text),
         );
 

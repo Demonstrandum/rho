@@ -24,6 +24,7 @@ import { VERSION } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth } from '@earendil-works/pi-tui';
 import { ensureGlobalSetting } from './lib/settings-store';
 import { zip, choose, themeRgb, blend, ansiFg, RESET, type Rgb } from './lib/utils';
+import { config } from './lib/config';
 
 // a short discoverability hint. keep it minimal; the footer carries model/token
 // state, so this only points at the two universal entry points.
@@ -308,18 +309,20 @@ export default function (pi: ExtensionAPI) {
 
         ctx.ui.setHeader((tui, theme) => {
             const start = Date.now();
-            let done = false;
-            const timer = setInterval(() => {
-                if (Date.now() - start >= tl.settleAt) {
-                    done = true;
-                    clearInterval(timer);
-                }
-                tui.requestRender();
-            }, FRAME_MS);
+            let done = !config.startup.animate;
+            const timer = config.startup.animate
+                ? setInterval(() => {
+                    if (Date.now() - start >= tl.settleAt) {
+                        done = true;
+                        clearInterval(timer);
+                    }
+                    tui.requestRender();
+                }, FRAME_MS)
+                : undefined;
 
             return {
                 dispose() {
-                    clearInterval(timer);
+                    if (timer) clearInterval(timer);
                 },
                 invalidate() {},
                 render(width: number): string[] {

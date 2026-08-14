@@ -155,7 +155,7 @@ export function wrapRawDict(
             const parts = elems.map((e, i) =>
                 mark(e.text, { file, line: e.line, col: e.col, path: `${section}["${key}"][${i}]` }),
             );
-            result.push([wrappedKey, parts.join(' | ')]);
+            result.push([wrappedKey, parts.join('" | "')]);
         } else if (typeof value === 'object' && value !== null && 'verb' in value) {
             const verbStrings = scanStringPositions(jsonLines, (kp?.line ?? 1) - 1);
             const vObj = value as { verb: string | string[] };

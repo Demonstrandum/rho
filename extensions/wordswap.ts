@@ -220,9 +220,9 @@ export const patternSwaps = _file.patterns ? buildPatternSwaps(_file.patterns) :
 // flatten for the vocabulary.md template: [displayKey, displayValue][] pairs.
 export function flattenEntry(key: string, value: WordValue): [string, string] {
     if (typeof value === 'string') return [key, value];
-    if (Array.isArray(value)) return [key, value.join(' | ')];
+    if (Array.isArray(value)) return [key, value.join('" | "')];
     const templates = Array.isArray(value.verb) ? value.verb : [value.verb];
-    return [`${key} (all forms)`, templates.join(' | ')];
+    return [key, templates.join('" | "')];
 }
 export const wordEntries: [string, string][] = Object.entries(_file.words)
     .map(([k, v]) => flattenEntry(k, v));

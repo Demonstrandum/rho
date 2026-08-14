@@ -1,6 +1,6 @@
 // sets the working indicator and message.
 //
-// the indicator glyphs come from spinners.json, filtered to ENABLED_CATEGORIES
+// the indicator glyphs come from spinners.json, filtered to config.spinner.categories
 // (chinese by default). the message is a random line from maxims.txt, animated
 // with a shimmer color-sweep, and a completion line (a random verb from
 // verbs.txt) is shown when the agent settles. both the maxim and the spinner
@@ -16,9 +16,9 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
 import { themeRgb, blend, ansiFg, RESET, type Rgb } from './lib/utils';
 import { evalTemplates } from './lib/template';
+import { config } from './lib/config';
 
-// edit to switch spinner sets. categories are defined per spinner in spinners.json.
-const ENABLED_CATEGORIES = ['chinese'];
+
 
 // colors come from the active theme, matching pi's native loader: the spinner is
 // the bright `accent`, the maxim rests on neutral `muted` and the shimmer sweeps
@@ -26,7 +26,7 @@ const ENABLED_CATEGORIES = ['chinese'];
 const SPINNER_COLOR: ThemeColor = 'accent';
 const MAXIM_BASE: ThemeColor = 'muted';
 const MAXIM_SHIMMER: ThemeColor = 'accent';
-const SHIMMER_MS = 80;
+
 // frames per trailing-dot step; the maxim grows '.' '..' '...' then repeats.
 const DOTS_STEP = 1;
 const DOTS_MAX = 3;
@@ -36,8 +36,7 @@ const DOTS_MAX = 3;
 // token to swap it, e.g. "[₿] Mined Bitcoin" -> "₿ Mined Bitcoin for 12s", and
 // may end with a `<preposition>` token to swap the default 'for', e.g.
 // "Solved a Rubiks cube <in only>" -> "... in only 12s".
-const COMPLETION_GLYPH = '完';
-const COMPLETION_FALLBACK: Verb = { text: 'Toiled', preposition: 'for', trail: '', sigil: COMPLETION_GLYPH };
+
 
 // the completion line renders through pi's status color (`dim`), which is low
 // contrast against the background. both the text and the sigil blend from the
@@ -112,7 +111,7 @@ function loadLines(path: string): string[] {
 
 function loadSpinners(): SpinnerDef[] {
     const file = JSON.parse(readFileSync(spinnersPath, 'utf8')) as SpinnersFile;
-    const enabled = new Set(ENABLED_CATEGORIES);
+    const enabled = new Set(config.spinner.categories);
     const all = Object.values(file).map(
         (spinner): SpinnerDef => ({ ...spinner, frames: toFrames(spinner.frames) }),
     );
@@ -126,14 +125,14 @@ function loadMaxims(): string[] {
 
 export function parseVerb(line: string): Verb {
     const sigilMatch = line.match(/^\s*\[([^\]]*)\]\s*(.*)$/);
-    const sigil = (sigilMatch?.[1]?.trim() || COMPLETION_GLYPH);
+    const sigil = (sigilMatch?.[1]?.trim() || config.spinner.done);
     const rest = sigilMatch ? sigilMatch[2] : line;
 
     const match = rest.match(/^(.*?)\s*(?:<([^>]*)>\s*(.*?))?$/)!;
 
-    const text        = match[1]?.trim() || COMPLETION_FALLBACK.text;
-    const preposition = match[2]?.trim() || COMPLETION_FALLBACK.preposition;
-    const trail       = match[3]?.trim() || COMPLETION_FALLBACK.trail;
+    const text        = match[1]?.trim() || 'Toiled';
+    const preposition = match[2]?.trim() || 'for';
+    const trail       = match[3]?.trim() || '';
 
     return { text, preposition, trail, sigil };
 }
@@ -253,7 +252,7 @@ export default function (pi: ExtensionAPI) {
         timer = setInterval(() => {
             frame++;
             render();
-        }, SHIMMER_MS);
+        }, config.spinner.shimmerSpeed);
     };
 
     const stopTimer = () => {
@@ -307,7 +306,9 @@ export default function (pi: ExtensionAPI) {
         agentStart = 0;
         verb = '';
         const rawLine = pick(VERB_LINES);
-        const done = rawLine ? parseVerb(evalTemplates(rawLine)) : COMPLETION_FALLBACK;
+        const done = rawLine
+            ? parseVerb(evalTemplates(rawLine))
+            : { text: 'Toiled', preposition: 'for', trail: '', sigil: config.spinner.done };
         if (ctx !== undefined) {
             ctx.ui.notify(formatVerb(ctx.ui.theme, done, elapsed), 'info');
         }

@@ -206,6 +206,61 @@ interface FileChange {
     modifiedContent: string;
 }
 
+// resolve a filename to its full path on disk.
+function resolveFilePath(name: string): string | null {
+    const candidates = [
+        join(ROOT, name),
+        join(SYSTEM_DIR, name),
+        join(ROOT, 'extensions', 'assets', name),
+    ];
+    for (const p of candidates) {
+        try { readFileSync(p); return p; } catch { /* next */ }
+    }
+    // try just the basename
+    const base = name.split('/').pop() ?? name;
+    if (base !== name) {
+        for (const p of [join(SYSTEM_DIR, base), join(ROOT, 'extensions', 'assets', base)]) {
+            try { readFileSync(p); return p; } catch { /* next */ }
+        }
+    }
+    return null;
+}
+
+// apply fileEdits as surgical line replacements.
+function collectFileEdits(fileEdits: Record<string, Record<string, string | null>>): FileChange[] {
+    const changes: FileChange[] = [];
+    for (const [filePath, lineEdits] of Object.entries(fileEdits)) {
+        const fullPath = resolveFilePath(filePath);
+        if (!fullPath) continue;
+        const original = readFileSync(fullPath, 'utf8');
+        const lines = original.split('\n');
+        const edits = Object.entries(lineEdits)
+            .map(([ln, val]) => ({ line: Number(ln), value: val }))
+            .sort((a, b) => b.line - a.line);
+        for (const edit of edits) {
+            const idx = edit.line - 1;
+            if (idx < 0 || idx >= lines.length) continue;
+            if (edit.value === null) {
+                lines.splice(idx, 1);
+                // clean up trailing comma if needed
+                if (idx > 0 && idx < lines.length) {
+                    const next = lines[idx]?.trim();
+                    if (next === '}' || next === '},' || next === ']' || next === '],') {
+                        lines[idx - 1] = lines[idx - 1].replace(/,\s*$/, '');
+                    }
+                }
+            } else {
+                lines[idx] = edit.value;
+            }
+        }
+        const modified = lines.join('\n');
+        if (original !== modified) {
+            changes.push({ originalPath: relative(ROOT, fullPath), originalContent: original, modifiedContent: modified });
+        }
+    }
+    return changes;
+}
+
 function collectFileChanges(lines: SourceLine[]): FileChange[] {
     const changes: FileChange[] = [];
 
@@ -251,68 +306,25 @@ function collectFileChanges(lines: SourceLine[]): FileChange[] {
         }
     }
 
-    // expression-generated lines: edits/deletions to lines with spans
-    // affect wordswap.json (the data source in the span metadata).
-    const exprChanges = lines.filter(
-        (l) => l.source.kind === 'expr' && l.spans && (l.deleted || l.edited !== null),
+    // expression-generated line deletions: convert to surgical file edits.
+    // (span-level edits go through fileEdits directly via the UI.)
+    const exprDeletions = lines.filter(
+        (l) => l.source.kind === 'expr' && l.spans && l.deleted,
     );
-    if (exprChanges.length > 0) {
-        const original = readFileSync(SWAPS_PATH, 'utf8');
-        const swapFile = loadSwapFile();
-        const newWords = { ...swapFile.words };
-        const newPatterns = { ...(swapFile.patterns ?? {}) };
-
-        for (const l of exprChanges) {
-            // find the data spans to identify which entry this line represents.
-            // the first data span with a 'key' path identifies the section and key.
-            const dataSpans = (l.spans ?? []).filter((s) => s.source !== null);
-            const keySpan = dataSpans.find((s) => s.source!.path?.endsWith(' key'));
-            const valSpan = dataSpans.find((s) => s.source!.path && !s.source!.path.endsWith(' key'));
+    if (exprDeletions.length > 0) {
+        const deletionEdits: Record<string, Record<string, string | null>> = {};
+        for (const l of exprDeletions) {
+            // find the key span to know which JSON line to remove
+            const keySpan = (l.spans ?? []).find((s) => s.source?.path?.endsWith(' key'));
             if (!keySpan?.source) continue;
-
-            const section = keySpan.source.path!.replace(' key', '');
-            const origKey = keySpan.text;
-            const isWords = section === 'words';
-            const dict = isWords ? newWords : newPatterns;
-
-            if (l.deleted) {
-                delete dict[origKey];
-            } else if (l.edited !== null) {
-                // parse the edited line to extract new key/value
-                const parsed = parseSwapLine(l.edited, isWords ? 'words' : 'patterns');
-                if (parsed) {
-                    delete dict[origKey];
-                    dict[parsed.key] = parsed.value;
-                }
-            }
+            const { file, line: jsonLine } = keySpan.source;
+            if (!deletionEdits[file]) deletionEdits[file] = {};
+            deletionEdits[file][String(jsonLine)] = null;
         }
-
-        const newFile: SwapFile = { words: newWords };
-        if (Object.keys(newPatterns).length > 0) newFile.patterns = newPatterns;
-        const modified = JSON.stringify(newFile, null, 4) + '\n';
-
-        if (original !== modified) {
-            changes.push({
-                originalPath: relative(ROOT, SWAPS_PATH),
-                originalContent: original,
-                modifiedContent: modified,
-            });
-        }
+        changes.push(...collectFileEdits(deletionEdits));
     }
 
     return changes;
-}
-
-function parseSwapLine(
-    text: string,
-    section: 'words' | 'patterns',
-): { key: string; value: string } | null {
-    if (section === 'words') {
-        const m = text.match(/^\s*-\s*"([^"]+)"\s*->\s*"([^"]+)"\s*$/);
-        return m ? { key: m[1], value: m[2] } : null;
-    }
-    const m = text.match(/^\s*-\s*\/([^/]+)\/\s*->\s*"([^"]+)"\s*$/);
-    return m ? { key: m[1], value: m[2] } : null;
 }
 
 function generateDiffs(changes: FileChange[]): string {
@@ -778,17 +790,29 @@ async function runWeb(): Promise<void> {
             }
 
             if (url.pathname === '/api/diff' && req.method === 'POST') {
-                const body = (await req.json()) as { modifications: Record<string, { deleted?: boolean; edited?: string | null }> };
+                const body = (await req.json()) as {
+                    modifications: Record<string, { deleted?: boolean; edited?: string | null }>;
+                    fileEdits?: Record<string, Record<string, string | null>>;
+                };
                 const modified = applyClientChanges(lines, body.modifications);
-                const changes = collectFileChanges(modified);
+                const changes = [
+                    ...collectFileChanges(modified),
+                    ...collectFileEdits(body.fileEdits ?? {}),
+                ];
                 const diff = changes.length > 0 ? generateDiffs(changes) : '';
                 return Response.json({ diff, fileCount: changes.length });
             }
 
             if (url.pathname === '/api/patch' && req.method === 'POST') {
-                const body = (await req.json()) as { modifications: Record<string, { deleted?: boolean; edited?: string | null }> };
+                const body = (await req.json()) as {
+                    modifications: Record<string, { deleted?: boolean; edited?: string | null }>;
+                    fileEdits?: Record<string, Record<string, string | null>>;
+                };
                 const modified = applyClientChanges(lines, body.modifications);
-                const changes = collectFileChanges(modified);
+                const changes = [
+                    ...collectFileChanges(modified),
+                    ...collectFileEdits(body.fileEdits ?? {}),
+                ];
                 if (changes.length > 0) {
                     const diff = generateDiffs(changes);
                     const patchFile = join(ROOT, 'prompt-explorer.patch');
@@ -815,9 +839,15 @@ async function runWeb(): Promise<void> {
             }
 
             if (url.pathname === '/api/apply' && req.method === 'POST') {
-                const body = (await req.json()) as { modifications: Record<string, { deleted?: boolean; edited?: string | null }> };
+                const body = (await req.json()) as {
+                    modifications: Record<string, { deleted?: boolean; edited?: string | null }>;
+                    fileEdits?: Record<string, Record<string, string | null>>;
+                };
                 const modified = applyClientChanges(lines, body.modifications);
-                const changes = collectFileChanges(modified);
+                const changes = [
+                    ...collectFileChanges(modified),
+                    ...collectFileEdits(body.fileEdits ?? {}),
+                ];
                 for (const c of changes) {
                     writeFileSync(join(ROOT, c.originalPath), c.modifiedContent);
                 }

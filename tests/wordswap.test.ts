@@ -155,6 +155,34 @@ test('irregular source and irregular replacement inflect independently', () => {
     expect(find('running').replacements[0]).toBe('springing');
 });
 
+test('trailing punctuation is absorbed when replacement ends in punct', () => {
+    const swaps = buildSwaps({
+        'in conclusion': 'padding:',
+        'the key insight is': 'something I just made up:',
+    });
+    // comma after "in conclusion" is absorbed by the colon in "padding:"
+    const out1 = applySwaps('In conclusion, we found nothing.', swaps);
+    console.log('punct1:', out1);
+    expect(out1).toBe('Padding: we found nothing.');
+
+    // no trailing punct: replacement appears as-is
+    const out2 = applySwaps('In conclusion we found nothing.', swaps);
+    console.log('punct2:', out2);
+    expect(out2).toBe('Padding: we found nothing.');
+
+    // period after the phrase is absorbed
+    const out3 = applySwaps('The key insight is.', swaps);
+    console.log('punct3:', out3);
+    expect(out3).toBe('Something I just made up:');
+});
+
+test('trailing punctuation is kept when replacement does not end in punct', () => {
+    const swaps = buildSwaps({ 'tapestry': 'big rug' });
+    const out = applySwaps('a tapestry, woven by hand.', swaps);
+    console.log('kept punct:', out);
+    expect(out).toBe('a big rug, woven by hand.');
+});
+
 test('inflectVerb handles regular verbs', () => {
     expect(inflectVerb('show')).toEqual({ '3s': 'shows', past: 'showed', ing: 'showing' });
     expect(inflectVerb('showcase')).toEqual({ '3s': 'showcases', past: 'showcased', ing: 'showcasing' });

@@ -27,13 +27,16 @@
     "prompt": "bun tools/prompt-explorer.ts",
     "prompt:cli": "bun tools/prompt-explorer.ts --cli",
     "prompt:preview": "bun tools/prompt-explorer.ts --preview",
+    "init": "bun tools/init-config.ts",
     "link": "pi install -l $(pwd)",
     "link:global": "pi install $(pwd)"
   },
   "dependencies": {
     "@ayulab/pi-rewind": "^0.4.6",
     "context-mode": "^1.0.169",
+    "env-paths": "^4.0.0",
     "pi-web-access": "^0.13.0",
+    "smol-toml": "^1.7.1",
     "token-rate-pi": "^1.0.5"
   },
   "bundledDependencies": ["pi-web-access", "@ayulab/pi-rewind", "context-mode", "token-rate-pi"],

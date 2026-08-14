@@ -6,8 +6,7 @@
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { ensureGlobalSetting } from './lib/settings-store';
-
-const IMAGE_WIDTH_CELLS = 180;
+import { config } from './lib/config';
 
 export default function (pi: ExtensionAPI) {
     pi.on('session_start', async (_event, ctx) => {
@@ -15,7 +14,7 @@ export default function (pi: ExtensionAPI) {
             return;
         }
         try {
-            ensureGlobalSetting(['terminal', 'imageWidthCells'], IMAGE_WIDTH_CELLS);
+            ensureGlobalSetting(['terminal', 'imageWidthCells'], config.images.width);
         } catch {
             // best effort: a settings write failure must never break startup.
         }

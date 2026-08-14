@@ -140,8 +140,10 @@ aside.open { width: 45%; min-width: 400px; }
     white-space: pre;
     tab-size: 4;
 }
-.diff-add { color: var(--green); }
-.diff-del { color: var(--red); }
+.diff-add { color: #3fb95088; }
+.diff-del { color: #f8514988; }
+.diff-add .word-hl { color: var(--green); background: #3fb95022; border-radius: 2px; }
+.diff-del .word-hl { color: var(--red); background: #f8514922; border-radius: 2px; }
 .diff-hunk { color: var(--blue); }
 .diff-file { color: var(--yellow); font-weight: 600; }
 
@@ -927,31 +929,33 @@ function startSpanEdit(lineIdx, spanIdx, el, srcRef, originalText) {
     };
 }
 
-function finishSpanEdit() {
+async function finishSpanEdit() {
     if (!editingSpan) return;
     const { element: el, srcRef, originalText } = editingSpan;
     const newText = el.textContent || '';
     el.contentEditable = 'false';
     el.onkeydown = null;
+    editingSpan = null;
 
     if (newText !== originalText) {
-        // apply surgical edit: replace the value in the source line at the known col
-        // fetch the current source line (from cache or original)
-        fetchSourceLine(srcRef.file, srcRef.line).then(sourceLine => {
-            if (!sourceLine) return;
-            const col0 = srcRef.col - 1;
-            const end = sourceLine.indexOf('"', col0);
-            if (end < 0) return;
-            const newSourceLine = sourceLine.slice(0, col0) + newText + sourceLine.slice(end);
-            addFileEdit(srcRef.file, srcRef.line, newSourceLine);
-            editingSpan = null;
-            renderLines();
-        });
-        return;
+        try {
+            const sourceLine = await fetchSourceLine(srcRef.file, srcRef.line);
+            if (sourceLine) {
+                const col0 = srcRef.col - 1;
+                let end = col0;
+                while (end < sourceLine.length && sourceLine[end] !== '"') {
+                    if (sourceLine[end] === '\\') end++;
+                    end++;
+                }
+                const newSourceLine = sourceLine.slice(0, col0) + newText + sourceLine.slice(end);
+                addFileEdit(srcRef.file, srcRef.line, newSourceLine);
+            }
+        } catch (e) {
+            toast('edit failed: ' + e.message);
+        }
     }
-
-    editingSpan = null;
     renderLines();
+    if (sidebarRef) renderSidebar();
 }
 
 function cancelSpanEdit() {
@@ -1080,7 +1084,29 @@ function closeDiff() {
 }
 
 let sourceCache = {};
+let sidebarRef = null; // { file, line, col } currently shown in sidebar
 async function showSourceFile(ref) {
+    const panel = document.getElementById('diff-panel');
+    panel.classList.add('open');
+    sidebarRef = ref;
+
+    if (!sourceCache[ref.file]) {
+        document.getElementById('diff-content').innerHTML = '<span style="color:var(--text-dim)">loading...</span>';
+        const fname = ref.file.split('/').pop();
+        const res = await fetch('/api/raw/' + encodeURIComponent(fname));
+        const data = await res.json();
+        if (data.error) {
+            document.getElementById('diff-content').innerHTML = '<span style="color:var(--red)">file not found</span>';
+            return;
+        }
+        sourceCache[ref.file] = data.content;
+    }
+    renderSidebar();
+}
+
+function renderSidebar() {
+    if (!sidebarRef) return;
+    const ref = sidebarRef;
     const panel = document.getElementById('diff-panel');
     const header = panel.querySelector('.diff-header span');
     const body = document.getElementById('diff-content');
@@ -1088,27 +1114,22 @@ async function showSourceFile(ref) {
     const fname = ref.file.split('/').pop();
     header.textContent = `${fname}:${ref.line}:${ref.col}`;
     if (ref.path) header.textContent += ` (${ref.path})`;
-    panel.classList.add('open');
-
-    if (!sourceCache[ref.file]) {
-        body.innerHTML = '<span style="color:var(--text-dim)">loading...</span>';
-        const res = await fetch('/api/raw/' + encodeURIComponent(ref.file.split('/').pop()));
-        const data = await res.json();
-        if (data.error) {
-            body.innerHTML = '<span style="color:var(--red)">file not found</span>';
-            return;
-        }
-        sourceCache[ref.file] = data.content;
-    }
 
     const content = sourceCache[ref.file];
-    const lines = content.split('\n');
+    if (!content) return;
+    const srcLines = content.split('\n');
     body.innerHTML = '';
 
-    for (let i = 0; i < lines.length; i++) {
+    for (let i = 0; i < srcLines.length; i++) {
         const lineNum = i + 1;
+        const hasEdit = fileEdits[ref.file]?.[lineNum] !== undefined;
+        const lineText = hasEdit ? (fileEdits[ref.file][lineNum] ?? '') : srcLines[i];
+        const isDeleted = hasEdit && fileEdits[ref.file][lineNum] === null;
+
         const div = document.createElement('div');
         div.className = 'source-line' + (lineNum === ref.line ? ' highlighted' : '');
+        if (isDeleted) div.style.opacity = '0.3';
+        if (hasEdit && !isDeleted) div.style.background = 'var(--yellow-dim)';
 
         const gutter = document.createElement('span');
         gutter.className = 'src-gutter';
@@ -1117,14 +1138,14 @@ async function showSourceFile(ref) {
         const src = document.createElement('span');
         src.className = 'src-content';
 
-        if (lineNum === ref.line && ref.col > 0) {
-            // highlight the column region
-            const text = lines[i];
-            const col0 = ref.col - 1; // 0-indexed
-            // find the extent: look for the closing quote
-            let end = text.indexOf('"', col0);
-            if (end < 0) end = text.length;
-
+        if (lineNum === ref.line && ref.col > 0 && !hasEdit) {
+            const text = srcLines[i];
+            const col0 = ref.col - 1;
+            let end = col0;
+            while (end < text.length && text[end] !== '"') {
+                if (text[end] === '\\') end++;
+                end++;
+            }
             src.appendChild(document.createTextNode(text.slice(0, col0)));
             const hl = document.createElement('span');
             hl.className = 'source-highlight-col';
@@ -1132,8 +1153,12 @@ async function showSourceFile(ref) {
             src.appendChild(hl);
             src.appendChild(document.createTextNode(text.slice(end)));
         } else {
-            src.textContent = lines[i] || ' ';
+            src.textContent = lineText || ' ';
         }
+
+        const ln = lineNum;
+        const fp = ref.file;
+        div.ondblclick = () => startSidebarEdit(fp, ln, div, src);
 
         div.appendChild(gutter);
         div.appendChild(src);
@@ -1145,8 +1170,16 @@ async function showSourceFile(ref) {
     if (hl) setTimeout(() => hl.scrollIntoView({ block: 'center' }), 50);
 }
 
+function hasAnyChanges() {
+    return Object.keys(modifications).length > 0 || Object.keys(fileEdits).length > 0;
+}
+
+function changesPayload() {
+    return JSON.stringify({ modifications, fileEdits });
+}
+
 async function savePatch() {
-    if (Object.keys(modifications).length === 0) {
+    if (!hasAnyChanges()) {
         toast('no changes');
         return;
     }
@@ -1154,7 +1187,7 @@ async function savePatch() {
         const res = await fetch('/api/diff', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ modifications }),
+            body: changesPayload(),
         });
         const data = await res.json();
         if (!data.diff) {
@@ -1165,6 +1198,30 @@ async function savePatch() {
     } catch (e) {
         toast('error: ' + e.message);
     }
+}
+
+// word-level diff: highlight only the changed parts within paired -/+ lines.
+function renderWordDiff(container, oldText, newText, isAdd) {
+    const prefix = isAdd ? '+' : '-';
+    const text = isAdd ? newText : oldText;
+    // find common prefix and suffix
+    let pre = 0;
+    while (pre < oldText.length && pre < newText.length && oldText[pre] === newText[pre]) pre++;
+    let suf = 0;
+    while (suf < oldText.length - pre && suf < newText.length - pre
+        && oldText[oldText.length - 1 - suf] === newText[newText.length - 1 - suf]) suf++;
+
+    const start = pre;
+    const end = text.length - suf;
+
+    container.appendChild(document.createTextNode(prefix + text.slice(0, start)));
+    if (start < end) {
+        const hl = document.createElement('span');
+        hl.className = 'word-hl';
+        hl.textContent = text.slice(start, end);
+        container.appendChild(hl);
+    }
+    container.appendChild(document.createTextNode(text.slice(end) + '\n'));
 }
 
 function showPatchModal(diff, fileCount) {
@@ -1187,16 +1244,39 @@ function showPatchModal(diff, fileCount) {
     closeBtn.onclick = () => overlay.remove();
     header.appendChild(closeBtn);
 
-    // body: rendered diff
+    // body: rendered diff with word-level highlighting
     const body = document.createElement('div');
     body.className = 'modal-body';
-    for (const line of diff.split('\n')) {
+    const diffLines = diff.split('\n');
+    for (let di = 0; di < diffLines.length; di++) {
+        const line = diffLines[di];
         const span = document.createElement('span');
-        if (line.startsWith('+++') || line.startsWith('---')) span.className = 'diff-file';
-        else if (line.startsWith('@@')) span.className = 'diff-hunk';
-        else if (line.startsWith('+')) span.className = 'diff-add';
-        else if (line.startsWith('-')) span.className = 'diff-del';
-        span.textContent = line + '\n';
+        if (line.startsWith('+++') || line.startsWith('---')) {
+            span.className = 'diff-file';
+            span.textContent = line + '\n';
+        } else if (line.startsWith('@@')) {
+            span.className = 'diff-hunk';
+            span.textContent = line + '\n';
+        } else if (line.startsWith('-') && di + 1 < diffLines.length && diffLines[di + 1].startsWith('+')) {
+            // paired del/add: word-level highlight
+            span.className = 'diff-del';
+            renderWordDiff(span, line.slice(1), diffLines[di + 1].slice(1), false);
+            body.appendChild(span);
+            const addSpan = document.createElement('span');
+            addSpan.className = 'diff-add';
+            renderWordDiff(addSpan, line.slice(1), diffLines[di + 1].slice(1), true);
+            body.appendChild(addSpan);
+            di++; // skip the + line
+            continue;
+        } else if (line.startsWith('+')) {
+            span.className = 'diff-add';
+            span.textContent = line + '\n';
+        } else if (line.startsWith('-')) {
+            span.className = 'diff-del';
+            span.textContent = line + '\n';
+        } else {
+            span.textContent = line + '\n';
+        }
         body.appendChild(span);
     }
 
@@ -1229,7 +1309,7 @@ function showPatchModal(diff, fileCount) {
         const res = await fetch('/api/patch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ modifications }),
+            body: changesPayload(),
         });
         const data = await res.json();
         if (data.path) {
@@ -1247,13 +1327,14 @@ function showPatchModal(diff, fileCount) {
         const res = await fetch('/api/apply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ modifications }),
+            body: changesPayload(),
         });
         const data = await res.json();
         if (data.applied) {
             toast(`applied to ${data.fileCount} file(s)`);
             overlay.remove();
             modifications = {};
+            fileEdits = {};
             undoStack = [];
             sourceCache = {};
             const r = await fetch('/api/lines');

@@ -167,11 +167,11 @@ export function wrapRawDict(
                     path: `${section}["${key}"].verb${templates.length > 1 ? `[${ti}]` : ''}`,
                 }));
             }
-            const displayKey = new SourceStr(`${key} (all forms)`, {
+            const markedKey = mark(key, {
                 file, line: kp?.line ?? 0, col: kp?.col ?? 0,
                 path: `${section} key`,
-            });
-            result.push([displayKey, parts.join(' | ')]);
+            }) + ' (all forms)';
+            result.push([markedKey, parts.join('" | "')]);
         } else {
             result.push([wrappedKey, String(value)]);
         }

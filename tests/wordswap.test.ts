@@ -216,13 +216,12 @@ test('wrapRawDict produces SourceStr pairs with JSON positions', () => {
     const dict = { seam: 'whatchamacallit' };
     const wrapped = wrapRawDict(dict, 'test.json', json, 'words');
     expect(wrapped).toHaveLength(1);
-    const [k, v] = wrapped[0];
-    expect((k as SourceStr).valueOf()).toBe('seam');
-    expect((v as SourceStr).valueOf()).toBe('whatchamacallit');
-    expect((k as SourceStr).meta.line).toBe(3);
-    expect((v as SourceStr).meta.line).toBe(3);
-    console.log('key meta:', (k as SourceStr).meta);
-    console.log('val meta:', (v as SourceStr).meta);
+    const [k, vs] = wrapped[0];
+    expect(k.valueOf()).toBe('seam');
+    expect(vs).toHaveLength(1);
+    expect((vs[0] as SourceStr).valueOf()).toBe('whatchamacallit');
+    expect(k.meta.line).toBe(3);
+    expect((vs[0] as SourceStr).meta.line).toBe(3);
 });
 
 test('wrapRawDict handles array values with per-element markers', () => {
@@ -230,18 +229,13 @@ test('wrapRawDict handles array values with per-element markers', () => {
     const dict = { multi: ['alpha', 'beta'] };
     const wrapped = wrapRawDict(dict, 'test.json', json, 'words');
     expect(wrapped).toHaveLength(1);
-    const [, v] = wrapped[0];
-    // v is a pre-marked string, not a SourceStr
-    expect(typeof v).toBe('string');
-    const spans = parseSpans(v as string);
-    console.log('array spans:', spans.map(s => `[${s.source?.path ?? 'tpl'}]${s.text}`).join(''));
-    // should have: marker(alpha) + " | " + marker(beta)
-    const dataSpans = spans.filter(s => s.source !== null);
-    expect(dataSpans).toHaveLength(2);
-    expect(dataSpans[0].text).toBe('alpha');
-    expect(dataSpans[0].source?.path).toBe('words["multi"][0]');
-    expect(dataSpans[1].text).toBe('beta');
-    expect(dataSpans[1].source?.path).toBe('words["multi"][1]');
+    const [, vs] = wrapped[0];
+    // values is an array of SourceStr, not a pre-joined string
+    expect(vs).toHaveLength(2);
+    expect((vs[0] as SourceStr).valueOf()).toBe('alpha');
+    expect((vs[0] as SourceStr).meta.path).toBe('words["multi"][0]');
+    expect((vs[1] as SourceStr).valueOf()).toBe('beta');
+    expect((vs[1] as SourceStr).meta.path).toBe('words["multi"][1]');
 });
 
 test('buildPatternSwaps creates regex capture group swaps', () => {

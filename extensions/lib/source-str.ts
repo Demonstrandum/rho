@@ -167,11 +167,7 @@ export function wrapRawDict(
                     path: `${section}["${key}"].verb${templates.length > 1 ? `[${ti}]` : ''}`,
                 }));
             }
-            const markedKey = mark(key, {
-                file, line: kp?.line ?? 0, col: kp?.col ?? 0,
-                path: `${section} key`,
-            }) + ' (all forms)';
-            result.push([markedKey, parts.join('" | "')]);
+            result.push([wrappedKey, parts.join('" | "')]);
         } else {
             result.push([wrappedKey, String(value)]);
         }
@@ -210,7 +206,7 @@ export function wrapEntries(
     }
 
     return entries.map(([k, v]) => {
-        const pos = positions[k] ?? positions[k.replace(/ \(all forms\)$/, '')];
+        const pos = positions[k];
         return [
             new SourceStr(k, {
                 file, line: pos?.kl ?? 0, col: pos?.kc ?? 0,

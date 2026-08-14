@@ -112,12 +112,14 @@ function scanStringPositions(
 // wrap entries from a raw JSON dict. handles string, array, and object
 // values. arrays and objects produce pre-marked strings with per-element
 // markers so each component traces to its exact JSON position.
+// returns [key, values[]] where values is always an array.
+// the template handles all formatting (quoting, joining).
 export function wrapRawDict(
     dict: Record<string, unknown>,
     file: string,
     jsonText: string,
     section: string,
-): [SourceStr | string, SourceStr | string][] {
+): [SourceStr, (SourceStr | string)[]][] {
     const jsonLines = jsonText.split('\n');
     const keyPos: Record<string, { line: number; col: number }> = {};
     for (let i = 0; i < jsonLines.length; i++) {
@@ -130,7 +132,7 @@ export function wrapRawDict(
         if (raw !== unesc) keyPos[raw] = { line: i + 1, col };
     }
 
-    const result: [SourceStr | string, SourceStr | string][] = [];
+    const result: [SourceStr, (SourceStr | string)[]][] = [];
 
     for (const [key, value] of Object.entries(dict)) {
         const kp = keyPos[key];
@@ -143,33 +145,32 @@ export function wrapRawDict(
             const ln = kp ? jsonLines[kp.line - 1] : '';
             const colonIdx = ln.indexOf(':', (kp?.col ?? 0));
             const vc = colonIdx >= 0 ? ln.indexOf('"', colonIdx + 1) : -1;
-            result.push([
-                wrappedKey,
+            result.push([wrappedKey, [
                 new SourceStr(value, {
                     file, line: kp?.line ?? 0, col: vc >= 0 ? vc + 2 : 0,
                     path: `${section}["${key}"]`,
                 }),
-            ]);
+            ]]);
         } else if (Array.isArray(value)) {
             const elems = scanStringPositions(jsonLines, (kp?.line ?? 1) - 1);
-            const parts = elems.map((e, i) =>
-                mark(e.text, { file, line: e.line, col: e.col, path: `${section}["${key}"][${i}]` }),
-            );
-            result.push([wrappedKey, parts.join('" | "')]);
+            result.push([wrappedKey, elems.map((e, i) =>
+                new SourceStr(e.text, {
+                    file, line: e.line, col: e.col,
+                    path: `${section}["${key}"][${i}]`,
+                }),
+            )]);
         } else if (typeof value === 'object' && value !== null && 'verb' in value) {
             const verbStrings = scanStringPositions(jsonLines, (kp?.line ?? 1) - 1);
             const vObj = value as { verb: string | string[] };
             const templates = Array.isArray(vObj.verb) ? vObj.verb : [vObj.verb];
-            const parts: string[] = [];
-            for (let ti = 0; ti < templates.length && ti < verbStrings.length; ti++) {
-                parts.push(mark(verbStrings[ti].text, {
-                    file, line: verbStrings[ti].line, col: verbStrings[ti].col,
-                    path: `${section}["${key}"].verb${templates.length > 1 ? `[${ti}]` : ''}`,
-                }));
-            }
-            result.push([wrappedKey, parts.join('" | "')]);
+            result.push([wrappedKey, verbStrings.slice(0, templates.length).map((e, i) =>
+                new SourceStr(e.text, {
+                    file, line: e.line, col: e.col,
+                    path: `${section}["${key}"].verb${templates.length > 1 ? `[${i}]` : ''}`,
+                }),
+            )]);
         } else {
-            result.push([wrappedKey, String(value)]);
+            result.push([wrappedKey, [String(value)]]);
         }
     }
 

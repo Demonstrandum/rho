@@ -217,16 +217,18 @@ const _file = loadSwapFile();
 export const swaps = buildSwaps(_file.words);
 export const patternSwaps = _file.patterns ? buildPatternSwaps(_file.patterns) : [];
 
-// flatten for the vocabulary.md template: [displayKey, displayValue][] pairs.
-export function flattenEntry(key: string, value: WordValue): [string, string] {
-    if (typeof value === 'string') return [key, value];
-    if (Array.isArray(value)) return [key, value.join('" | "')];
+// extract display values for the vocabulary.md template.
+// values are always string[] so the template handles formatting.
+export function extractValues(key: string, value: WordValue): [string, string[]] {
+    if (typeof value === 'string') return [key, [value]];
+    if (Array.isArray(value)) return [key, value as string[]];
     const templates = Array.isArray(value.verb) ? value.verb : [value.verb];
-    return [key, templates.join('" | "')];
+    return [key, templates];
 }
-export const wordEntries: [string, string][] = Object.entries(_file.words)
-    .map(([k, v]) => flattenEntry(k, v));
-export const patternEntries = Object.entries(_file.patterns ?? {}) as [string, string][];
+export const wordEntries: [string, string[]][] = Object.entries(_file.words)
+    .map(([k, v]) => extractValues(k, v));
+export const patternEntries: [string, string[]][] = Object.entries(_file.patterns ?? {})
+    .map(([k, v]) => [k, [v]]);
 
 export default function (pi: ExtensionAPI) {
     if (swaps.length === 0 && patternSwaps.length === 0) return;

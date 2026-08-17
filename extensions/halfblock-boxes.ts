@@ -1,16 +1,13 @@
 // replace the default Box shell on built-in tools with half-block edges.
 // saves one line of vertical space per tool call (the blank padding line
-// above and below the content becomes a half-height colored strip).
-//
-// uses renderShell: "self" on each built-in tool override. execution and
-// slot renderers (renderCall, renderResult) inherit from the built-in.
+// above and below becomes a half-height colored strip).
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, type Component } from '@earendil-works/pi-tui';
 
-const LOWER_HALF = '\u2584'; // ▄
-const UPPER_HALF = '\u2580'; // ▀
+const LOWER_HALF = '\u2584';
+const UPPER_HALF = '\u2580';
 
-function visibleWidth(s: string): number {
+function stripAnsi(s: string): number {
     return s.replace(/\x1b\[[0-9;]*m/g, '').replace(/\x1b\][^\x07]*\x07/g, '').length;
 }
 
@@ -18,28 +15,28 @@ class HalfBlockBox implements Component {
     private child: Component | null = null;
     private bgFn: (s: string) => string;
     private fgColor: string;
-    private paddingX: number;
+    private px: number;
 
-    constructor(bgFn: (s: string) => string, fgColor: string, paddingX = 1) {
+    constructor(bgFn: (s: string) => string, fgColor: string, px = 1) {
         this.bgFn = bgFn;
         this.fgColor = fgColor;
-        this.paddingX = paddingX;
+        this.px = px;
     }
 
-    setChild(child: Component) { this.child = child; }
+    setChild(c: Component) { this.child = c; }
 
     render(width: number): string[] {
-        const out: string[] = [];
         const reset = '\x1b[0m';
-        const pad = ' '.repeat(this.paddingX);
+        const pad = ' '.repeat(this.px);
+        const out: string[] = [];
 
         out.push(`${this.fgColor}${LOWER_HALF.repeat(width)}${reset}`);
 
         if (this.child) {
-            const inner = Math.max(1, width - this.paddingX * 2);
-            for (const cl of this.child.render(inner)) {
-                const fill = ' '.repeat(Math.max(0, inner - visibleWidth(cl)));
-                out.push(this.bgFn(`${pad}${cl}${fill}${pad}`));
+            const inner = Math.max(1, width - this.px * 2);
+            for (const line of this.child.render(inner)) {
+                const fill = ' '.repeat(Math.max(0, inner - stripAnsi(line)));
+                out.push(this.bgFn(`${pad}${line}${fill}${pad}`));
             }
         }
 
@@ -50,51 +47,52 @@ class HalfBlockBox implements Component {
     invalidate() { this.child?.invalidate(); }
 }
 
-// extract the fg ANSI escape for the tool bg color (to use on half-block chars)
-function extractFgFromBg(theme: any): string {
+function extractToolFgColor(theme: any): string {
     try {
-        const sample = (theme.bg as Function)('toolBg', ' ');
+        const sample = theme.bg('toolBg', ' ');
         const m = sample.match(/\x1b\[48;2;(\d+);(\d+);(\d+)m/);
         if (m) return `\x1b[38;2;${m[1]};${m[2]};${m[3]}m`;
-    } catch { /* */ }
+    } catch { /* theme key might differ */ }
     return '\x1b[38;5;236m';
 }
 
 export default function (pi: ExtensionAPI) {
+    let registered = false;
+
     pi.on('session_start', async (_event, ctx) => {
-        const theme = ctx.ui.theme as any;
-        if (!theme) return;
+        if (registered) return;
+        registered = true;
 
-        const toolBg = (s: string) => (theme.bg as Function)('toolBg', s) as string;
-        const fgColor = extractFgFromBg(theme);
+        try {
+            const theme = ctx.ui.theme as any;
+            const toolBg = theme
+                ? (s: string) => theme.bg('toolBg', s)
+                : (s: string) => `\x1b[48;5;236m${s}\x1b[0m`;
+            const fgColor = theme ? extractToolFgColor(theme) : '\x1b[38;5;236m';
 
-        for (const toolInfo of (pi as any).getAllTools()) {
-            const info = toolInfo as any;
-            // only override the built-in tools (they have sourceInfo.source === 'builtin')
-            if (info.sourceInfo?.source !== 'builtin') continue;
+            for (const info of pi.getAllTools()) {
+                if ((info as any).sourceInfo?.source !== 'builtin') continue;
 
-            (pi as any).registerTool({
-                name: info.name,
-                label: info.label ?? info.name,
-                description: info.description,
-                parameters: info.parameters,
-                renderShell: 'self',
-                executionMode: info.executionMode,
-                execute: info.execute,
-                // renderCall omitted: inherits built-in (tool name label).
-                // renderResult: wrap in HalfBlockBox instead of default Box.
-                renderResult(result: any, options: any, thm: any, context: any) {
-                    let box = context.lastComponent as HalfBlockBox | undefined;
-                    if (!box || !(box instanceof HalfBlockBox)) {
-                        box = new HalfBlockBox(toolBg, fgColor);
-                    }
-                    const content = typeof result === 'string'
-                        ? result
-                        : result?.content?.[0]?.text ?? JSON.stringify(result);
-                    box.setChild(new Text(content, 0, 0));
-                    return box;
-                },
-            });
+                (pi.registerTool as any)({
+                    name: info.name,
+                    description: info.description,
+                    parameters: info.parameters,
+                    renderShell: 'self',
+                    renderResult(result: any, _options: any, _thm: any, context: any) {
+                        let box = context.lastComponent as HalfBlockBox | undefined;
+                        if (!box || !(box instanceof HalfBlockBox)) {
+                            box = new HalfBlockBox(toolBg, fgColor);
+                        }
+                        const text = typeof result === 'string'
+                            ? result
+                            : result?.content?.[0]?.text ?? JSON.stringify(result);
+                        box.setChild(new Text(text, 0, 0));
+                        return box;
+                    },
+                });
+            }
+        } catch (e) {
+            // if anything fails, skip. default Box rendering still works.
         }
     });
 }

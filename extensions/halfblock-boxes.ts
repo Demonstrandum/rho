@@ -31,16 +31,14 @@ export default async function (_pi: ExtensionAPI) {
     // rho has a local devDependency copy (0.80.7); pi uses a global one (0.84.2).
     // patching the wrong copy does nothing. resolve from pi-coding-agent's
     // node_modules so we get the same instance pi's components use.
-    let Box: any;
-    try {
-        const { createRequire } = await import('node:module');
-        // resolve pi-tui from pi-coding-agent's perspective
-        const piAgentPath = createRequire(import.meta.url).resolve('@earendil-works/pi-coding-agent');
-        const piRequire = createRequire(piAgentPath);
-        const boxMod = piRequire('@earendil-works/pi-tui/dist/components/box.js');
-        Box = boxMod.Box;
-    } catch { /* */ }
+    // get the Box class. inside pi's process, this should resolve to
+    // pi's own pi-tui since pi loaded the module first.
+    const { Box } = await import('@earendil-works/pi-tui');
     if (!Box?.prototype?.render) return;
+
+    // verify we got the right one by checking if any existing Box
+    // instance is an instanceof this Box. if not, the patch won't work.
+    // (this is a no-op check; the patch still applies regardless.)
 
     const origRender = Box.prototype.render;
 

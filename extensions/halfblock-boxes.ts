@@ -31,33 +31,24 @@ export default function (_pi: ExtensionAPI) {
     const origRender = Box.prototype.render;
 
     Box.prototype.render = function (this: any, width: number): string[] {
-        // run the original render
-        const lines: string[] = origRender.call(this, width);
-        if (lines.length === 0) return lines;
-
-        const paddingY: number = this.paddingY ?? 1;
-        if (paddingY === 0) return lines;
+        const realPaddingY: number = this.paddingY ?? 1;
+        if (realPaddingY === 0) return origRender.call(this, width);
 
         const fg = bgFnToFg(this.bgFn);
-        if (!fg) return lines; // no bg function, nothing to patch
+        if (!fg) return origRender.call(this, width);
 
-        // the original output is:
-        //   [paddingY blank bg lines] [content lines] [paddingY blank bg lines]
-        // replace each top padding line with a lower-half-block line,
-        // and each bottom padding line with an upper-half-block line.
+        // zero out paddingY so the original render produces no blank lines
+        this.paddingY = 0;
+        this.invalidateCache();
+        const lines: string[] = origRender.call(this, width);
+        this.paddingY = realPaddingY;
+        this.invalidateCache();
 
-        const result = [...lines];
+        if (lines.length === 0) return lines;
 
-        // top padding: first paddingY lines
-        for (let i = 0; i < paddingY && i < result.length; i++) {
-            result[i] = halfBlockLine(LOWER_HALF, width, fg);
-        }
-
-        // bottom padding: last paddingY lines
-        for (let i = 0; i < paddingY && i < result.length; i++) {
-            result[result.length - 1 - i] = halfBlockLine(UPPER_HALF, width, fg);
-        }
-
-        return result;
+        // add half-block edges
+        lines.unshift(halfBlockLine(LOWER_HALF, width, fg));
+        lines.push(halfBlockLine(UPPER_HALF, width, fg));
+        return lines;
     };
 }

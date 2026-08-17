@@ -21,6 +21,20 @@ function halfBlockLine(char: string, width: number, fgColor: string): string {
     return `${fgColor}${char.repeat(width)}\x1b[39m`;
 }
 
+// set of bg ANSI sequences that get half-block treatment (tool boxes).
+// populated in session_start from theme. boxes with other bg colors
+// (user messages, custom messages) keep their original padding.
+const toolBgSet = new Set<string>();
+
+function isToolBg(bgFn: ((s: string) => string) | undefined): boolean {
+    if (!bgFn || toolBgSet.size === 0) return false;
+    try {
+        const sample = bgFn(' ');
+        const m = sample.match(/\x1b\[48;2;\d+;\d+;\d+m/) ?? sample.match(/\x1b\[48;5;\d+m/);
+        return m ? toolBgSet.has(m[0]) : false;
+    } catch { return false; }
+}
+
 const origRender = Box.prototype.render;
 
 Box.prototype.render = function (this: any, width: number): string[] {
@@ -28,25 +42,37 @@ Box.prototype.render = function (this: any, width: number): string[] {
     const paddingY: number = this.paddingY ?? 1;
     if (paddingY === 0 || lines.length < paddingY * 2 + 1) return lines;
 
+    if (!isToolBg(this.bgFn)) return lines;
+
     const fg = bgFnToFg(this.bgFn);
     if (!fg) return lines;
 
-    // replace top padding lines with lower-half-blocks
     for (let i = 0; i < paddingY; i++) {
         lines[i] = halfBlockLine(LOWER_HALF, width, fg);
     }
-    // replace bottom padding lines with upper-half-blocks
     for (let i = 0; i < paddingY; i++) {
         lines[lines.length - 1 - i] = halfBlockLine(UPPER_HALF, width, fg);
     }
     return lines;
 };
 
-// spacers between boxes become redundant: the half-block edges
-// already provide visual separation. zero them out.
-const origSpacerRender = Spacer.prototype.render;
+// spacers are inside tool-execution components (above the Box).
+// with half-block edges they're redundant. zero them out.
 Spacer.prototype.render = function (_width: number): string[] {
     return [];
 };
 
-export default function (_pi: ExtensionAPI) {}
+export default function (pi: ExtensionAPI) {
+    pi.on('session_start', async (_event, ctx) => {
+        const theme = ctx.ui.theme as any;
+        if (!theme) return;
+        // register the tool bg ANSI sequences
+        for (const key of ['toolSuccessBg', 'toolErrorBg', 'toolPendingBg']) {
+            try {
+                const sample = theme.bg(key, ' ');
+                const m = sample.match(/\x1b\[48;2;\d+;\d+;\d+m/) ?? sample.match(/\x1b\[48;5;\d+m/);
+                if (m) toolBgSet.add(m[0]);
+            } catch { /* */ }
+        }
+    });
+}

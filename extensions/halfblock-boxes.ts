@@ -127,10 +127,10 @@ export default function (pi: ExtensionAPI) {
                         box = new HalfBlockBox(fg, bgFn);
                     }
 
-                    const text = typeof result === 'string'
+                    const raw = typeof result === 'string'
                         ? result
                         : result?.content?.[0]?.text ?? JSON.stringify(result);
-                    box.child = new Text(text, 0, 0);
+                    box.child = new Text(raw.replace(/\n+$/, ''), 0, 0);
                     return box;
                 };
 

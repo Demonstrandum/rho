@@ -35,7 +35,10 @@ export default function (_pi: ExtensionAPI) {
         if (realPaddingY === 0) return origRender.call(this, width);
 
         const fg = bgFnToFg(this.bgFn);
-        if (!fg) return origRender.call(this, width);
+        if (!fg) {
+            console.error('[halfblock] no fg color extracted, bgFn:', typeof this.bgFn);
+            return origRender.call(this, width);
+        }
 
         // zero out paddingY so the original render produces no blank lines
         this.paddingY = 0;

@@ -24,22 +24,21 @@ function halfBlockLine(char: string, width: number, fgColor: string): string {
 const origRender = Box.prototype.render;
 
 Box.prototype.render = function (this: any, width: number): string[] {
-    const realPaddingY: number = this.paddingY ?? 1;
-    if (realPaddingY === 0) return origRender.call(this, width);
+    const lines: string[] = origRender.call(this, width);
+    const paddingY: number = this.paddingY ?? 1;
+    if (paddingY === 0 || lines.length < paddingY * 2 + 1) return lines;
 
     const fg = bgFnToFg(this.bgFn);
-    if (!fg) return origRender.call(this, width);
+    if (!fg) return lines;
 
-    this.paddingY = 0;
-    this.invalidateCache();
-    const lines: string[] = origRender.call(this, width);
-    this.paddingY = realPaddingY;
-    this.invalidateCache();
-
-    if (lines.length === 0) return lines;
-
-    lines.unshift(halfBlockLine(LOWER_HALF, width, fg));
-    lines.push(halfBlockLine(UPPER_HALF, width, fg));
+    // replace top padding lines with lower-half-blocks
+    for (let i = 0; i < paddingY; i++) {
+        lines[i] = halfBlockLine(LOWER_HALF, width, fg);
+    }
+    // replace bottom padding lines with upper-half-blocks
+    for (let i = 0; i < paddingY; i++) {
+        lines[lines.length - 1 - i] = halfBlockLine(UPPER_HALF, width, fg);
+    }
     return lines;
 };
 

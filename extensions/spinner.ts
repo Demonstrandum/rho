@@ -310,7 +310,7 @@ export default function (pi: ExtensionAPI) {
             ? parseVerb(evalTemplates(rawLine))
             : { text: 'Toiled', preposition: 'for', trail: '', sigil: config.spinner.done };
         if (ctx !== undefined) {
-            ctx.ui.notify(formatVerb(ctx.ui.theme, done, elapsed), 'info');
+            ctx.ui.notify('\n' + formatVerb(ctx.ui.theme, done, elapsed) + '\n', 'info');
         }
     });
 

@@ -21,18 +21,23 @@ function halfBlockLine(char: string, width: number, fgColor: string): string {
     return `${fgColor}${char.repeat(width)}\x1b[39m`;
 }
 
-// set of bg ANSI sequences that get half-block treatment (tool boxes).
-// populated in session_start from theme. boxes with other bg colors
-// (user messages, custom messages) keep their original padding.
-const toolBgSet = new Set<string>();
+// bg ANSI sequences to EXCLUDE from half-block treatment (user messages).
+// populated in session_start. before that, all boxes get half-blocks.
+const skipBgSet = new Set<string>();
 
-function isToolBg(bgFn: ((s: string) => string) | undefined): boolean {
-    if (!bgFn || toolBgSet.size === 0) return false;
+function extractBgAnsi(bgFn: ((s: string) => string) | undefined): string | null {
+    if (!bgFn) return null;
     try {
         const sample = bgFn(' ');
         const m = sample.match(/\x1b\[48;2;\d+;\d+;\d+m/) ?? sample.match(/\x1b\[48;5;\d+m/);
-        return m ? toolBgSet.has(m[0]) : false;
-    } catch { return false; }
+        return m ? m[0] : null;
+    } catch { return null; }
+}
+
+function shouldSkip(bgFn: ((s: string) => string) | undefined): boolean {
+    if (skipBgSet.size === 0) return false;
+    const ansi = extractBgAnsi(bgFn);
+    return ansi ? skipBgSet.has(ansi) : false;
 }
 
 const origRender = Box.prototype.render;
@@ -42,7 +47,7 @@ Box.prototype.render = function (this: any, width: number): string[] {
     const paddingY: number = this.paddingY ?? 1;
     if (paddingY === 0 || lines.length < paddingY * 2 + 1) return lines;
 
-    if (!isToolBg(this.bgFn)) return lines;
+    if (shouldSkip(this.bgFn)) return lines;
 
     const fg = bgFnToFg(this.bgFn);
     if (!fg) return lines;
@@ -66,12 +71,12 @@ export default function (pi: ExtensionAPI) {
     pi.on('session_start', async (_event, ctx) => {
         const theme = ctx.ui.theme as any;
         if (!theme) return;
-        // register the tool bg ANSI sequences
-        for (const key of ['toolSuccessBg', 'toolErrorBg', 'toolPendingBg']) {
+        // register bg colors to EXCLUDE (user/custom message bubbles)
+        for (const key of ['userMessageBg', 'customMessageBg']) {
             try {
                 const sample = theme.bg(key, ' ');
                 const m = sample.match(/\x1b\[48;2;\d+;\d+;\d+m/) ?? sample.match(/\x1b\[48;5;\d+m/);
-                if (m) toolBgSet.add(m[0]);
+                if (m) skipBgSet.add(m[0]);
             } catch { /* */ }
         }
     });

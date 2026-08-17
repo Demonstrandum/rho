@@ -3,7 +3,6 @@
 // args, syntax highlighting, diffs). every component that uses Box
 // (tools, user messages, custom messages) gets the treatment.
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { Box, visibleWidth } from '@earendil-works/pi-tui';
 
 const LOWER_HALF = '\u2584';
 const UPPER_HALF = '\u2580';
@@ -27,8 +26,22 @@ function halfBlockLine(char: string, width: number, fgColor: string): string {
     return `${fgColor}${char.repeat(width)}\x1b[39m`;
 }
 
-export default function (_pi: ExtensionAPI) {
-    console.error('[halfblock] patching Box.prototype.render');
+export default async function (_pi: ExtensionAPI) {
+    // find the Box class from pi's own pi-tui instance.
+    // rho has a local devDependency copy (0.80.7); pi uses a global one (0.84.2).
+    // patching the wrong copy does nothing. resolve from pi-coding-agent's
+    // node_modules so we get the same instance pi's components use.
+    let Box: any;
+    try {
+        const { createRequire } = await import('node:module');
+        // resolve pi-tui from pi-coding-agent's perspective
+        const piAgentPath = createRequire(import.meta.url).resolve('@earendil-works/pi-coding-agent');
+        const piRequire = createRequire(piAgentPath);
+        const boxMod = piRequire('@earendil-works/pi-tui/dist/components/box.js');
+        Box = boxMod.Box;
+    } catch { /* */ }
+    if (!Box?.prototype?.render) return;
+
     const origRender = Box.prototype.render;
 
     Box.prototype.render = function (this: any, width: number): string[] {
@@ -36,10 +49,7 @@ export default function (_pi: ExtensionAPI) {
         if (realPaddingY === 0) return origRender.call(this, width);
 
         const fg = bgFnToFg(this.bgFn);
-        if (!fg) {
-            console.error('[halfblock] no fg color extracted, bgFn:', typeof this.bgFn);
-            return origRender.call(this, width);
-        }
+        if (!fg) return origRender.call(this, width);
 
         // zero out paddingY so the original render produces no blank lines
         this.paddingY = 0;

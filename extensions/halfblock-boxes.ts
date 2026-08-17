@@ -28,6 +28,7 @@ function halfBlockLine(char: string, width: number, fgColor: string): string {
 }
 
 export default function (_pi: ExtensionAPI) {
+    console.error('[halfblock] patching Box.prototype.render');
     const origRender = Box.prototype.render;
 
     Box.prototype.render = function (this: any, width: number): string[] {

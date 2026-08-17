@@ -80,7 +80,11 @@ interface BuiltTool {
     execute(...args: unknown[]): Promise<any>;
 }
 
-function toDefinition(tool: BuiltTool, renderResult: ToolDefinition['renderResult']): ToolDefinition {
+function toDefinition(
+    tool: BuiltTool,
+    renderCall: ToolDefinition['renderCall'],
+    renderResult: ToolDefinition['renderResult'],
+): ToolDefinition {
     return {
         name: tool.name,
         label: tool.label,
@@ -90,6 +94,7 @@ function toDefinition(tool: BuiltTool, renderResult: ToolDefinition['renderResul
         executionMode: tool.executionMode,
         renderShell: 'self',
         execute: (id, params, signal, onUpdate) => tool.execute(id, params, signal, onUpdate),
+        renderCall,
         renderResult,
     };
 }
@@ -109,7 +114,22 @@ export default function (pi: ExtensionAPI) {
             const fgError = bgToFg(theme, 'toolErrorBg');
             const fgPending = bgToFg(theme, 'toolPendingBg');
 
-            const makeRenderer = (): ToolDefinition['renderResult'] =>
+            const makeCallRenderer = (toolLabel: string): ToolDefinition['renderCall'] =>
+                (args: any, _thm: any, context: any) => {
+                    const bgKey = 'toolPendingBg';
+                    const bgFn = (s: string) => theme.bg(bgKey, s);
+
+                    let box = context.lastComponent as HalfBlockBox | undefined;
+                    if (!(box instanceof HalfBlockBox)) {
+                        box = new HalfBlockBox(fgPending, bgFn);
+                    }
+
+                    // compact label: just the tool name
+                    box.child = new Text(theme.fg('accent', toolLabel), 0, 0);
+                    return box;
+                };
+
+            const makeResultRenderer = (): ToolDefinition['renderResult'] =>
                 (result: any, _options: any, _thm: any, context: any) => {
                     const bgKey = context.isError ? 'toolErrorBg'
                         : context.isPartial ? 'toolPendingBg'
@@ -146,7 +166,7 @@ export default function (pi: ExtensionAPI) {
             ];
 
             for (const tool of tools) {
-                pi.registerTool(toDefinition(tool, makeRenderer()));
+                pi.registerTool(toDefinition(tool, makeCallRenderer(tool.label), makeResultRenderer()));
             }
         } catch {
             // silent: default Box rendering continues.

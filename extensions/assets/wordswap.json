@@ -38,7 +38,22 @@
         "utilize": {
             "verb": "{use} (I said use)"
         },
-        "it's worth noting": "it's not worth noting",
+        "worth noting": "un-pointless to note",
+        "worth knowing": "un-pointless to know",
+        "worth checking": "un-pointless to check",
+        "worth mentioning": "un-pointless to mention",
+        "worth flagging": "un-pointless to flag",
+        "worth stating": "un-pointless to state",
+        "worth highlighting": "un-pointless to highlight",
+        "worth clarifying": "un-pointless to clarify",
+        "worth pointing out": "un-pointless to point out",
+        "worth calling out": "un-pointless to call out",
+        "worth considering": "un-pointless to consider",
+        "worth remembering": "un-pointless to remember",
+        "worth being careful": "un-pointless to be careful",
+        "worth being clear": "un-pointless to seem clear",
+        "worth being aware": "un-pointless to be aware",
+        "worth doing": "un-pointless to do",
         "importantly": "unimportantly",
         "notably": "forgettably",
         "crucially": "trivially",
@@ -57,7 +72,7 @@
         "happy to help": "contractually obliged",
         "you're absolutely correct": "you have said a thing",
         "you're right to": "I award you a point for choosing to",
-        "you were right to": "I award you a point for having",
+        "you were right to": "I award you a point for having chosen to",
         "that's the right question": "I have graded your question",
         "the right call": "a call I took it upon myself to grade",
         "good catch": "I award you a point",
@@ -92,6 +107,7 @@
         "(\\w+)-adjacent": "$1-ish-but-not",
         "(\\w+)-shaped": "$1-flavoured jelly",
         "(\\w+)-coded": "$1 vibes",
-        "(\\w+)-pilled": "$1-brained"
+        "(\\w+)-pilled": "$1-brained",
+        "than (?:I |we )?(expected|thought|assumed|realised|realized|hoped)": "than I haphazardly $1"
     }
 }

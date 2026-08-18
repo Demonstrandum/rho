@@ -1,11 +1,29 @@
 // inspired by jola's claude code MessageDisplay word-swap hook:
 // https://jola.dev/posts/how-to-stop-claude-from-saying-load-bearing
-// pi has no display-only filter, so this rewrites the stored message on
-// message_end (which does enter later context) rather than just the display.
+//
+// two layers, deliberately separate:
+//
+//   message_end                  rewrites the stored message, which is the
+//                                whole point: the swap enters later context.
+//                                the text it stores is plain text only.
+//   registerMarkdownTransformer  styles the display: red background on a
+//                                swapped span, dim on the /noswap marker.
+//                                pi runs it on the markdown before rendering,
+//                                so nothing it does reaches the transcript.
+//
+// styling used to be applied in message_end, which wrote theme escapes into
+// the message. an escape does not survive the round trip back into the
+// model's context (the ESC byte goes, its printable tail stays), so the agent
+// read `[48;2;255;234;234m` as text and copied it forward, one layer per
+// turn. stripAnsi below cleans what is already stored.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type {
+    ExtensionAPI,
+    ExtensionUIContext,
+    MarkdownTransformContext,
+} from '@earendil-works/pi-coding-agent';
 import { config } from './lib/config';
 
 const swapsPath = join(dirname(fileURLToPath(import.meta.url)), 'assets', 'wordswap.json');
@@ -135,7 +153,12 @@ export function buildSwaps(dict: Record<string, WordValue>): Swap[] {
             swaps.push(...buildVerbSwaps(phrase, value));
         }
     }
-    return swaps;
+    // longest phrase first: applySwaps runs one .replace() per entry in this
+    // order, so a shorter phrase that is a prefix of a longer one ("i
+    // appreciate you" / "i appreciate you pushing") would otherwise always
+    // consume its prefix out of the text before the longer entry's turn came,
+    // regardless of which one the table intended to fire.
+    return swaps.sort((a, b) => b.original.length - a.original.length);
 }
 
 export function buildPatternSwaps(dict: Record<string, string>): PatternSwap[] {
@@ -163,14 +186,35 @@ function loadSwapFile(): SwapFile {
 
 // carry the matched text's case onto the replacement: ALL CAPS -> upper,
 // Leading-cap -> capitalized, anything else -> the replacement verbatim.
-function matchCase(matched: string, replacement: string): string {
-    if (/[a-z]/i.test(matched) && matched === matched.toUpperCase()) {
-        return replacement.toUpperCase();
+
+/** case shape of a matched span, carried onto the replacement that stands in for it. */
+export type CaseForm = 'verbatim' | 'upper' | 'title' | 'sentence';
+
+// only ever used with match/replace, both of which reset lastIndex. never .test().
+const WORDS = /[A-Za-z][A-Za-z'\u2019]*/g;
+
+export function detectCase(matched: string): CaseForm {
+    const words = matched.match(WORDS) ?? [];
+    if (words.length === 0) return 'verbatim';
+    if (!/[a-z]/.test(matched)) return 'upper';
+    const capitalized = words.every((word) => /^[A-Z]/.test(word));
+    const shouted = words.some((word) => word.length > 1 && word === word.toUpperCase());
+    if (words.length > 1 && capitalized && !shouted) return 'title';
+    if (/^[A-Z]/.test(matched)) return 'sentence';
+    return 'verbatim';
+}
+
+export function applyCase(form: CaseForm, replacement: string): string {
+    switch (form) {
+        case 'upper':
+            return replacement.toUpperCase();
+        case 'title':
+            return replacement.replace(WORDS, (w) => w.charAt(0).toUpperCase() + w.slice(1));
+        case 'sentence':
+            return replacement.replace(/[A-Za-z]/, (c) => c.toUpperCase());
+        case 'verbatim':
+            return replacement;
     }
-    if (/^[A-Z]/.test(matched)) {
-        return replacement.charAt(0).toUpperCase() + replacement.slice(1);
-    }
-    return replacement;
 }
 
 export function applySwaps(
@@ -187,7 +231,7 @@ export function applySwaps(
             const choice = replacements.length === 1
                 ? replacements[0]
                 : replacements[Math.floor(Math.random() * replacements.length)];
-            const rep = matchCase(core, choice);
+            const rep = applyCase(detectCase(core), choice);
             const result = wrap ? wrap(rep) : rep;
             // absorb trailing punct when the replacement already ends in punct
             if (trailingPunct && TRAILING_PUNCT.test(choice)) return result;
@@ -205,7 +249,7 @@ export function applySwaps(
                     result = result.replace(`$${i}`, args[i] as string);
                 }
             }
-            const rep = matchCase(matched, result);
+            const rep = applyCase(detectCase(matched), result);
             return wrap ? wrap(rep) : rep;
         });
     }
@@ -230,10 +274,42 @@ export const wordEntries: [string, string[]][] = Object.entries(_file.words)
 export const patternEntries: [string, string[]][] = Object.entries(_file.patterns ?? {})
     .map(([k, v]) => [k, [v]]);
 
+// a real escape, and the printable remains of one whose ESC was already lost
+// on a trip through the model's context. the orphan forms are the ones this
+// extension itself used to emit (dim, its reset, and a 24-bit background).
+const ANSI_SGR = /\x1b\[[0-9;]*m/g;
+const ORPHANED_SGR = /\[(?:0|2|22|39|49)m|\[(?:38|48);(?:2;\d+;\d+;\d+|5;\d+)m/g;
+
+export function stripAnsi(text: string): string {
+    return text.replace(ANSI_SGR, '').replace(ORPHANED_SGR, '');
+}
+
+/** the marker, and any backticks or stale dim remnants hugging it. */
+const BYPASS_MARKER = /\/noswap/;
+
+function escapeRegex(source: string): string {
+    return source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// the stored text carries no marks, so the display side finds a swapped span
+// again by matching what a swap can produce. a $n slot stood for one captured
+// group, which every current pattern fills with a single word.
+function buildSpanPattern(replacements: readonly string[]): RegExp | null {
+    const alternatives = [...new Set(replacements)]
+        .filter((r) => r !== '')
+        .sort((a, b) => b.length - a.length)
+        .map((r) => escapeRegex(r).replace(/\\\$\d/g, '\\S+'));
+    if (alternatives.length === 0) return null;
+    return new RegExp(alternatives.join('|'), 'gi');
+}
+
+const SWAPPED_SPAN = buildSpanPattern([
+    ...swaps.flatMap((s) => s.replacements),
+    ...patternSwaps.map((p) => p.replacement),
+]);
+
 export default function (pi: ExtensionAPI) {
     if (swaps.length === 0 && patternSwaps.length === 0) return;
-
-    const BYPASS_MARKER = /\/noswap/g;
 
     pi.registerCommand('noswap', {
         description: "toggle the word filter on/off for this session",
@@ -253,13 +329,18 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
-    pi.on('message_end', async (event, ctx) => {
-        const highlight = (s: string) => ctx.ui.theme.bg('toolErrorBg', s);
+    // the theme is read per render so a /theme switch is picked up.
+    let ui: ExtensionUIContext | undefined;
+    pi.on('session_start', async (_event, ctx) => {
+        ui = ctx.ui;
+    });
+
+    pi.on('message_end', async (event) => {
         const message = event.message;
         if (message.role !== 'assistant') return;
         if (typeof message.content === 'string') return;
 
-        // check if any text block contains the bypass marker
+        // one marker anywhere in the message exempts all of it.
         const bypass = !config.wordswap.enabled || message.content.some(
             (block) => block.type === 'text' && BYPASS_MARKER.test(block.text),
         );
@@ -267,27 +348,29 @@ export default function (pi: ExtensionAPI) {
         let changed = false;
         const content = message.content.map((block) => {
             if (block.type !== 'text') return block;
-            let text = block.text;
-            // dim the marker so it stays in the text (KV cache) but is unobtrusive
-            const DIM = '\x1b[2m';
-            const RESET = '\x1b[22m';
-            const dimmed = text.replace(BYPASS_MARKER, `${DIM}/noswap${RESET}`);
-            if (dimmed !== text) {
-                text = dimmed;
-                changed = true;
-            }
-            if (!bypass) {
-                const swapped = applySwaps(text, swaps, patternSwaps, highlight);
-                if (swapped !== text) {
-                    text = swapped;
-                    changed = true;
-                }
-            }
+            const clean = stripAnsi(block.text);
+            const text = bypass ? clean : applySwaps(clean, swaps, patternSwaps);
             if (text === block.text) return block;
+            changed = true;
             return { ...block, text };
         });
 
         if (!changed) return;
         return { message: { ...message, content } };
+    });
+
+    // display only. pi hands the markdown over before rendering it, and
+    // whatever comes back is styled and dropped; the message is untouched.
+    pi.registerMarkdownTransformer((markdown: string, context: MarkdownTransformContext) => {
+        if (context.messageType !== 'assistant') return markdown;
+        const theme = ui?.theme;
+        if (!theme) return markdown;
+
+        let out = markdown;
+        const bypassed = BYPASS_MARKER.test(out);
+        if (SWAPPED_SPAN && config.wordswap.enabled && !bypassed) {
+            out = out.replace(SWAPPED_SPAN, (span) => theme.bg('toolErrorBg', span));
+        }
+        return out.replace(/\/noswap/g, (marker) => theme.fg('dim', marker));
     });
 }

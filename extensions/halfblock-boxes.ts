@@ -42,7 +42,7 @@ function needsExtraPadding(bgFn: ((s: string) => string) | undefined): boolean {
 const origRender = Box.prototype.render;
 
 Box.prototype.render = function (this: any, width: number): string[] {
-    const lines: string[] = origRender.call(this, width);
+    const lines: string[] = [...origRender.call(this, width)];
     const paddingY: number = this.paddingY ?? 1;
     if (paddingY === 0 || lines.length < paddingY * 2 + 1) return lines;
 

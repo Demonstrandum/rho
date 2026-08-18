@@ -4,11 +4,23 @@
 //  1. Box.render          - the paddingY blank lines become half-height blocks.
 //  2. ToolExecutionComponent.render - drops the blank lines the tool row adds
 //     around itself (its leading Spacer(1) and the self-render path's "").
-//  3. Container.render    - where a tool row is immediately followed by an
-//     assistant message, drops that message's leading blank line. assistant
-//     messages open with a Spacer(1), which is wanted after a user bubble and
-//     redundant after a half-block edge, so it is decided by adjacency rather
-//     than removed outright.
+//  3. Container.render    - two jobs. where a tool row is immediately followed
+//     by an assistant message, drops that message's leading blank line;
+//     assistant messages open with a Spacer(1), which is wanted after a user
+//     bubble and redundant after a half-block edge, so it is decided by
+//     adjacency rather than removed outright. it also skips pi's IdleStatus,
+//     which reserves two blank rows in the dock whenever the agent is idle.
+//
+// on IdleStatus: pi parks it in statusContainer from clearStatusIndicator(),
+// gated on terminal.clearOnShrink, which rho sets. the two rows exist to keep
+// the dock height stable so a shrink cannot leave a stale row. clearOnShrink
+// already forces a full redraw on shrink, which handles that, so the reserved
+// rows are redundant here and cost two permanent blank lines under the
+// transcript. skipping the child is not the same as clearing the flag: drop
+// the flag and the stale rows come back under the footer.
+//
+// it is matched on constructor name because pi exports neither the class nor a
+// subpath to it (package exports expose only ".", "./rpc-entry", "./client").
 import {
     AssistantMessageComponent,
     ToolExecutionComponent,
@@ -94,6 +106,8 @@ Container.prototype.render = function (this: any, width: number): string[] {
 
     for (let i = 0; i < children.length; i++) {
         const child = children[i];
+        if (child?.constructor?.name === 'IdleStatus') continue;
+
         let childLines: string[] = child.render(width);
 
         const afterToolRow = i > 0 && children[i - 1] instanceof ToolExecutionComponent;

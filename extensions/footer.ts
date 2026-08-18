@@ -68,9 +68,6 @@ export default function (pi: ExtensionAPI) {
             return;
         }
         ctx.ui.setFooter((tui, theme, footerData) => {
-            // flip clearOnShrink live so the current session drops leftover blank
-            // rows on shrink; clear-on-shrink.ts persists it so re-applies keep it.
-            tui.setClearOnShrink(true);
             const unsub = footerData.onBranchChange(() => tui.requestRender());
             return {
                 dispose: unsub,

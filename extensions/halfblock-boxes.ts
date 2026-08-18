@@ -56,12 +56,6 @@ Box.prototype.render = function (this: any, width: number): string[] {
         lines[lines.length - 1 - i] = halfBlockLine(UPPER_HALF, width, fg);
     }
 
-    // user/custom message boxes: add blank line above and below
-    if (needsExtraPadding(this.bgFn)) {
-        lines.unshift('');
-        lines.push('');
-    }
-
     return lines;
 };
 

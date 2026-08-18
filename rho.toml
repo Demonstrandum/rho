@@ -1,6 +1,6 @@
 [spinner]
 # which spinner sets to use (defined in extensions/assets/spinners.json)
-categories = ["chinese"]
+categories = [ "chinese" ]
 # glyph shown on the completion line when the agent finishes
 done = "完"
 # ms per frame for the shimmer color sweep on working messages

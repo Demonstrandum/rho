@@ -27,6 +27,15 @@ export interface RhoConfig {
     images: {
         width: number;
     };
+    // each key switches off one patch in halfblock-boxes.ts. all four are
+    // independent; with every one false the extension applies nothing and pi
+    // renders as shipped.
+    render: {
+        halfBlocks: boolean;
+        tightToolRows: boolean;
+        tightAfterToolRows: boolean;
+        hideIdleStatus: boolean;
+    };
 }
 
 // TOML-side config: kebab-case keys.
@@ -36,11 +45,19 @@ interface RawSpinner {
     'shimmer-speed'?: number;
 }
 
+interface RawRender {
+    'half-blocks'?: boolean;
+    'tight-tool-rows'?: boolean;
+    'tight-after-tool-rows'?: boolean;
+    'hide-idle-status'?: boolean;
+}
+
 interface RawConfig {
     spinner?: RawSpinner;
     wordswap?: Partial<RhoConfig['wordswap']>;
     startup?: Partial<RhoConfig['startup']>;
     images?: Partial<RhoConfig['images']>;
+    render?: RawRender;
 }
 
 const _DEFAULTS: RhoConfig = {
@@ -58,6 +75,12 @@ const _DEFAULTS: RhoConfig = {
     images: {
         width: 180,
     },
+    render: {
+        halfBlocks: true,
+        tightToolRows: true,
+        tightAfterToolRows: true,
+        hideIdleStatus: true,
+    },
 };
 
 function fromRaw(raw: RawConfig): RhoConfig {
@@ -70,6 +93,13 @@ function fromRaw(raw: RawConfig): RhoConfig {
         wordswap: { ..._DEFAULTS.wordswap, ...raw.wordswap },
         startup: { ..._DEFAULTS.startup, ...raw.startup },
         images: { ..._DEFAULTS.images, ...raw.images },
+        render: {
+            halfBlocks: raw.render?.['half-blocks'] ?? _DEFAULTS.render.halfBlocks,
+            tightToolRows: raw.render?.['tight-tool-rows'] ?? _DEFAULTS.render.tightToolRows,
+            tightAfterToolRows:
+                raw.render?.['tight-after-tool-rows'] ?? _DEFAULTS.render.tightAfterToolRows,
+            hideIdleStatus: raw.render?.['hide-idle-status'] ?? _DEFAULTS.render.hideIdleStatus,
+        },
     };
 }
 
@@ -107,6 +137,19 @@ export function toToml(cfg: RhoConfig = config): string {
         '[images]',
         '# width in terminal cells for inline images',
         `width = ${cfg.images.width}`,
+        '',
+        '[render]',
+        "# a Box's blank padding rows become half-height block characters, so a",
+        '# tool bubble costs no blank rows',
+        `half-blocks = ${cfg.render.halfBlocks}`,
+        '# drop the blank lines a tool row wraps itself in',
+        `tight-tool-rows = ${cfg.render.tightToolRows}`,
+        "# drop an assistant message's leading blank line when a tool row is what",
+        '# precedes it (the same blank line is kept after a user bubble)',
+        `tight-after-tool-rows = ${cfg.render.tightAfterToolRows}`,
+        "# skip pi's IdleStatus, which parks two blank rows in the dock while idle.",
+        '# needs terminal.clearOnShrink, which clear-on-shrink.ts sets',
+        `hide-idle-status = ${cfg.render.hideIdleStatus}`,
         '',
     ].join('\n');
 }

@@ -1,32 +1,72 @@
 [spinner]
-# which spinner sets to use (defined in extensions/assets/spinners.json)
-categories = [ "chinese" ]
-# glyph shown on the completion line when the agent finishes
-done = "完"
-# ms per frame for the shimmer color sweep on working messages
-shimmer-speed = 80
+categories = [ "chinese" ]  # which spinner sets to use (defined in extensions/assets/spinners.json)
+done = "完"  # glyph shown on the completion line when the agent finishes
+shimmer-speed = 80  # ms per frame for the shimmer color sweep on working messages
+
+[audit]
+# which model /audit sends the last reply to for review, as
+# provider/id, or "current" for the session model
+model = "anthropic/claude-haiku-4-5"
+# context always asks before sending, never sends unattended. transcript:
+# a report renders here and nothing is ever offered to the agent. both:
+# the report renders here and sending is still offered, on approval
+feedback = "both"
+timeout-ms = 30000  # abort the reviewer call after this long; a timeout reports as an error
+# what the auditor assumes its reader already knows. the skill requires
+# this parameter and asks for it when absent
+audience = "an expert in the general field, unfamiliar with this repository and this conversation"
 
 [wordswap]
-# whether the word filter is active (toggle at runtime with /noswap)
-enabled = true
+enabled = true  # whether the word filter is active (toggle at runtime with /noswap)
 
 [startup]
-# whether to play the logo animation on launch
-animate = true
+animate = true  # whether to play the logo animation on launch
 
 [images]
-# width in terminal cells for inline images
-width = 180
+width = 180  # width in terminal cells for inline images
+
+[stash]
+# spare keys for the built-in actions that share ctrl+s / ctrl+r with the
+# stash. pi reports every such shared key at startup, even under
+# quietStartup, so each colliding action is moved to the next unused key
+# in this list. an empty list leaves pi alone and keeps the report
+demote-to = [ "f2", "f3", "f4", "f5", "f6" ]
+
+[input]
+# replace the thin ─ border lines with half-block characters (▄ top, ▀
+# bottom) coloured to match the field background
+half-block-edges = true
+# fill the input field content rows with a gradient background derived
+# from the user message bubble colour, matching the edge gradient
+background = true
+# horizontal colour gradient on the input field. off: flat accent.
+# edges: gradient on the half-block border rows and content background
+gradient = "edges"
+# how far to shift the user bubble colour for the field background.
+# 0 = same as bubble, 1 = fully dark or light (auto-detected)
+darken = 0.25
+# how much each gradient colour shows through over the field
+# background. 0 = invisible, 1 = full saturation. applied after
+# any per-stop @filters
+tint = 0.3
+# gradient colour stops for the default mode, left to right. each
+# entry is a theme colour name (e.g. "border") or a hex code.
+# for custom stop positions:
+#   { colors = ["border", "userMessageBg"], stops = [0.0, 0.35] }
+gradient-colors = [ "border", "userMessageBg" ]
+bash-colors = [ "bashMode", "userMessageBg" ]  # gradient colour stops for bash mode
 
 [render]
 # a Box's blank padding rows become half-height block characters, so a
 # tool bubble costs no blank rows
 half-blocks = true
-# drop the blank lines a tool row wraps itself in
-tight-tool-rows = true
+tight-tool-rows = true  # drop the blank lines a tool row wraps itself in
 # drop an assistant message's leading blank line when a tool row is what
 # precedes it (the same blank line is kept after a user bubble)
 tight-after-tool-rows = true
 # skip pi's IdleStatus, which parks two blank rows in the dock while idle.
 # needs terminal.clearOnShrink, which clear-on-shrink.ts sets
 hide-idle-status = true
+# shorten ctx_execute / ctx_execute_file / ctx_batch_execute tool rows to
+# one highlighted line each, expanding to the full command and output
+exec-preview = true

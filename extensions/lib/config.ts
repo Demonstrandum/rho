@@ -110,19 +110,123 @@ function defaults(): RhoConfig {
     return out as RhoConfig;
 }
 
-type RawConfig = Record<string, Record<string, unknown> | undefined>;
+type RawConfig = Record<string, unknown>;
 
-function fromRaw(raw: RawConfig): RhoConfig {
+export interface ConfigProblem {
+    /** where in the file, e.g. `render.half-blocks` */
+    at: string;
+    message: string;
+}
+
+// what the schema demands. an integer default is named as such, since
+// "expected number, got number" is no use when the value is 1.5.
+function expectation(expected: unknown): string {
+    if (Array.isArray(expected)) {
+        const element = expected[0];
+        return element === undefined ? 'array' : `array of ${typeof element}`;
+    }
+    if (typeof expected === 'number' && Number.isInteger(expected)) return 'integer';
+    return typeof expected;
+}
+
+function describe(value: unknown): string {
+    if (Array.isArray(value)) {
+        const element = value[0];
+        return element === undefined ? 'array' : `array of ${typeof element}`;
+    }
+    return typeof value;
+}
+
+// the default doubles as the spec: whatever shape it has is the shape the file
+// must supply. an integer default (milliseconds, terminal cells) also rejects a
+// fractional value, since no such field is meaningfully fractional.
+function accepts(value: unknown, expected: unknown): boolean {
+    if (Array.isArray(expected)) {
+        if (!Array.isArray(value)) return false;
+        const element = expected[0];
+        return element === undefined || value.every((v) => typeof v === typeof element);
+    }
+    if (typeof value !== typeof expected) return false;
+    if (typeof expected === 'number' && Number.isInteger(expected)) return Number.isInteger(value);
+    return true;
+}
+
+// `half_blocks` and `halfBlocks` should be recognised as meaning `half-blocks`
+// rather than silently ignored, so names are compared with separators and case
+// removed.
+function squash(name: string): string {
+    return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function nearest(name: string, known: string[]): string | undefined {
+    const target = squash(name);
+    return known.find((candidate) => squash(candidate) === target);
+}
+
+function isTable(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * resolve a parsed TOML table against the schema. unknown or ill-typed entries
+ * are reported and the field keeps its default, so a bad config degrades to the
+ * default rather than propagating a value of the wrong type.
+ */
+export function resolveConfig(raw: RawConfig): {
+    config: RhoConfig;
+    problems: ConfigProblem[];
+} {
     const out = defaults() as unknown as Record<string, Record<string, unknown>>;
-    for (const [section, fields] of Object.entries(SECTIONS)) {
-        const rawSection = raw[section];
-        if (!rawSection) continue;
-        for (const [name, f] of Object.entries(fields)) {
-            const value = rawSection[f.key];
-            if (value !== undefined) out[section][name] = value;
+    const problems: ConfigProblem[] = [];
+    const sectionNames = Object.keys(SECTIONS);
+
+    for (const [name, value] of Object.entries(raw)) {
+        if (!(name in SECTIONS)) {
+            const suggestion = nearest(name, sectionNames);
+            problems.push({
+                at: name,
+                message: suggestion
+                    ? `unknown section, did you mean [${suggestion}]?`
+                    : `unknown section, ignored (known: ${sectionNames.join(', ')})`,
+            });
+            continue;
+        }
+        if (!isTable(value)) {
+            problems.push({ at: name, message: `expected a [${name}] table, got ${describe(value)}` });
         }
     }
-    return out as unknown as RhoConfig;
+
+    for (const [section, fields] of Object.entries(SECTIONS)) {
+        const rawSection = raw[section];
+        if (!isTable(rawSection)) continue;
+
+        const keys = Object.values(fields).map((f) => f.key);
+        for (const key of Object.keys(rawSection)) {
+            if (keys.includes(key)) continue;
+            const suggestion = nearest(key, keys);
+            problems.push({
+                at: `${section}.${key}`,
+                message: suggestion
+                    ? `unknown key, did you mean ${suggestion}?`
+                    : `unknown key, ignored (known: ${keys.join(', ')})`,
+            });
+        }
+
+        for (const [name, f] of Object.entries(fields)) {
+            const value = rawSection[f.key];
+            if (value === undefined) continue;
+            if (!accepts(value, f.default)) {
+                problems.push({
+                    at: `${section}.${f.key}`,
+                    message: `expected ${expectation(f.default)}, got ${JSON.stringify(value)}; using default ${JSON.stringify(f.default)}`,
+                });
+                continue;
+            }
+            out[section][name] = value;
+        }
+    }
+
+    return { config: out as unknown as RhoConfig, problems };
 }
 
 function toRaw(cfg: RhoConfig): Record<string, Record<string, unknown>> {
@@ -161,17 +265,35 @@ function annotate(toml: string): string {
     return out.join('\n');
 }
 
-function load(): RhoConfig {
-    if (!existsSync(CONFIG_PATH)) return defaults();
+function load(): { config: RhoConfig; problems: ConfigProblem[] } {
+    if (!existsSync(CONFIG_PATH)) return { config: defaults(), problems: [] };
+    let text: string;
     try {
-        return fromRaw(parse(readFileSync(CONFIG_PATH, 'utf8')) as RawConfig);
-    } catch {
-        return defaults();
+        text = readFileSync(CONFIG_PATH, 'utf8');
+    } catch (e) {
+        return {
+            config: defaults(),
+            problems: [{ at: CONFIG_PATH, message: `could not be read: ${(e as Error).message}` }],
+        };
+    }
+    try {
+        return resolveConfig(parse(text) as RawConfig);
+    } catch (e) {
+        return {
+            config: defaults(),
+            problems: [
+                { at: CONFIG_PATH, message: `is not valid TOML, using defaults: ${(e as Error).message}` },
+            ],
+        };
     }
 }
 
+const loaded = load();
+
 export const DEFAULTS: Readonly<RhoConfig> = defaults();
-export const config: RhoConfig = load();
+export const config: RhoConfig = loaded.config;
+/** anything wrong with the config file, surfaced by rho.ts at session start. */
+export const configProblems: readonly ConfigProblem[] = loaded.problems;
 export { CONFIG_PATH as configPath };
 
 export function toToml(cfg: RhoConfig = config): string {

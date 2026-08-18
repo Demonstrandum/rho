@@ -1,5 +1,13 @@
 import { test, expect } from 'bun:test';
-import { resolveConfig, DEFAULTS, toToml } from '../extensions/lib/config';
+import {
+    resolveConfig,
+    DEFAULTS,
+    toToml,
+    isBool,
+    isString,
+    isPosInt,
+    isStringArray,
+} from '../extensions/lib/config';
 import { parse } from 'smol-toml';
 
 test('a valid value is taken from the file', () => {
@@ -51,12 +59,75 @@ test('an empty array is accepted', () => {
     expect(problems).toEqual([]);
 });
 
-test('a fractional value is rejected where the default is an integer', () => {
+test('every schema field is checked, so the emitted file names each expectation', () => {
+    // guards are the only source of the "expected ..." text, so a field added
+    // without one would surface here rather than silently accepting anything.
+    const labels = new Set([isBool.label, isString.label, isPosInt.label, isStringArray.label]);
+    const { problems } = resolveConfig({
+        spinner: { categories: 1, done: 1, 'shimmer-speed': 'x' },
+        wordswap: { enabled: 1 },
+        startup: { animate: 1 },
+        images: { width: 'x' },
+        render: {
+            'half-blocks': 1,
+            'tight-tool-rows': 1,
+            'tight-after-tool-rows': 1,
+            'hide-idle-status': 1,
+        },
+    });
+    // one per field in the schema
+    expect(problems).toHaveLength(10);
+    for (const p of problems) {
+        const named = [...labels].some((l) => p.message.includes(`expected ${l}`));
+        expect(named).toBe(true);
+    }
+});
+
+test('a fractional value is rejected where a positive integer is required', () => {
     const { config, problems } = resolveConfig({ spinner: { 'shimmer-speed': 1.5 } });
     expect(config.spinner.shimmerSpeed).toBe(DEFAULTS.spinner.shimmerSpeed);
     expect(problems).toHaveLength(1);
     // "expected number, got number" would say nothing here.
-    expect(problems[0].message).toBe('expected integer, got 1.5; using default 80');
+    expect(problems[0].message).toBe('expected positive integer, got 1.5; using default 80');
+});
+
+test('a constraint narrower than the type is enforced', () => {
+    // no default could express "positive": -5 and 0 are both plain numbers.
+    for (const bad of [-5, 0]) {
+        const { config, problems } = resolveConfig({ spinner: { 'shimmer-speed': bad } });
+        expect(config.spinner.shimmerSpeed).toBe(DEFAULTS.spinner.shimmerSpeed);
+        expect(problems).toHaveLength(1);
+        expect(problems[0].message).toContain('expected positive integer');
+    }
+});
+
+test('guards check exactly, with no sample value to infer from', () => {
+    // the empty-array case: element checking must not depend on a default
+    // supplying an element to compare against.
+    expect(isStringArray([])).toBe(true);
+    expect(isStringArray(['a', 'b'])).toBe(true);
+    expect(isStringArray([1, 2])).toBe(false);
+    expect(isStringArray(['a', 7])).toBe(false);
+    expect(isStringArray('a')).toBe(false);
+
+    expect(isPosInt(80)).toBe(true);
+    expect(isPosInt(0)).toBe(false);
+    expect(isPosInt(-1)).toBe(false);
+    expect(isPosInt(1.5)).toBe(false);
+    expect(isPosInt('80')).toBe(false);
+
+    expect(isBool(true)).toBe(true);
+    expect(isBool('true')).toBe(false);
+
+    expect(isString('')).toBe(true);
+    expect(isString(42)).toBe(false);
+});
+
+test('every guard carries a label used in messages', () => {
+    expect(isBool.label).toBe('boolean');
+    expect(isString.label).toBe('string');
+    expect(isPosInt.label).toBe('positive integer');
+    expect(isStringArray.label).toBe('array of string');
 });
 
 test('a misspelled key is reported with the intended key', () => {

@@ -13,8 +13,15 @@ compression signal an established result where none has been established.
 Do not verify the mathematics or the claims. Every check below is decidable
 from the text alone. Arguing about whether a claim is true is out of scope.
 
-Rule numbers are shared with the writer prompt. Numbers absent from this list
-are writer-only, because they are not decidable from the text.
+Rule numbers are shared with the writer prompt. The only rule numbers this
+skill may cite are: 1.(iii), 2.(i), 2.(ii), 2.(iii), 2.(iv), 3.(ii), 3.(iii),
+3.(iv), 4.(i), 4.(ii), 5.(ii), 6.(i), 6.(iii), 7.(vii), 7.(ix), 8.(i), 8.(ii),
+8.(iii), 8.(iv), 8.(v), 9.(i), 9.(ii), 9.(iii), 9.(v), 10.(i), 10.(ii),
+10.(iv), 10.(v), 10.(vi), 11.(i), 11.(ii), 11.(iii), 11.(iv), 12.(ii),
+12.(iv), 13.(i), 13.(ii), 13.(iii), 13.(iv), 13.(v), 13.(vi), 13.(vii),
+13.(viii). Any other number, including ones that look adjacent to a listed
+rule (7.(i), 7.(ii), 12.(i), 12.(iii)), is writer-only and is never a valid
+citation here, no matter how plausible it looks.
 
 ## Input
 
@@ -24,7 +31,12 @@ already know. If the audience parameter is absent, request it before reviewing.
 ## Checks
 
 1.(iii) **Conclusion without antecedent.** A declarative technical claim with no
-preceding sentence yielding it, no named result, and no hedge.
+preceding sentence yielding it, no named result, and no hedge. Naming the
+mechanism or process responsible for the claim ("when the Higgs field settled
+into its ground state") is itself a named result; do not also demand a hedge
+word on top of it. A claim standard to the stated audience needs neither: do
+not flag "the electron's mass has not changed since the early universe" for
+an audience of physicists on the grounds that it lacks a citation.
 
 2.(i) **Bare first mention.** Enumerate every technical noun and symbol. Classify
 each as introduced, standard and named for the stated audience, or bare. Flag

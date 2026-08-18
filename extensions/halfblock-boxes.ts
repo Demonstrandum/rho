@@ -1,32 +1,38 @@
 // half-block edges on tool boxes, and no dead space around them.
 //
-// three patches, each as narrow as the effect needs:
-//  1. Box.render          - the paddingY blank lines become half-height blocks.
-//  2. ToolExecutionComponent.render - drops the blank lines the tool row adds
-//     around itself (its leading Spacer(1) and the self-render path's "").
-//  3. Container.render    - two jobs. where a tool row is immediately followed
-//     by an assistant message, drops that message's leading blank line;
-//     assistant messages open with a Spacer(1), which is wanted after a user
-//     bubble and redundant after a half-block edge, so it is decided by
-//     adjacency rather than removed outright. it also skips pi's IdleStatus,
-//     which reserves two blank rows in the dock whenever the agent is idle.
+// four independent behaviours, each switched by a key in [render] of
+// rho.toml. a patch is only installed when its key is true, so a disabled
+// behaviour costs nothing at render time.
 //
-// on IdleStatus: pi parks it in statusContainer from clearStatusIndicator(),
-// gated on terminal.clearOnShrink, which rho sets. the two rows exist to keep
-// the dock height stable so a shrink cannot leave a stale row. clearOnShrink
-// already forces a full redraw on shrink, which handles that, so the reserved
-// rows are redundant here and cost two permanent blank lines under the
-// transcript. skipping the child is not the same as clearing the flag: drop
-// the flag and the stale rows come back under the footer.
-//
-// it is matched on constructor name because pi exports neither the class nor a
-// subpath to it (package exports expose only ".", "./rpc-entry", "./client").
+//  half-blocks           Box.render: the paddingY blank rows become
+//                        half-height block characters.
+//  tight-tool-rows       ToolExecutionComponent.render: drops the blank lines
+//                        the tool row wraps itself in (its leading Spacer(1)
+//                        and the self-render path's "").
+//  tight-after-tool-rows Container.render: drops an assistant message's
+//                        leading blank line when a tool row precedes it.
+//                        assistant messages open with a Spacer(1), which is
+//                        wanted after a user bubble and redundant after a
+//                        half-block edge, so it is decided by adjacency
+//                        rather than removed outright.
+//  hide-idle-status      Container.render: skips pi's IdleStatus, which parks
+//                        two blank rows in the dock whenever the agent is
+//                        idle. pi adds it from clearStatusIndicator() gated on
+//                        terminal.clearOnShrink, which clear-on-shrink.ts
+//                        sets. the rows reserve height so a shrink cannot
+//                        leave a stale row, but clearOnShrink already forces a
+//                        full redraw on shrink, so they are redundant here.
+//                        skipping the child is not the same as clearing the
+//                        flag: drop the flag and stale rows come back under
+//                        the footer. matched on constructor name because pi
+//                        exports neither the class nor a subpath to it.
 import {
     AssistantMessageComponent,
     ToolExecutionComponent,
     type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
 import { Box, Container } from '@earendil-works/pi-tui';
+import { config } from './lib/config';
 
 const LOWER_HALF = '\u2584';
 const UPPER_HALF = '\u2580';
@@ -40,12 +46,10 @@ function isBlank(line: string): boolean {
     return line.replace(CSI, '').replace(OSC, '').trim() === '';
 }
 
-// the control characters on a dropped line (an OSC133 zone marker rides on the
-// assistant message's first line) must survive onto the line that replaces it.
-function controlsOnly(line: string): string {
-    return line.replace(/[^\x1b\x07\[\]0-9;m\\]/g, '').length > 0
-        ? (line.match(OSC)?.join('') ?? '')
-        : '';
+// an OSC133 zone marker rides on an assistant message's first line, so it has
+// to survive onto the line that replaces a dropped one.
+function oscOnly(line: string): string {
+    return line.match(OSC)?.join('') ?? '';
 }
 
 // the half-blocks are drawn in the box's own background colour as a foreground
@@ -66,66 +70,72 @@ function halfBlockLine(char: string, width: number, fgColor: string): string {
     return `${fgColor}${char.repeat(width)}\x1b[39m`;
 }
 
-// 1. Box: paddingY blank lines -> half-height blocks.
-const origBoxRender = Box.prototype.render;
+const { halfBlocks, tightToolRows, tightAfterToolRows, hideIdleStatus } = config.render;
 
-Box.prototype.render = function (this: any, width: number): string[] {
-    // copy: the original returns its internal cache array by reference.
-    const lines: string[] = [...origBoxRender.call(this, width)];
-    const paddingY: number = this.paddingY ?? 1;
-    if (paddingY === 0 || lines.length < paddingY * 2 + 1) return lines;
+if (halfBlocks) {
+    const origBoxRender = Box.prototype.render;
+    Box.prototype.render = function (this: any, width: number): string[] {
+        // copy: the original returns its internal cache array by reference.
+        const lines: string[] = [...origBoxRender.call(this, width)];
+        const paddingY: number = this.paddingY ?? 1;
+        if (paddingY === 0 || lines.length < paddingY * 2 + 1) return lines;
 
-    const fg = bgFnToFg(this.bgFn);
-    if (!fg) return lines;
+        const fg = bgFnToFg(this.bgFn);
+        if (!fg) return lines;
 
-    for (let i = 0; i < paddingY; i++) {
-        lines[i] = halfBlockLine(LOWER_HALF, width, fg);
-    }
-    for (let i = 0; i < paddingY; i++) {
-        lines[lines.length - 1 - i] = halfBlockLine(UPPER_HALF, width, fg);
-    }
-    return lines;
-};
-
-// 2. tool rows: drop the blank lines they wrap themselves in.
-const origToolRender = ToolExecutionComponent.prototype.render;
-
-ToolExecutionComponent.prototype.render = function (this: any, width: number): string[] {
-    const lines: string[] = [...origToolRender.call(this, width)];
-    while (lines.length > 0 && isBlank(lines[0])) lines.shift();
-    while (lines.length > 0 && isBlank(lines[lines.length - 1])) lines.pop();
-    return lines;
-};
-
-// 3. tool row -> assistant message: drop the message's leading blank line.
-const origContainerRender = Container.prototype.render;
-
-Container.prototype.render = function (this: any, width: number): string[] {
-    const children: any[] = this.children ?? [];
-    const out: string[] = [];
-
-    for (let i = 0; i < children.length; i++) {
-        const child = children[i];
-        if (child?.constructor?.name === 'IdleStatus') continue;
-
-        let childLines: string[] = child.render(width);
-
-        const afterToolRow = i > 0 && children[i - 1] instanceof ToolExecutionComponent;
-        if (afterToolRow && child instanceof AssistantMessageComponent) {
-            childLines = [...childLines];
-            let carried = '';
-            while (childLines.length > 1 && isBlank(childLines[0])) {
-                carried += controlsOnly(childLines[0]);
-                childLines.shift();
-            }
-            if (carried !== '' && childLines.length > 0) {
-                childLines[0] = carried + childLines[0];
-            }
+        for (let i = 0; i < paddingY; i++) {
+            lines[i] = halfBlockLine(LOWER_HALF, width, fg);
         }
+        for (let i = 0; i < paddingY; i++) {
+            lines[lines.length - 1 - i] = halfBlockLine(UPPER_HALF, width, fg);
+        }
+        return lines;
+    };
+}
 
-        for (const line of childLines) out.push(line);
-    }
-    return out;
-};
+if (tightToolRows) {
+    const origToolRender = ToolExecutionComponent.prototype.render;
+    ToolExecutionComponent.prototype.render = function (this: any, width: number): string[] {
+        const lines: string[] = [...origToolRender.call(this, width)];
+        while (lines.length > 0 && isBlank(lines[0])) lines.shift();
+        while (lines.length > 0 && isBlank(lines[lines.length - 1])) lines.pop();
+        return lines;
+    };
+}
+
+if (tightAfterToolRows || hideIdleStatus) {
+    const origContainerRender = Container.prototype.render;
+    Container.prototype.render = function (this: any, width: number): string[] {
+        const children: any[] = this.children ?? [];
+        const out: string[] = [];
+
+        for (let i = 0; i < children.length; i++) {
+            const child = children[i];
+            if (hideIdleStatus && child?.constructor?.name === 'IdleStatus') continue;
+
+            let childLines: string[] = child.render(width);
+
+            if (
+                tightAfterToolRows &&
+                i > 0 &&
+                children[i - 1] instanceof ToolExecutionComponent &&
+                child instanceof AssistantMessageComponent
+            ) {
+                childLines = [...childLines];
+                let carried = '';
+                while (childLines.length > 1 && isBlank(childLines[0])) {
+                    carried += oscOnly(childLines[0]);
+                    childLines.shift();
+                }
+                if (carried !== '' && childLines.length > 0) {
+                    childLines[0] = carried + childLines[0];
+                }
+            }
+
+            for (const line of childLines) out.push(line);
+        }
+        return out;
+    };
+}
 
 export default function (_pi: ExtensionAPI) {}

@@ -17,3 +17,16 @@ animate = true
 [images]
 # width in terminal cells for inline images
 width = 180
+
+[render]
+# a Box's blank padding rows become half-height block characters, so a
+# tool bubble costs no blank rows
+half-blocks = true
+# drop the blank lines a tool row wraps itself in
+tight-tool-rows = true
+# drop an assistant message's leading blank line when a tool row is what
+# precedes it (the same blank line is kept after a user bubble)
+tight-after-tool-rows = true
+# skip pi's IdleStatus, which parks two blank rows in the dock while idle.
+# needs terminal.clearOnShrink, which clear-on-shrink.ts sets
+hide-idle-status = true

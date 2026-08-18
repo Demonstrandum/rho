@@ -5,9 +5,23 @@
 //   /rho config write PATH   write live config to a file
 import { resolve } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { config, configPath, toToml, save } from './lib/config';
+import { config, configPath, configProblems, toToml, save } from './lib/config';
+
+function problemReport(): string {
+    return configProblems.map((p) => `  ${p.at}: ${p.message}`).join('\n');
+}
 
 export default function (pi: ExtensionAPI) {
+    // an ignored key or a wrong type is otherwise invisible: the file parses,
+    // nothing changes, and there is nothing to explain why.
+    pi.on('session_start', async (_event, ctx) => {
+        if (configProblems.length === 0) return;
+        const count = configProblems.length;
+        ctx.ui.notify(
+            `rho.toml: ${count} problem${count === 1 ? '' : 's'}\n${problemReport()}`,
+            'warning',
+        );
+    });
     pi.registerCommand('rho', {
         description: 'rho config management',
         handler: async (args, ctx) => {
@@ -23,7 +37,9 @@ export default function (pi: ExtensionAPI) {
 
             if (!action) {
                 const toml = toToml(config);
-                ctx.ui.notify(`${configPath}\n\n${toml}`, 'info');
+                const problems =
+                    configProblems.length > 0 ? `\n\nproblems:\n${problemReport()}` : '';
+                ctx.ui.notify(`${configPath}\n\n${toml}${problems}`, 'info');
                 return;
             }
 

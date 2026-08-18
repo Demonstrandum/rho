@@ -47,6 +47,45 @@ export const isStringArray = guard<string[]>(
     'array of string',
     (v) => Array.isArray(v) && v.every((element) => typeof element === 'string'),
 );
+export const isUnitFloat = guard<number>(
+    'number in [0, 1]',
+    (v) => typeof v === 'number' && v >= 0 && v <= 1,
+);
+
+export interface GradientStops {
+    colors: string[];
+    stops: number[];
+}
+
+export type GradientSpec = string[] | GradientStops;
+
+export const isGradientSpec = guard<GradientSpec>(
+    'colour array or { colors = [...], stops = [...] }',
+    (v) => {
+        if (Array.isArray(v)) return v.every((e) => typeof e === 'string');
+        if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+            const o = v as Record<string, unknown>;
+            return Array.isArray(o.colors)
+                && o.colors.every((e: unknown) => typeof e === 'string')
+                && Array.isArray(o.stops)
+                && o.stops.every((e: unknown) => typeof e === 'number' && e >= 0 && e <= 1)
+                && o.colors.length === o.stops.length;
+        }
+        return false;
+    },
+);
+
+/**
+ * a closed set of strings. the guard narrows to the union of the members, so a
+ * field built with it has a literal union type rather than `string`, and the
+ * default is checked against the members at compile time.
+ */
+export function isOneOf<const T extends readonly [string, ...string[]]>(...allowed: T): Guard<T[number]> {
+    return guard<T[number]>(
+        allowed.map((member) => `"${member}"`).join(' | '),
+        (v) => typeof v === 'string' && (allowed as readonly string[]).includes(v),
+    );
+}
 
 interface Field<T> {
     /** key as it appears in the TOML file (kebab-case) */
@@ -116,6 +155,36 @@ const SCHEMA = {
             'ms per frame for the shimmer color sweep on working messages',
         ),
     },
+    audit: {
+        model: field(
+            'model',
+            isString,
+            'anthropic/claude-haiku-4-5',
+            'which model /audit sends the last reply to for review, as',
+            'provider/id, or "current" for the session model',
+        ),
+        feedback: field(
+            'feedback',
+            isOneOf('context', 'transcript', 'both'),
+            'both',
+            'context always asks before sending, never sends unattended. transcript:',
+            'a report renders here and nothing is ever offered to the agent. both:',
+            'the report renders here and sending is still offered, on approval',
+        ),
+        timeoutMs: field(
+            'timeout-ms',
+            isPosInt,
+            30_000,
+            'abort the reviewer call after this long; a timeout reports as an error',
+        ),
+        audience: field(
+            'audience',
+            isString,
+            'an expert in the general field, unfamiliar with this repository and this conversation',
+            'what the auditor assumes its reader already knows. the skill requires',
+            'this parameter and asks for it when absent',
+        ),
+    },
     wordswap: {
         enabled: field(
             'enabled',
@@ -129,6 +198,70 @@ const SCHEMA = {
     },
     images: {
         width: field('width', isPosInt, 180, 'width in terminal cells for inline images'),
+    },
+    stash: {
+        demoteTo: field(
+            'demote-to',
+            isStringArray,
+            ['f2', 'f3', 'f4', 'f5', 'f6'],
+            'spare keys for the built-in actions that share ctrl+s / ctrl+r with the',
+            'stash. pi reports every such shared key at startup, even under',
+            'quietStartup, so each colliding action is moved to the next unused key',
+            'in this list. an empty list leaves pi alone and keeps the report',
+        ),
+    },
+    input: {
+        halfBlockEdges: field(
+            'half-block-edges',
+            isBool,
+            true,
+            'replace the thin ─ border lines with half-block characters (▄ top, ▀',
+            'bottom) coloured to match the field background',
+        ),
+        background: field(
+            'background',
+            isBool,
+            true,
+            'fill the input field content rows with a gradient background derived',
+            'from the user message bubble colour, matching the edge gradient',
+        ),
+        gradient: field(
+            'gradient',
+            isOneOf('off', 'edges'),
+            'edges',
+            'horizontal colour gradient on the input field. off: flat accent.',
+            'edges: gradient on the half-block border rows and content background',
+        ),
+        darken: field(
+            'darken',
+            isUnitFloat,
+            0.25,
+            'how far to shift the user bubble colour for the field background.',
+            '0 = same as bubble, 1 = fully dark or light (auto-detected)',
+        ),
+        tint: field(
+            'tint',
+            isUnitFloat,
+            0.3,
+            'how much each gradient colour shows through over the field',
+            'background. 0 = invisible, 1 = full saturation. applied after',
+            'any per-stop @filters',
+        ),
+        gradientColors: field(
+            'gradient-colors',
+            isGradientSpec,
+            ['border', 'userMessageBg'],
+            'gradient colour stops for the default mode, left to right. each',
+            'entry is a theme colour name (e.g. "border") or a hex code.',
+            'for custom stop positions:',
+            '  { colors = ["border", "userMessageBg"], stops = [0.0, 0.35] }',
+        ),
+        bashColors: field(
+            'bash-colors',
+            isGradientSpec,
+            ['bashMode', 'userMessageBg'],
+            'gradient colour stops for bash mode',
+        ),
     },
     render: {
         halfBlocks: field(
@@ -157,6 +290,13 @@ const SCHEMA = {
             true,
             "skip pi's IdleStatus, which parks two blank rows in the dock while idle.",
             'needs terminal.clearOnShrink, which clear-on-shrink.ts sets',
+        ),
+        execPreview: field(
+            'exec-preview',
+            isBool,
+            true,
+            'shorten ctx_execute / ctx_execute_file / ctx_batch_execute tool rows to',
+            'one highlighted line each, expanding to the full command and output',
         ),
     },
 } satisfies Schema;
@@ -285,8 +425,14 @@ function toRaw(cfg: RhoConfig): Record<string, Record<string, unknown>> {
     return out;
 }
 
+// a single short doc line rides on the assignment line itself, `key = value  #
+// doc`, instead of costing it a line above. anything longer, or a doc with more
+// than one line, still goes above: unlike an above comment, a trailing one has
+// no room to wrap.
+const MAX_LINE = 100;
+
 // smol-toml emits `[section]` headers and `key = value` lines, so each field's
-// doc is inserted above the line that assigns its key.
+// doc is inserted at (trailing) or above that line.
 function annotate(toml: string): string {
     const out: string[] = [];
     let fields: Section | undefined;
@@ -299,9 +445,14 @@ function annotate(toml: string): string {
             continue;
         }
         const assign = line.match(/^([A-Za-z0-9_-]+)\s*=/);
-        if (assign && fields) {
-            const f = Object.values(fields).find((candidate) => candidate.key === assign[1]);
-            if (f) for (const doc of f.doc) out.push(`# ${doc}`);
+        const f = assign && fields && Object.values(fields).find((candidate) => candidate.key === assign[1]);
+        if (f) {
+            const trailing = `${line}  # ${f.doc[0]}`;
+            if (f.doc.length === 1 && trailing.length <= MAX_LINE) {
+                out.push(trailing);
+                continue;
+            }
+            for (const doc of f.doc) out.push(`# ${doc}`);
         }
         out.push(line);
     }

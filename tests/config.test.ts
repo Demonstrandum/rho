@@ -7,6 +7,7 @@ import {
     isString,
     isPosInt,
     isStringArray,
+    isOneOf,
 } from '../extensions/lib/config';
 import { parse } from 'smol-toml';
 
@@ -62,9 +63,21 @@ test('an empty array is accepted', () => {
 test('every schema field is checked, so the emitted file names each expectation', () => {
     // guards are the only source of the "expected ..." text, so a field added
     // without one would surface here rather than silently accepting anything.
-    const labels = new Set([isBool.label, isString.label, isPosInt.label, isStringArray.label]);
+    const labels = new Set([
+        isBool.label,
+        isString.label,
+        isPosInt.label,
+        isStringArray.label,
+        isOneOf('context', 'transcript', 'both').label,
+    ]);
     const { problems } = resolveConfig({
         spinner: { categories: 1, done: 1, 'shimmer-speed': 'x' },
+        audit: {
+            model: 1,
+            feedback: 'somewhere',
+            'timeout-ms': 'x',
+            audience: 1,
+        },
         wordswap: { enabled: 1 },
         startup: { animate: 1 },
         images: { width: 'x' },
@@ -76,7 +89,7 @@ test('every schema field is checked, so the emitted file names each expectation'
         },
     });
     // one per field in the schema
-    expect(problems).toHaveLength(10);
+    expect(problems).toHaveLength(14);
     for (const p of problems) {
         const named = [...labels].some((l) => p.message.includes(`expected ${l}`));
         expect(named).toBe(true);
@@ -121,6 +134,22 @@ test('guards check exactly, with no sample value to infer from', () => {
 
     expect(isString('')).toBe(true);
     expect(isString(42)).toBe(false);
+
+    // a closed set: membership, not shape, is what a literal union constrains.
+    const feedback = isOneOf('context', 'transcript', 'both');
+    expect(feedback('both')).toBe(true);
+    expect(feedback('Both')).toBe(false);
+    expect(feedback('somewhere')).toBe(false);
+    expect(feedback(1)).toBe(false);
+});
+
+test('a value outside a closed set keeps the default and lists the members', () => {
+    const { config, problems } = resolveConfig({ audit: { feedback: 'somewhere' } });
+    expect(config.audit.feedback).toBe(DEFAULTS.audit.feedback);
+    expect(problems).toHaveLength(1);
+    expect(problems[0].message).toBe(
+        'expected "context" | "transcript" | "both", got "somewhere"; using default "both"',
+    );
 });
 
 test('every guard carries a label used in messages', () => {
@@ -128,6 +157,7 @@ test('every guard carries a label used in messages', () => {
     expect(isString.label).toBe('string');
     expect(isPosInt.label).toBe('positive integer');
     expect(isStringArray.label).toBe('array of string');
+    expect(isOneOf('a', 'b').label).toBe('"a" | "b"');
 });
 
 test('a misspelled key is reported with the intended key', () => {

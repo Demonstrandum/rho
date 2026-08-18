@@ -31,8 +31,16 @@ import {
     ToolExecutionComponent,
     type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
-import { Box, Container } from '@earendil-works/pi-tui';
+import { Box, Container, type Component } from '@earendil-works/pi-tui';
 import { config } from './lib/config';
+
+// paddingY and bgFn are `private` in Box's declaration, so reaching them needs a
+// cast. naming exactly what is reached keeps it to those two members instead of
+// opening the whole receiver up.
+interface BoxInternals {
+    paddingY: number;
+    bgFn?: (text: string) => string;
+}
 
 const LOWER_HALF = '\u2584';
 const UPPER_HALF = '\u2580';
@@ -74,13 +82,14 @@ const { halfBlocks, tightToolRows, tightAfterToolRows, hideIdleStatus } = config
 
 if (halfBlocks) {
     const origBoxRender = Box.prototype.render;
-    Box.prototype.render = function (this: any, width: number): string[] {
+    Box.prototype.render = function (this: Box, width: number): string[] {
+        const self = this as unknown as BoxInternals;
         // copy: the original returns its internal cache array by reference.
         const lines: string[] = [...origBoxRender.call(this, width)];
-        const paddingY: number = this.paddingY ?? 1;
+        const paddingY: number = self.paddingY ?? 1;
         if (paddingY === 0 || lines.length < paddingY * 2 + 1) return lines;
 
-        const fg = bgFnToFg(this.bgFn);
+        const fg = bgFnToFg(self.bgFn);
         if (!fg) return lines;
 
         for (let i = 0; i < paddingY; i++) {
@@ -95,7 +104,10 @@ if (halfBlocks) {
 
 if (tightToolRows) {
     const origToolRender = ToolExecutionComponent.prototype.render;
-    ToolExecutionComponent.prototype.render = function (this: any, width: number): string[] {
+    ToolExecutionComponent.prototype.render = function (
+        this: ToolExecutionComponent,
+        width: number,
+    ): string[] {
         const lines: string[] = [...origToolRender.call(this, width)];
         while (lines.length > 0 && isBlank(lines[0])) lines.shift();
         while (lines.length > 0 && isBlank(lines[lines.length - 1])) lines.pop();
@@ -105,8 +117,9 @@ if (tightToolRows) {
 
 if (tightAfterToolRows || hideIdleStatus) {
     const origContainerRender = Container.prototype.render;
-    Container.prototype.render = function (this: any, width: number): string[] {
-        const children: any[] = this.children ?? [];
+    Container.prototype.render = function (this: Container, width: number): string[] {
+        // Container.children is public, so this needs no cast.
+        const children: Component[] = this.children ?? [];
         const out: string[] = [];
 
         for (let i = 0; i < children.length; i++) {

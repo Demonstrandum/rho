@@ -67,10 +67,25 @@ function field<T>(key: string, check: Guard<T>, def: T, ...doc: string[]): Field
     return { key, check, default: def, doc };
 }
 
-// Field<any> rather than Field<unknown>: a Guard<T> is a predicate on its
-// parameter, so Guard<boolean> is not assignable to Guard<unknown>.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Section = Record<string, Field<any>>;
+// the schema constraint drops the predicate's type parameter rather than
+// widening it. Field<unknown> would not work, because a Guard<T> is a predicate
+// on its parameter and Guard<boolean> is therefore not assignable to
+// Guard<unknown>; but a type predicate IS assignable to a plain
+// boolean-returning function, and any default is assignable to unknown. so this
+// admits every Field<T> without an `any`.
+interface AnyGuard {
+    (value: unknown): boolean;
+    label: string;
+}
+
+interface AnyField {
+    key: string;
+    check: AnyGuard;
+    default: unknown;
+    doc: string[];
+}
+
+type Section = Record<string, AnyField>;
 type Schema = Record<string, Section>;
 
 /** one property per field, typed by that field's default. */

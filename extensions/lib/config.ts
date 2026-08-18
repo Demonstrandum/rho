@@ -16,20 +16,61 @@ import { parse, stringify } from 'smol-toml';
 const paths = envPaths('rho', { suffix: '' });
 const CONFIG_PATH = join(paths.config, 'rho.toml');
 
+/**
+ * a runtime check paired with the type it narrows to. `label` names the
+ * expectation for error messages.
+ *
+ * this is what a field is checked against, rather than the shape of its
+ * default. a default can only ever imply its own shape, which leaves two
+ * holes: an empty array default carries no element to compare against, and no
+ * default can express a constraint narrower than its type, such as requiring a
+ * positive integer.
+ */
+interface Guard<T> {
+    (value: unknown): value is T;
+    label: string;
+}
+
+function guard<T>(label: string, test: (value: unknown) => boolean): Guard<T> {
+    const g = ((value: unknown) => test(value)) as unknown as Guard<T>;
+    g.label = label;
+    return g;
+}
+
+export const isBool = guard<boolean>('boolean', (v) => typeof v === 'boolean');
+export const isString = guard<string>('string', (v) => typeof v === 'string');
+export const isPosInt = guard<number>(
+    'positive integer',
+    (v) => typeof v === 'number' && Number.isInteger(v) && v > 0,
+);
+export const isStringArray = guard<string[]>(
+    'array of string',
+    (v) => Array.isArray(v) && v.every((element) => typeof element === 'string'),
+);
+
 interface Field<T> {
     /** key as it appears in the TOML file (kebab-case) */
     key: string;
+    /** what the file must supply; also the runtime check */
+    check: Guard<T>;
     default: T;
     /** lines emitted as `#` comments above the key */
     doc: string[];
 }
 
-/** T is inferred from `def`, so `field('done', '完')` is a Field<string>. */
-function field<T>(key: string, def: T, ...doc: string[]): Field<T> {
-    return { key, default: def, doc };
+/**
+ * T comes from the guard's predicate, so no field needs an explicit type
+ * argument, and `def` is checked against it: a default that contradicts its
+ * guard is a compile error.
+ */
+function field<T>(key: string, check: Guard<T>, def: T, ...doc: string[]): Field<T> {
+    return { key, check, default: def, doc };
 }
 
-type Section = Record<string, Field<unknown>>;
+// Field<any> rather than Field<unknown>: a Guard<T> is a predicate on its
+// parameter, so Guard<boolean> is not assignable to Guard<unknown>.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Section = Record<string, Field<any>>;
 type Schema = Record<string, Section>;
 
 /** one property per field, typed by that field's default. */
@@ -41,14 +82,21 @@ type ConfigOf<S extends Schema> = {
 
 const SCHEMA = {
     spinner: {
-        categories: field<string[]>(
+        categories: field(
             'categories',
+            isStringArray,
             ['chinese'],
             'which spinner sets to use (defined in extensions/assets/spinners.json)',
         ),
-        done: field('done', '完', 'glyph shown on the completion line when the agent finishes'),
+        done: field(
+            'done',
+            isString,
+            '完',
+            'glyph shown on the completion line when the agent finishes',
+        ),
         shimmerSpeed: field(
             'shimmer-speed',
+            isPosInt,
             80,
             'ms per frame for the shimmer color sweep on working messages',
         ),
@@ -56,36 +104,41 @@ const SCHEMA = {
     wordswap: {
         enabled: field(
             'enabled',
+            isBool,
             true,
             'whether the word filter is active (toggle at runtime with /noswap)',
         ),
     },
     startup: {
-        animate: field('animate', true, 'whether to play the logo animation on launch'),
+        animate: field('animate', isBool, true, 'whether to play the logo animation on launch'),
     },
     images: {
-        width: field('width', 180, 'width in terminal cells for inline images'),
+        width: field('width', isPosInt, 180, 'width in terminal cells for inline images'),
     },
     render: {
         halfBlocks: field(
             'half-blocks',
+            isBool,
             true,
             "a Box's blank padding rows become half-height block characters, so a",
             'tool bubble costs no blank rows',
         ),
         tightToolRows: field(
             'tight-tool-rows',
+            isBool,
             true,
             'drop the blank lines a tool row wraps itself in',
         ),
         tightAfterToolRows: field(
             'tight-after-tool-rows',
+            isBool,
             true,
             "drop an assistant message's leading blank line when a tool row is what",
             'precedes it (the same blank line is kept after a user bubble)',
         ),
         hideIdleStatus: field(
             'hide-idle-status',
+            isBool,
             true,
             "skip pi's IdleStatus, which parks two blank rows in the dock while idle.",
             'needs terminal.clearOnShrink, which clear-on-shrink.ts sets',
@@ -118,37 +171,12 @@ export interface ConfigProblem {
     message: string;
 }
 
-// what the schema demands. an integer default is named as such, since
-// "expected number, got number" is no use when the value is 1.5.
-function expectation(expected: unknown): string {
-    if (Array.isArray(expected)) {
-        const element = expected[0];
-        return element === undefined ? 'array' : `array of ${typeof element}`;
-    }
-    if (typeof expected === 'number' && Number.isInteger(expected)) return 'integer';
-    return typeof expected;
-}
-
 function describe(value: unknown): string {
     if (Array.isArray(value)) {
         const element = value[0];
         return element === undefined ? 'array' : `array of ${typeof element}`;
     }
     return typeof value;
-}
-
-// the default doubles as the spec: whatever shape it has is the shape the file
-// must supply. an integer default (milliseconds, terminal cells) also rejects a
-// fractional value, since no such field is meaningfully fractional.
-function accepts(value: unknown, expected: unknown): boolean {
-    if (Array.isArray(expected)) {
-        if (!Array.isArray(value)) return false;
-        const element = expected[0];
-        return element === undefined || value.every((v) => typeof v === typeof element);
-    }
-    if (typeof value !== typeof expected) return false;
-    if (typeof expected === 'number' && Number.isInteger(expected)) return Number.isInteger(value);
-    return true;
 }
 
 // `half_blocks` and `halfBlocks` should be recognised as meaning `half-blocks`
@@ -215,10 +243,10 @@ export function resolveConfig(raw: RawConfig): {
         for (const [name, f] of Object.entries(fields)) {
             const value = rawSection[f.key];
             if (value === undefined) continue;
-            if (!accepts(value, f.default)) {
+            if (!f.check(value)) {
                 problems.push({
                     at: `${section}.${f.key}`,
-                    message: `expected ${expectation(f.default)}, got ${JSON.stringify(value)}; using default ${JSON.stringify(f.default)}`,
+                    message: `expected ${f.check.label}, got ${JSON.stringify(value)}; using default ${JSON.stringify(f.default)}`,
                 });
                 continue;
             }

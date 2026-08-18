@@ -23,7 +23,7 @@
   },
   "scripts": {
     "test": "bun test tests/",
-    "postinstall": "bun tools/link-pi-tui.ts",
+    "postinstall": "bun tools/link-pi-packages.ts",
     "typecheck": "tsc --noEmit",
     "prompt": "bun tools/prompt-explorer.ts",
     "prompt:cli": "bun tools/prompt-explorer.ts --cli",

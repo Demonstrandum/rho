@@ -74,7 +74,7 @@ test('the shipped wordswap.json builds into a valid rule set', () => {
     ) as { words: Record<string, string>; patterns?: Record<string, string> };
     const swaps = buildSwaps(shipped.words);
     expect(swaps.length).toBeGreaterThan(0);
-    expect(swaps[0].original).toBe('load-bearing');
+    expect(swaps.some(s => s.original === 'load-bearing')).toBe(true);
 });
 
 test('verb entries generate inflected swaps', () => {

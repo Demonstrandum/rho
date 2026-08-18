@@ -1,6 +1,6 @@
 // monkey-patch Box.prototype.render to use half-block edges.
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { Box, Spacer } from '@earendil-works/pi-tui';
+import { Box } from '@earendil-works/pi-tui';
 
 const LOWER_HALF = '\u2584';
 const UPPER_HALF = '\u2580';
@@ -61,11 +61,7 @@ Box.prototype.render = function (this: any, width: number): string[] {
     return lines;
 };
 
-// spacers are inside tool-execution components (above the Box).
-// with half-block edges they're redundant. zero them out.
-Spacer.prototype.render = function (_width: number): string[] {
-    return [];
-};
+
 
 export default function (pi: ExtensionAPI) {
     pi.on('session_start', async (_event, ctx) => {

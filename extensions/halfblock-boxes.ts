@@ -56,6 +56,11 @@ Box.prototype.render = function (this: any, width: number): string[] {
         lines[lines.length - 1 - i] = halfBlockLine(UPPER_HALF, width, fg);
     }
 
+    if (needsExtraPadding(this.bgFn)) {
+        lines.unshift('');
+        lines.push('');
+    }
+
     return lines;
 };
 

@@ -28,7 +28,7 @@ import { config } from './lib/config';
 
 // a short discoverability hint. keep it minimal; the footer carries model/token
 // state, so this only points at the two universal entry points.
-const HINT = '/ commands · ! bash';
+const HINT = '/ commands · ! shell';
 
 // pi wordmark, transcribed exactly from the hand-drawn glyph ('#' = filled),
 // scaled up with block characters. the drawn shape is deliberately asymmetric.

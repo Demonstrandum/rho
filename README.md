@@ -9,6 +9,7 @@ personal [pi](https://pi.dev) dotfiles, packaged as a pi package (Bun + TypeScri
 - **billing protection**: detects and avoids Anthropic's third-party billing classifier. monitors response headers for extra-usage routing.
 - **spinner**: custom working indicator with shimmer animation, random working messages, random completion lines with templated values.
 - **startup and UI**: compact startup banner, custom footer, `/context` context-window visualisation.
+- **prose audit**: `/audit` sends the last reply to a second model (haiku by default) to be reviewed against the writing rules, outside the conversation. findings render in the transcript; sending a correction back to the agent is offered, never automatic, with the option to edit it first.
 - **commands**: `/audit` (prose review against the writing rules), `/cwd` (change directory mid-session), `/web` (launch pi-web UI).
 - **settings**: auto-configures terminal and display preferences on first run.
 - **bundled packages**: web browsing and librarian (pi-web-access), session rewind (pi-rewind), FTS5 knowledge base (context-mode), output speed display (token-rate-pi).
@@ -24,6 +25,7 @@ bundles my:
   - `startup.ts` hides pi's built-in startup block (`quietStartup`) and renders a compact bold-inline header (logo + `prompts`/`skills`/`commands`/`themes` on one line each) via `setHeader`
   - `silence-extra-usage-warning.ts` persists `warnings.anthropicExtraUsage=false` so the subscription-billing notice is not shown every session
   - `footer.ts` replaces the built-in footer to swap the token arrow glyphs
+  - `auditor.ts` + `lib/audit.ts` add `/audit`, which reviews the last assistant reply against the writer rules with a separate model, through one forced-tool call to `ctx.modelRegistry.complete`; configured under `[audit]` in `rho.toml` (`model`, `feedback`, `timeout-ms`, `audience`)
   - `cwd.ts` adds `/cwd [path]` to change the agent's working directory mid-session
   - `web.ts` adds `/web` to launch the [pi-web](https://github.com/jmfederico/pi-web) UI as a background service (and `/web status|stop|logs|...` passthrough)
   - `agentica.ts` adds an `agentica` tool (runs python that can call MCP tools via the Agentica MCP Runtime), ported from [MathisWellmann/nixos-config](https://github.com/MathisWellmann/nixos-config)'s `pi-agent.nix`. off by default: only registers when `RHO_AGENTICA_RUNTIME` points at an agentica-mcp-runtime checkout (`RHO_AGENTICA_PYTHON` overrides the interpreter, default `<runtime>/.venv/bin/python`); with the env unset it is a no-op

@@ -8,7 +8,11 @@
 // in a subdirectory so pi's extension auto-discovery (top-level *.ts only)
 // does not try to load it as an extension.
 
-import type { Rgb } from './utils';
+import { blend, ansiFg, RESET, type Rgb } from './utils';
+import {
+    tetrisGrid, BOARD_W, BOARD_H, BOARD_ROW_OFFSET, BOARD_COL_OFFSET,
+    type TetrisState,
+} from './tetris-logo';
 
 // pi wordmark, transcribed from the hand-drawn glyph ('1' = filled), scaled up
 // with block characters. the drawn shape is deliberately asymmetric.
@@ -281,7 +285,10 @@ const SHIMMER_MS_DEFAULT = 500;
 // pi runs one trace; rho runs two traces with a gap, so it needs more.
 const SHIMMER_MS_PI = 750;
 const SHIMMER_MS_RHO = 1050;
-export const TYPE_DELAY_MS = 150;
+// how far into the shimmer the label starts typing. 0 starts both at once,
+// 1 keeps them sequential. at 0.5 the text is written over the second half
+// of the shimmer.
+export const TYPE_OVERLAP = 0.5;
 export const TYPE_PER_CHAR_MS = 60;
 export const CURSOR_TAIL_MS = 250;
 export const FRAME_MS = 40;
@@ -302,20 +309,33 @@ export interface Timeline {
 
 // total run time at the unscaled defaults, used to derive the scale factor
 // when a caller asks for a specific total.
+// delay from the start of the shimmer to the first typed character.
+function typeOffsetMs(mode: IntroMode): number {
+    return shimmerMs(mode) * TYPE_OVERLAP;
+}
+
+// the shimmer and the label run concurrently, so the tail is whichever of the
+// two finishes last.
 function defaultTotalMs(mode: IntroMode, labelLength: number): number {
     const introMs = mode === 'tetris' ? 1600 : DEFAULT_INTRO_MS[mode];
-    return introMs + SHIMMER_DELAY_MS + shimmerMs(mode) + TYPE_DELAY_MS
-        + labelLength * TYPE_PER_CHAR_MS + CURSOR_TAIL_MS;
+    const typeTail = typeOffsetMs(mode) + labelLength * TYPE_PER_CHAR_MS + CURSOR_TAIL_MS;
+    return introMs + SHIMMER_DELAY_MS + Math.max(shimmerMs(mode), typeTail);
 }
+
+// tetris runs four drops, a flash and a clear before the shimmer starts, so it
+// is allowed past the configured total rather than being compressed to fit.
+const TETRIS_OVERRUN = 1.3;
 
 // `targetMs`, when given, scales every phase so the whole sequence fits it.
 export function timeline(introMs: number, mode: IntroMode, labelLength: number, targetMs?: number): Timeline {
-    const s = targetMs ? targetMs / defaultTotalMs(mode, labelLength) : 1;
+    const target = targetMs !== undefined && mode === 'tetris' ? targetMs * TETRIS_OVERRUN : targetMs;
+    const s = target ? target / defaultTotalMs(mode, labelLength) : 1;
     const introEnd = introMs * s;
     const shimmerStart = introEnd + SHIMMER_DELAY_MS * s;
     const shimmerEnd = shimmerStart + shimmerMs(mode) * s;
-    const typeStart = shimmerEnd + TYPE_DELAY_MS * s;
-    const settleAt = typeStart + labelLength * TYPE_PER_CHAR_MS * s + CURSOR_TAIL_MS * s;
+    const typeStart = shimmerStart + typeOffsetMs(mode) * s;
+    const typeEnd = typeStart + labelLength * TYPE_PER_CHAR_MS * s;
+    const settleAt = Math.max(shimmerEnd, typeEnd + CURSOR_TAIL_MS * s);
     return { introEnd, shimmerStart, shimmerEnd, typeStart, settleAt };
 }
 
@@ -358,4 +378,130 @@ export function pathCellFade(
     const idx = order.get(gr * GLYPH_W + gc) ?? 0;
     const age = (t / tl.introEnd - PIRHO_REVEAL[idx]) / CELL_FADE_SPAN;
     return smoothstep(Math.max(0, Math.min(1, age)));
+}
+
+// everything the logo needs to draw one frame. the caller supplies colours and
+// the per-session picks; the frame itself is a pure function of elapsed time.
+export interface LogoFrame {
+    readonly t: number;
+    readonly mode: IntroMode;
+    readonly dir: ShimmerDir;
+    readonly order: ReadonlyMap<number, number>;
+    readonly tl: Timeline;
+    readonly finished: boolean;
+    readonly accent: Rgb;
+    readonly tetrisColors: Record<string, Rgb>;
+    readonly tetrisState: TetrisState | null;
+}
+
+// tetris needs room the glyph does not: rows above for the pieces to fall
+// through, and the row below that fills and clears. every other mode draws
+// the glyph alone.
+export function logoHeight(mode: IntroMode): number {
+    return mode === 'tetris' ? BOARD_H : LOGO_H;
+}
+
+export function logoWidth(mode: IntroMode): number {
+    return mode === 'tetris' ? BOARD_W * SCALE_X : LOGO_W;
+}
+
+// the row the label sits against: the middle of the glyph, wherever the glyph
+// is drawn.
+export function logoCenterRow(mode: IntroMode): number {
+    return mode === 'tetris' ? BOARD_ROW_OFFSET + CENTER_ROW : CENTER_ROW;
+}
+
+// the glyph's left edge in cells, for the modes that inset it.
+const TETRIS_INDENT = BOARD_COL_OFFSET * SCALE_X;
+
+// one row of the glyph, coloured by whichever reveal or shimmer is running.
+function glyphRow(frame: LogoFrame, row: number, highlight: Rgb, fadeRgb: Rgb | undefined, pathFade: boolean): string {
+    const { t, mode, dir, order, tl, finished, accent } = frame;
+    let line = '';
+    for (let col = 0; col < LOGO_W; col++) {
+        const ch = cellGlyph(row, col, t, mode, order, tl, finished);
+        if (ch === ' ') {
+            line += ' ';
+            continue;
+        }
+        let cellRgb: Rgb;
+        if (fadeRgb) {
+            cellRgb = fadeRgb;
+        } else if (pathFade) {
+            cellRgb = blend(darken(accent, FADE_DARK), accent, pathCellFade(row, col, t, order, tl));
+        } else {
+            const inten = shimmerIntensity(dir, row, col, t, tl);
+            cellRgb = inten > 0 ? blend(accent, highlight, inten) : accent;
+        }
+        line += ansiFg(cellRgb) + ch;
+    }
+    return line;
+}
+
+// the board mid-drop: pieces in their own colours, the clear row flashing,
+// and after the clear the glyph alone, which is what the shimmer inherits.
+function tetrisLines(frame: LogoFrame, highlight: Rgb): string[] {
+    const { t, tl, accent, tetrisColors, tetrisState } = frame;
+
+    // once the drop has run its course the glyph takes over in place, so the
+    // shimmer and the label land on the same cells the pieces settled into.
+    if (t >= tl.introEnd || tetrisState === null) {
+        const pad = ' '.repeat(TETRIS_INDENT);
+        return Array.from({ length: BOARD_H }, (_, row) => {
+            const gr = row - BOARD_ROW_OFFSET;
+            if (gr < 0 || gr >= LOGO_H) {
+                return '';
+            }
+            return pad + glyphRow(frame, gr, highlight, undefined, false) + RESET;
+        });
+    }
+
+    const grid = tetrisGrid(tetrisState);
+    return grid.map((gridRow) => {
+        let line = '';
+        for (const name of gridRow) {
+            if (name === null) {
+                line += ' '.repeat(SCALE_X);
+                continue;
+            }
+            const rgb = name === 'logo' ? accent : tetrisColors[name] ?? accent;
+            line += ansiFg(rgb) + '█'.repeat(SCALE_X);
+        }
+        return line + RESET;
+    });
+}
+
+// the logo as ansi lines, no label. this is the whole visual: the intro
+// reveal, the per-cell fades, the tetris board, and the shimmer. startup.ts
+// and the demo both call it, so the demo cannot drift.
+export function renderLogoLines(frame: LogoFrame): string[] {
+    const { t, mode, tl, accent } = frame;
+    const highlight = blend(accent, [255, 255, 255], SHIMMER_HIGHLIGHT_MIX);
+
+    if (mode === 'tetris') {
+        return tetrisLines(frame, highlight);
+    }
+
+    // during the colour fade-in every cell shares one accent ramp.
+    const fadingIn = mode === 'fade' && t < tl.introEnd;
+    const fadeRgb = fadingIn
+        ? blend(darken(accent, FADE_DARK), accent, smoothstep(t / tl.introEnd))
+        : undefined;
+    const pathFade = (mode === 'pi' || mode === 'rho') && t < tl.introEnd;
+
+    return Array.from({ length: LOGO_H }, (_, row) =>
+        glyphRow(frame, row, highlight, fadeRgb, pathFade) + RESET);
+}
+
+// the plain block cells for one row, for terminals with no truecolor. the
+// caller applies its own single colour to the whole string.
+export function plainLogoRow(
+    row: number, t: number, mode: IntroMode,
+    order: ReadonlyMap<number, number>, tl: Timeline, finished: boolean,
+): string {
+    let cells = '';
+    for (let col = 0; col < LOGO_W; col++) {
+        cells += cellGlyph(row, col, t, mode, order, tl, finished);
+    }
+    return cells;
 }

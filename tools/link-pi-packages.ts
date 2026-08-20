@@ -11,6 +11,10 @@ const PACKAGES = ['pi-tui', 'pi-coding-agent'];
 
 const localScope = join(import.meta.dir, '..', 'node_modules', '@earendil-works');
 
+function warn(msg: string): void {
+    console.error(`[link-pi-packages] ${msg}`);
+}
+
 function globalScopeDir(): string | null {
     try {
         const piBin = execSync('which pi', { encoding: 'utf8' }).trim();
@@ -26,20 +30,36 @@ function globalScopeDir(): string | null {
 }
 
 const scope = globalScopeDir();
-if (!scope) process.exit(0);
+if (!scope) {
+    warn("could not locate pi's global @earendil-works scope from `which pi`; leaving node_modules untouched. rho extensions may fail to load if their local copies are missing or broken.");
+    process.exit(0);
+}
 
 for (const pkg of PACKAGES) {
     const target = join(scope, pkg);
     const link = join(localScope, pkg);
-    if (!existsSync(target)) continue;
+    if (!existsSync(target)) {
+        warn(`global ${pkg} not found at ${target}; skipping.`);
+        continue;
+    }
 
     try {
         const stat = lstatSync(link);
-        if (stat.isSymbolicLink() && readlinkSync(link) === target) continue; // already linked
+        if (stat.isSymbolicLink()) {
+            const current = readlinkSync(link);
+            if (current === target) continue; // already linked
+            // a self-referential loop (link -> itself) resolves to nothing and
+            // makes the package unresolvable; rewrite it below.
+            if (resolve(dirname(link), current) === resolve(link)) {
+                warn(`${pkg} was a self-referential symlink loop; repairing.`);
+            }
+        }
     } catch { /* not present yet */ }
 
     try {
         rmSync(link, { recursive: true, force: true });
         symlinkSync(target, link);
-    } catch { /* leave the local copy if the link fails */ }
+    } catch (err) {
+        warn(`failed to link ${pkg} -> ${target}: ${(err as Error).message}. rho's prototype patches will not apply until this is fixed (try re-running \`bun tools/link-pi-packages.ts\`).`);
+    }
 }

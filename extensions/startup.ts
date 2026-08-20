@@ -26,334 +26,53 @@ import { ensureGlobalSetting } from './lib/settings-store';
 import { zip, choose, themeRgb, blend, ansiFg, RESET, type Rgb } from './lib/utils';
 import { config } from './lib/config';
 import {
-    createTetrisState, tickTetris, getTetrisCellState,
+    createTetrisState, tickTetris,
     PIECE_COLORS_DARK, PIECE_COLORS_LIGHT,
 } from './lib/tetris-logo';
+import {
+    LOGO_W, LOGO_H, CENTER_ROW, SCALE_X, SCALE_Y,
+    DEFAULT_INTRO_MS, TYPE_PER_CHAR_MS, CURSOR_TAIL_MS, FRAME_MS,
+    FADE_RAMP, SHIMMER_DIRS,
+    type IntroMode, type ShimmerDir, type LinearShimmerDir, type Timeline,
+    timeline, orderFor, shimmerDirFor, renderLogoLines, plainLogoRow, logoCenterRow,
+} from './lib/pi-logo';
 
 // a short discoverability hint. keep it minimal; the footer carries model/token
 // state, so this only points at the two universal entry points.
 const HINT = '/ commands · ! shell';
-
-// pi wordmark, transcribed exactly from the hand-drawn glyph ('#' = filled),
-// scaled up with block characters. the drawn shape is deliberately asymmetric.
-const GLYPH: readonly number[][] = [
-    [1, 1, 1, 0],
-    [1, 0, 1, 0],
-    [1, 1, 0, 1],
-    [1, 0, 0, 1],
-];
-const SCALE_X = 2;
-const SCALE_Y = 1;
-
-const GLYPH_H = GLYPH.length;
-const GLYPH_W = Math.max(...GLYPH.map((row) => row.length));
-const isFilled = (gr: number, gc: number): boolean => GLYPH[gr]?.[gc] === 1;
-
-class Art {
-    lines: string[];
-    width: number;
-    height: number;
-
-    constructor(lines: string[]) {
-        this.lines = lines;
-        this.width = Math.max(...lines.map(l => l.length));
-        this.height = lines.length;
-    }
-
-    get centerRow(): number {
-        return Math.floor((this.height - 1) / 2);
-    }
-
-    draw(): string[] {
-        return this.lines.map((l) => l.padEnd(this.width));
-    }
-
-    isFilled(row: number, col: number): boolean {
-        return (this.lines[row]?.[col] ?? ' ') !== ' ';
-    }
-}
-
-// scale the 0/1 glyph matrix into solid block-art lines the Art wrapper owns.
-function scaleGlyph(glyph: readonly number[][], scaleX: number, scaleY: number): string[] {
-    const width = Math.max(...glyph.map((row) => row.length));
-    const lines: string[] = [];
-    for (const row of glyph) {
-        let line = '';
-        for (let col = 0; col < width; col++) {
-            line += (row[col] === 0 ? ' ' : '█').repeat(scaleX);
-        }
-        for (let k = 0; k < scaleY; k++) {
-            lines.push(line);
-        }
-    }
-    return lines;
-}
-
-const ART = new Art(scaleGlyph(GLYPH, SCALE_X, SCALE_Y));
-const LOGO_W = ART.width;
-const LOGO_H = ART.height;
-const CENTER_ROW = ART.centerRow;
-
-// pirho intro: draw the P first, pause, draw the I, then shimmer the PI
-// reading order followed by the RHO trace order.
-//
-// P (8 cells):
-//   ###
-//   # #
-//   ##
-//   #
-//
-// I (2 cells, the remainder):
-//     #
-//     #
-//
-// RHO trace (same 10 cells, different order, clockwise loop then tail):
-//   ###
-//   # #
-//   ## #
-//      #
-
-const PI_PATH: readonly [number, number][] = [
-    [0,0], [0,1], [0,2],
-    [1,0], [1,2],
-    [2,0], [2,1],
-    [3,0],
-    [2,3], [3,3],
-];
-
-const RHO_PATH: readonly [number, number][] = [
-    [0,0], [0,1], [0,2],
-    [1,2],
-    [2,1], [2,0],
-    [1,0],
-    [2,3], [3,3],
-    [3,0],
-];
-
-const P_COUNT = 8;
-
-function pathOrder(path: readonly [number, number][]): Map<number, number> {
-    const m = new Map<number, number>();
-    path.forEach(([gr, gc], i) => m.set(gr * GLYPH_W + gc, i));
-    return m;
-}
-
-const PI_ORDER = pathOrder(PI_PATH);
-const RHO_ORDER = pathOrder(RHO_PATH);
-
-// per-cell reveal times (0..1 progress) for the pirho intro. P cells fill the
-// first 60%, a 15% gap separates them, then I cells fill the last 25%.
-const PIRHO_REVEAL: number[] = (() => {
-    const times: number[] = [];
-    for (let i = 0; i < P_COUNT; i++) times.push(i / P_COUNT * 0.60);
-    const iCount = PI_PATH.length - P_COUNT;
-    for (let i = 0; i < iCount; i++) times.push(0.75 + i / iCount * 0.25);
-    return times;
-})();
-
-// the shimmer sweeps a bright band along one of four axes, picked per session.
-type ShimmerDir = 'ns' | 'ew' | 'nwse' | 'nesw' | 'pi' | 'pirho';
-const SHIMMER_DIRS: ShimmerDir[] = ['ns', 'ew', 'nwse', 'nesw'];
-type LinearShimmerDir = 'ns' | 'ew' | 'nwse' | 'nesw';
-const SHIMMER_RANGE: Record<LinearShimmerDir, readonly [number, number]> = {
-    ns: [0, LOGO_H - 1],
-    ew: [0, LOGO_W - 1],
-    nwse: [0, LOGO_W - 1 + (LOGO_H - 1)],
-    nesw: [-(LOGO_W - 1), LOGO_H - 1],
-};
-function shimmerProjection(dir: LinearShimmerDir, row: number, col: number): number {
-    switch (dir) {
-        case 'ns': return row;
-        case 'ew': return col;
-        case 'nwse': return row + col;
-        case 'nesw': return row - col;
-    }
-}
-
-// truecolor rgb shimmer, ported from spinner.ts: blend accent -> highlight per
-// cell by a smooth moving band, instead of swapping discrete block glyphs.
-
-function darken(rgb: Rgb, factor: number): Rgb {
-    return [Math.round(rgb[0] * factor), Math.round(rgb[1] * factor), Math.round(rgb[2] * factor)];
-}
-// smoothstep easing (clamped) for a gentler ramp.
-function smoothstep(x: number): number {
-    const c = Math.max(0, Math.min(1, x));
-    return c * c * (3 - 2 * c);
-}
-
-// how far a cell brightens toward white at the shimmer band peak.
-const SHIMMER_HIGHLIGHT_MIX = 0.6;
-// falloff half-width of the band, in projection units (bigger = smoother spread).
-const SHIMMER_BAND = 3;
-// the fade-in ramps color from accent darkened by this factor up to full accent.
-const FADE_DARK = 0.3;
-
-// smooth 0..1 brightness for a cell: a linear-falloff band moving along `dir`.
-const PATH_SHIMMER_BAND = 2;
-
-// single-pass path shimmer: one sweep along a path order.
-function pathShimmerIntensity(
-    row: number, col: number, t: number,
-    ord: ReadonlyMap<number, number>, passStart: number, passEnd: number,
-): number {
-    if (t < passStart || t >= passEnd) return 0;
-    const gr = Math.floor(row / SCALE_Y);
-    const gc = Math.floor(col / SCALE_X);
-    const proj = ord.get(gr * GLYPH_W + gc) ?? -99;
-    const bw = PATH_SHIMMER_BAND;
-    const pathLen = PI_PATH.length - 1;
-    const progress = (t - passStart) / (passEnd - passStart);
-    const band = -bw + progress * (pathLen + bw * 2);
-    return Math.max(0, 1 - Math.abs(proj - band) / bw);
-}
-
-// pirho shimmer: two consecutive sweeps with a gap between them. the first
-// pass traces PI reading order (P then I), the gap lets the glyph rest at
-// base colour, then the second pass traces the RHO outline (clockwise loop,
-// then descending tail).
-const PIRHO_GAP_FRAC = 0.12;  // fraction of total shimmer duration
-
-function pirhoShimmerIntensity(row: number, col: number, t: number, tl: Timeline): number {
-    if (t < tl.shimmerStart || t >= tl.shimmerEnd) return 0;
-    const dur = tl.shimmerEnd - tl.shimmerStart;
-    const gapMs = dur * PIRHO_GAP_FRAC;
-    const passMs = (dur - gapMs) / 2;
-    const piEnd = tl.shimmerStart + passMs;
-    const rhoStart = piEnd + gapMs;
-    if (t < piEnd) {
-        return pathShimmerIntensity(row, col, t, PI_ORDER, tl.shimmerStart, piEnd);
-    }
-    if (t >= rhoStart) {
-        return pathShimmerIntensity(row, col, t, RHO_ORDER, rhoStart, tl.shimmerEnd);
-    }
-    return 0;  // gap
-}
-
-function shimmerIntensity(dir: ShimmerDir, row: number, col: number, t: number, tl: Timeline): number {
-    if (t < tl.shimmerStart || t >= tl.shimmerEnd) return 0;
-    if (dir === 'pirho') return pirhoShimmerIntensity(row, col, t, tl);
-    if (dir === 'pi') return pathShimmerIntensity(row, col, t, PI_ORDER, tl.shimmerStart, tl.shimmerEnd);
-    const progress = (t - tl.shimmerStart) / (tl.shimmerEnd - tl.shimmerStart);
-    const [lo, hi] = SHIMMER_RANGE[dir];
-    const band = lo - SHIMMER_BAND + progress * (hi - lo + SHIMMER_BAND * 2);
-    return Math.max(0, 1 - Math.abs(shimmerProjection(dir, row, col) - band) / SHIMMER_BAND);
-}
-
-// row-major reveal order of filled glyph cells, for the block-by-block build-in.
-const REVEAL_ORDER = new Map<number, number>();
-let filledCount = 0;
-for (let gr = 0; gr < GLYPH_H; gr++) {
-    for (let gc = 0; gc < GLYPH_W; gc++) {
-        if (isFilled(gr, gc)) {
-            REVEAL_ORDER.set(gr * GLYPH_W + gc, filledCount++);
-        }
-    }
-}
-
-// a random permutation of the same cells, for the scatter build-in (per session).
-function shuffledOrder(): Map<number, number> {
-    const keys = [...REVEAL_ORDER.keys()];
-    for (let i = keys.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [keys[i], keys[j]] = [keys[j], keys[i]];
-    }
-    const order = new Map<number, number>();
-    keys.forEach((key, index) => order.set(key, index));
-    return order;
-}
-
-// empty-to-solid density ramp, used for the quick fade-in.
-const FADE_RAMP = [' ', '░', '▒', '▓', '█'] as const;
 
 const LABEL_HEADS   = [ 'pi', 'π'];
 const LABEL_SUBS    = ['rho', 'ϱ'];
 const LABEL_WEIGHTS = [ 0.67, 0.33];
 const LABEL_TAIL = ` v${VERSION}`;
 
-type IntroMode = 'fade' | 'build' | 'scatter' | 'pi' | 'pirho' | 'tetris';
-
-// animation timeline (ms), ~2s total. the block fills run a touch slower so the
-// individual cells are legible; the fade path is quick.
+// intro duration per mode. the shared defaults cover every mode but tetris,
+// whose drop sequence needs longer.
 const INTRO_MS: Record<IntroMode, number> = {
-    fade: 400, build: 500, scatter: 500, pi: 900, pirho: 900, tetris: 1600,
+    ...DEFAULT_INTRO_MS,
+    tetris: 1600,
 };
 
-// mode selection from config
+const MODE_NAMES: readonly IntroMode[] = ['fade', 'build', 'scatter', 'pi', 'rho', 'tetris'];
+
+// 'pirho' was the old name for the two-trace mode, now 'rho'.
+function parseMode(name: string): IntroMode | null {
+    const resolved = name === 'pirho' ? 'rho' : name;
+    return MODE_NAMES.includes(resolved as IntroMode) ? (resolved as IntroMode) : null;
+}
+
 function getConfiguredModes(): { modes: IntroMode[]; weights: number[] } {
     const modes: IntroMode[] = [];
     const weights: number[] = [];
     for (let i = 0; i < config.startup.modes.length; i++) {
-        let name = config.startup.modes[i];
-        // config uses 'rho', code uses 'pirho'
-        if (name === 'rho') name = 'pirho';
-        if (['fade', 'build', 'scatter', 'pi', 'pirho', 'tetris'].includes(name)) {
-            modes.push(name as IntroMode);
+        const mode = parseMode(config.startup.modes[i]);
+        if (mode) {
+            modes.push(mode);
             weights.push(config.startup.weights[i] ?? 0);
         }
     }
     if (modes.length === 0) return { modes: ['fade'], weights: [1] };
     return { modes, weights };
-}
-const SHIMMER_DELAY_MS = 150;
-const SHIMMER_MS_DEFAULT = 500;
-// pi does one path pass; pirho does two passes with a gap, so it needs more.
-const SHIMMER_MS_PI = 800;
-const SHIMMER_MS_PIRHO = 1800;
-const TYPE_DELAY_MS = 150;
-const TYPE_PER_CHAR_MS = 60;
-const CURSOR_TAIL_MS = 250;
-const FRAME_MS = 40;
-
-interface Timeline {
-    readonly introEnd: number;
-    readonly shimmerStart: number;
-    readonly shimmerEnd: number;
-    readonly typeStart: number;
-    readonly settleAt: number;
-}
-
-function shimmerMs(mode: IntroMode): number {
-    if (mode === 'pirho') return SHIMMER_MS_PIRHO;
-    if (mode === 'pi') return SHIMMER_MS_PI;
-    if (mode === 'tetris') return SHIMMER_MS_DEFAULT;
-    return SHIMMER_MS_DEFAULT;
-}
-
-function timeline(mode: IntroMode, labelLength: number): Timeline {
-    const introEnd = INTRO_MS[mode];
-    const shimmerStart = introEnd + SHIMMER_DELAY_MS;
-    const shimmerEnd = shimmerStart + shimmerMs(mode);
-    const typeStart = shimmerEnd + TYPE_DELAY_MS;
-    const settleAt = typeStart + labelLength * TYPE_PER_CHAR_MS + CURSOR_TAIL_MS;
-    return { introEnd, shimmerStart, shimmerEnd, typeStart, settleAt };
-}
-
-// block character for one scaled cell at elapsed time t.
-function cellGlyph(row: number, col: number, t: number, mode: IntroMode, order: ReadonlyMap<number, number>, tl: Timeline, finished: boolean): string {
-    const gr = Math.floor(row / SCALE_Y);
-    const gc = Math.floor(col / SCALE_X);
-    if (!isFilled(gr, gc)) {
-        return ' ';
-    }
-    if (finished) {
-        return '█';
-    }
-    if (t < tl.introEnd) {
-        if (mode === 'fade') {
-            const level = Math.min(FADE_RAMP.length - 1, Math.floor((t / tl.introEnd) * FADE_RAMP.length));
-            return FADE_RAMP[level]!;
-        }
-        if (mode === 'pi' || mode === 'pirho') {
-            const idx = order.get(gr * GLYPH_W + gc)!;
-            const progress = t / tl.introEnd;
-            return progress >= PIRHO_REVEAL[idx] ? '█' : ' ';
-        }
-        const revealed = Math.ceil((t / tl.introEnd) * filledCount);
-        return order.get(gr * GLYPH_W + gc)! < revealed ? '█' : ' ';
-    }
-    // solid during the shimmer; brightness is applied as per-cell rgb in render().
-    return '█';
 }
 
 // the wordmark is a list of styled segments; the type-on reveal walks the
@@ -429,13 +148,8 @@ export default function (pi: ExtensionAPI) {
         const { modes, weights } = getConfiguredModes();
         const mode = choose(modes, weights);
         
-        // tetris mode uses its own state machine
-        const tetrisState = mode === 'tetris' ? createTetrisState(INTRO_MS.tetris) : null;
-        
         // block fills reveal cells in order; scatter uses a random permutation.
-        const order = mode === 'scatter' ? shuffledOrder()
-            : (mode === 'pi' || mode === 'pirho') ? PI_ORDER
-            : REVEAL_ORDER;
+        const order = orderFor(mode);
         // pick the wordmark once per session (weighted pi/rho vs π/ϱ).
         const [head, sub] = choose(zip(LABEL_HEADS, LABEL_SUBS), LABEL_WEIGHTS);
         const label: LabelSegment[] = [
@@ -445,8 +159,17 @@ export default function (pi: ExtensionAPI) {
         ];
         // pick the shimmer direction once per session (uniform over the four axes).
         // path-based intros use matching shimmer directions; others pick a random axis.
-        const dir: ShimmerDir = mode === 'pirho' ? 'pirho' : mode === 'pi' ? 'pi' : choose(SHIMMER_DIRS);
-        const tl = timeline(mode, labelLength(label));
+        // trace modes use their own path; the rest sweep an axis from config.
+        const configuredDirs = config.startup.shimmerDirs.filter(
+            (d): d is LinearShimmerDir => (SHIMMER_DIRS as readonly string[]).includes(d),
+        );
+        const linearDir = choose(configuredDirs.length > 0 ? configuredDirs : SHIMMER_DIRS);
+        const dir: ShimmerDir = shimmerDirFor(mode, linearDir);
+        // config.startup.durationMs sets the total; the timeline scales to fit.
+        const tl = timeline(INTRO_MS[mode], mode, labelLength(label), config.startup.durationMs);
+        // the drop sequence owns the whole intro window, so the clear finishes
+        // exactly as the shimmer takes over the settled glyph.
+        const tetrisState = mode === 'tetris' ? createTetrisState(tl.introEnd) : null;
 
         ctx.ui.setHeader((tui, theme) => {
             const start = Date.now();
@@ -476,83 +199,23 @@ export default function (pi: ExtensionAPI) {
                     }
 
                     const accentRgb = themeRgb(theme, 'accent');
-                    const highlightRgb = accentRgb ? blend(accentRgb, [255, 255, 255], SHIMMER_HIGHLIGHT_MIX) : undefined;
-                    
-                    // tetris colors based on theme
+                    // tetris piece colours follow the theme's light/dark cast.
                     const isLight = theme.name?.toLowerCase().includes('light') ?? false;
                     const tetrisColors = isLight ? PIECE_COLORS_LIGHT : PIECE_COLORS_DARK;
-                    
-                    // during the color fade-in every cell shares one accent ramp (darkened -> full).
-                    const fadingIn = mode === 'fade' && t < tl.introEnd;
-                    const fadeRgb =
-                        fadingIn && accentRgb
-                            ? blend(darken(accentRgb, FADE_DARK), accentRgb, smoothstep(t / tl.introEnd))
-                            : undefined;
-                    // path reveals fade each cell individually from dark to bright.
-                    const pathFade = (mode === 'pi' || mode === 'pirho') && t < tl.introEnd && accentRgb;
-                    // tetris mode uses colored pieces during intro
-                    const tetrisFade = mode === 'tetris' && t < tl.introEnd && tetrisState && accentRgb;
-                    const logoLines: string[] = [];
-                    for (let row = 0; row < LOGO_H; row++) {
-                        let line: string;
-                        if (accentRgb && highlightRgb) {
-                            line = '';
-                            for (let col = 0; col < LOGO_W; col++) {
-                                // tetris mode handles its own cell state
-                                let ch: string;
-                                let cellRgb: Rgb;
-                                if (tetrisFade) {
-                                    const gr = Math.floor(row / SCALE_Y);
-                                    const gc = Math.floor(col / SCALE_X);
-                                    const state = getTetrisCellState(tetrisState, gr, gc);
-                                    if (state === 'empty') {
-                                        line += ' ';
-                                        continue;
-                                    }
-                                    ch = '█';
-                                    if (state === 'filled') {
-                                        cellRgb = accentRgb;
-                                    } else if (state === 'flash') {
-                                        cellRgb = tetrisColors.flash;
-                                    } else {
-                                        cellRgb = tetrisColors[state] ?? accentRgb;
-                                    }
-                                } else {
-                                    ch = cellGlyph(row, col, t, mode, order, tl, finished);
-                                    if (ch === ' ') {
-                                        line += ' ';
-                                        continue;
-                                    }
-                                    if (fadeRgb) {
-                                        cellRgb = fadeRgb;
-                                    } else if (pathFade) {
-                                        const gr = Math.floor(row / SCALE_Y);
-                                        const gc = Math.floor(col / SCALE_X);
-                                        const idx = order.get(gr * GLYPH_W + gc) ?? 0;
-                                        const revealAt = PIRHO_REVEAL[idx];
-                                        const progress = t / tl.introEnd;
-                                        const cellAge = (progress - revealAt) / 0.15;
-                                        cellRgb = blend(darken(accentRgb, FADE_DARK), accentRgb, smoothstep(Math.max(0, Math.min(1, cellAge))));
-                                    } else {
-                                        const inten = shimmerIntensity(dir, row, col, t, tl);
-                                        cellRgb = inten > 0 ? blend(accentRgb, highlightRgb, inten) : accentRgb;
-                                    }
-                                }
-                                line += ansiFg(cellRgb) + ch;
-                            }
-                            line += RESET;
-                        } else {
-                            // 256-color terminals lack truecolor: fall back to flat accent.
-                            let cells = '';
-                            for (let col = 0; col < LOGO_W; col++) {
-                                cells += cellGlyph(row, col, t, mode, order, tl, finished);
-                            }
-                            line = theme.fg('accent', cells);
-                        }
-                        if (row === CENTER_ROW && (finished || t >= tl.typeStart)) {
-                            line += `   ${renderLabel(theme, label, t, tl, finished)}`;
-                        }
-                        logoLines.push(line);
+
+                    // truecolor: the shared renderer draws every cell. 256-color
+                    // terminals have no rgb to blend, so they get flat accent.
+                    const logoLines = accentRgb
+                        ? renderLogoLines({
+                            t, mode, dir, order, tl, finished,
+                            accent: accentRgb, tetrisColors, tetrisState,
+                        })
+                        : Array.from({ length: LOGO_H }, (_, row) =>
+                            theme.fg('accent', plainLogoRow(row, t, mode, order, tl, finished)));
+
+                    if (finished || t >= tl.typeStart) {
+                        const labelRow = accentRgb ? logoCenterRow(mode) : CENTER_ROW;
+                        logoLines[labelRow] += `   ${renderLabel(theme, label, t, tl, finished)}`;
                     }
 
                     const commands = pi.getCommands();

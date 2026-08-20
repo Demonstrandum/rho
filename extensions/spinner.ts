@@ -204,15 +204,17 @@ export function isEmojiCluster(cluster: string): boolean {
 // sweep, since interleaving color escapes through them corrupts the output.
 export function colorSweep(text: string, frame: number, base: Rgb, shimmer: Rgb): string {
     const clusters = [...graphemes.segment(text)].map((s) => s.segment);
-    const total = clusters.length + SHIMMER_BAND * 2;
-    const pos = frame % total;
+    const len = clusters.length;
+    const pos = frame % len;
     let out = '';
-    for (let i = 0; i < clusters.length; i++) {
+    for (let i = 0; i < len; i++) {
         if (isEmojiCluster(clusters[i])) {
             out += ansiFg(base) + clusters[i];
             continue;
         }
-        const t = Math.max(0, 1 - Math.abs(i - pos) / SHIMMER_BAND);
+        const linear = Math.abs(i - pos);
+        const dist = Math.min(linear, len - linear);
+        const t = Math.max(0, 1 - dist / SHIMMER_BAND);
         out += ansiFg(blend(base, shimmer, t)) + clusters[i];
     }
     return out + RESET;

@@ -90,16 +90,74 @@ const LOGO_W = ART.width;
 const LOGO_H = ART.height;
 const CENTER_ROW = ART.centerRow;
 
+// pirho intro: draw the P first, pause, draw the I, then shimmer the PI
+// reading order followed by the RHO trace order.
+//
+// P (8 cells):
+//   ###
+//   # #
+//   ##
+//   #
+//
+// I (2 cells, the remainder):
+//     #
+//     #
+//
+// RHO trace (same 10 cells, different order, clockwise loop then tail):
+//   ###
+//   # #
+//   ## #
+//      #
+
+const PI_PATH: readonly [number, number][] = [
+    [0,0], [0,1], [0,2],
+    [1,0], [1,2],
+    [2,0], [2,1],
+    [3,0],
+    [2,3], [3,3],
+];
+
+const RHO_PATH: readonly [number, number][] = [
+    [0,0], [0,1], [0,2],
+    [1,2],
+    [2,1], [2,0],
+    [1,0],
+    [2,3], [3,3],
+    [3,0],
+];
+
+const P_COUNT = 8;
+
+function pathOrder(path: readonly [number, number][]): Map<number, number> {
+    const m = new Map<number, number>();
+    path.forEach(([gr, gc], i) => m.set(gr * GLYPH_W + gc, i));
+    return m;
+}
+
+const PI_ORDER = pathOrder(PI_PATH);
+const RHO_ORDER = pathOrder(RHO_PATH);
+
+// per-cell reveal times (0..1 progress) for the pirho intro. P cells fill the
+// first 60%, a 15% gap separates them, then I cells fill the last 25%.
+const PIRHO_REVEAL: number[] = (() => {
+    const times: number[] = [];
+    for (let i = 0; i < P_COUNT; i++) times.push(i / P_COUNT * 0.60);
+    const iCount = PI_PATH.length - P_COUNT;
+    for (let i = 0; i < iCount; i++) times.push(0.75 + i / iCount * 0.25);
+    return times;
+})();
+
 // the shimmer sweeps a bright band along one of four axes, picked per session.
-type ShimmerDir = 'ns' | 'ew' | 'nwse' | 'nesw';
+type ShimmerDir = 'ns' | 'ew' | 'nwse' | 'nesw' | 'pi' | 'pirho';
 const SHIMMER_DIRS: ShimmerDir[] = ['ns', 'ew', 'nwse', 'nesw'];
-const SHIMMER_RANGE: Record<ShimmerDir, readonly [number, number]> = {
+type LinearShimmerDir = 'ns' | 'ew' | 'nwse' | 'nesw';
+const SHIMMER_RANGE: Record<LinearShimmerDir, readonly [number, number]> = {
     ns: [0, LOGO_H - 1],
     ew: [0, LOGO_W - 1],
     nwse: [0, LOGO_W - 1 + (LOGO_H - 1)],
     nesw: [-(LOGO_W - 1), LOGO_H - 1],
 };
-function shimmerProjection(dir: ShimmerDir, row: number, col: number): number {
+function shimmerProjection(dir: LinearShimmerDir, row: number, col: number): number {
     switch (dir) {
         case 'ns': return row;
         case 'ew': return col;
@@ -128,11 +186,51 @@ const SHIMMER_BAND = 3;
 const FADE_DARK = 0.3;
 
 // smooth 0..1 brightness for a cell: a linear-falloff band moving along `dir`.
-function shimmerIntensity(dir: ShimmerDir, row: number, col: number, t: number, tl: Timeline): number {
-    if (t < tl.shimmerStart || t >= tl.shimmerEnd) {
-        return 0;
+const PATH_SHIMMER_BAND = 2;
+
+// single-pass path shimmer: one sweep along a path order.
+function pathShimmerIntensity(
+    row: number, col: number, t: number,
+    ord: ReadonlyMap<number, number>, passStart: number, passEnd: number,
+): number {
+    if (t < passStart || t >= passEnd) return 0;
+    const gr = Math.floor(row / SCALE_Y);
+    const gc = Math.floor(col / SCALE_X);
+    const proj = ord.get(gr * GLYPH_W + gc) ?? -99;
+    const bw = PATH_SHIMMER_BAND;
+    const pathLen = PI_PATH.length - 1;
+    const progress = (t - passStart) / (passEnd - passStart);
+    const band = -bw + progress * (pathLen + bw * 2);
+    return Math.max(0, 1 - Math.abs(proj - band) / bw);
+}
+
+// pirho shimmer: two consecutive sweeps with a gap between them. the first
+// pass traces PI reading order (P then I), the gap lets the glyph rest at
+// base colour, then the second pass traces the RHO outline (clockwise loop,
+// then descending tail).
+const PIRHO_GAP_FRAC = 0.12;  // fraction of total shimmer duration
+
+function pirhoShimmerIntensity(row: number, col: number, t: number, tl: Timeline): number {
+    if (t < tl.shimmerStart || t >= tl.shimmerEnd) return 0;
+    const dur = tl.shimmerEnd - tl.shimmerStart;
+    const gapMs = dur * PIRHO_GAP_FRAC;
+    const passMs = (dur - gapMs) / 2;
+    const piEnd = tl.shimmerStart + passMs;
+    const rhoStart = piEnd + gapMs;
+    if (t < piEnd) {
+        return pathShimmerIntensity(row, col, t, PI_ORDER, tl.shimmerStart, piEnd);
     }
-    const progress = (t - tl.shimmerStart) / SHIMMER_MS;
+    if (t >= rhoStart) {
+        return pathShimmerIntensity(row, col, t, RHO_ORDER, rhoStart, tl.shimmerEnd);
+    }
+    return 0;  // gap
+}
+
+function shimmerIntensity(dir: ShimmerDir, row: number, col: number, t: number, tl: Timeline): number {
+    if (t < tl.shimmerStart || t >= tl.shimmerEnd) return 0;
+    if (dir === 'pirho') return pirhoShimmerIntensity(row, col, t, tl);
+    if (dir === 'pi') return pathShimmerIntensity(row, col, t, PI_ORDER, tl.shimmerStart, tl.shimmerEnd);
+    const progress = (t - tl.shimmerStart) / (tl.shimmerEnd - tl.shimmerStart);
     const [lo, hi] = SHIMMER_RANGE[dir];
     const band = lo - SHIMMER_BAND + progress * (hi - lo + SHIMMER_BAND * 2);
     return Math.max(0, 1 - Math.abs(shimmerProjection(dir, row, col) - band) / SHIMMER_BAND);
@@ -169,16 +267,19 @@ const LABEL_SUBS    = ['rho', 'ϱ'];
 const LABEL_WEIGHTS = [ 0.67, 0.33];
 const LABEL_TAIL = ` v${VERSION}`;
 
-type IntroMode = 'fade' | 'build' | 'scatter';
-const INTRO_MODES: IntroMode[] = ['fade', 'build', 'scatter'];
-// weights: fade is the common case; the two block fills split the rest.
-const INTRO_WEIGHTS = [0.5, 0.25, 0.25];
+type IntroMode = 'fade' | 'build' | 'scatter' | 'pi' | 'pirho';
+const INTRO_MODES: IntroMode[] = ['fade', 'build', 'scatter', 'pi', 'pirho'];
+// weights: fade is common; build/scatter split a portion; pi/pirho share the rest.
+const INTRO_WEIGHTS = [0.30, 0.10, 0.10, 0.25, 0.25];
 
 // animation timeline (ms), ~2s total. the block fills run a touch slower so the
 // individual cells are legible; the fade path is quick.
-const INTRO_MS: Record<IntroMode, number> = { fade: 400, build: 500, scatter: 500 };
+const INTRO_MS: Record<IntroMode, number> = { fade: 400, build: 500, scatter: 500, pi: 900, pirho: 900 };
 const SHIMMER_DELAY_MS = 150;
-const SHIMMER_MS = 500;
+const SHIMMER_MS_DEFAULT = 500;
+// pi does one path pass; pirho does two passes with a gap, so it needs more.
+const SHIMMER_MS_PI = 800;
+const SHIMMER_MS_PIRHO = 1800;
 const TYPE_DELAY_MS = 150;
 const TYPE_PER_CHAR_MS = 60;
 const CURSOR_TAIL_MS = 250;
@@ -192,10 +293,16 @@ interface Timeline {
     readonly settleAt: number;
 }
 
+function shimmerMs(mode: IntroMode): number {
+    if (mode === 'pirho') return SHIMMER_MS_PIRHO;
+    if (mode === 'pi') return SHIMMER_MS_PI;
+    return SHIMMER_MS_DEFAULT;
+}
+
 function timeline(mode: IntroMode, labelLength: number): Timeline {
     const introEnd = INTRO_MS[mode];
     const shimmerStart = introEnd + SHIMMER_DELAY_MS;
-    const shimmerEnd = shimmerStart + SHIMMER_MS;
+    const shimmerEnd = shimmerStart + shimmerMs(mode);
     const typeStart = shimmerEnd + TYPE_DELAY_MS;
     const settleAt = typeStart + labelLength * TYPE_PER_CHAR_MS + CURSOR_TAIL_MS;
     return { introEnd, shimmerStart, shimmerEnd, typeStart, settleAt };
@@ -215,6 +322,11 @@ function cellGlyph(row: number, col: number, t: number, mode: IntroMode, order: 
         if (mode === 'fade') {
             const level = Math.min(FADE_RAMP.length - 1, Math.floor((t / tl.introEnd) * FADE_RAMP.length));
             return FADE_RAMP[level]!;
+        }
+        if (mode === 'pi' || mode === 'pirho') {
+            const idx = order.get(gr * GLYPH_W + gc)!;
+            const progress = t / tl.introEnd;
+            return progress >= PIRHO_REVEAL[idx] ? '█' : ' ';
         }
         const revealed = Math.ceil((t / tl.introEnd) * filledCount);
         return order.get(gr * GLYPH_W + gc)! < revealed ? '█' : ' ';
@@ -295,7 +407,9 @@ export default function (pi: ExtensionAPI) {
         // pick the intro style once per session (weighted fade / build / scatter).
         const mode = choose(INTRO_MODES, INTRO_WEIGHTS);
         // block fills reveal cells in order; scatter uses a random permutation.
-        const order = mode === 'scatter' ? shuffledOrder() : REVEAL_ORDER;
+        const order = mode === 'scatter' ? shuffledOrder()
+            : (mode === 'pi' || mode === 'pirho') ? PI_ORDER
+            : REVEAL_ORDER;
         // pick the wordmark once per session (weighted pi/rho vs π/ϱ).
         const [head, sub] = choose(zip(LABEL_HEADS, LABEL_SUBS), LABEL_WEIGHTS);
         const label: LabelSegment[] = [
@@ -304,7 +418,8 @@ export default function (pi: ExtensionAPI) {
             { text: LABEL_TAIL, style: (theme, s) => theme.fg('dim', s) },
         ];
         // pick the shimmer direction once per session (uniform over the four axes).
-        const dir = choose(SHIMMER_DIRS);
+        // path-based intros use matching shimmer directions; others pick a random axis.
+        const dir: ShimmerDir = mode === 'pirho' ? 'pirho' : mode === 'pi' ? 'pi' : choose(SHIMMER_DIRS);
         const tl = timeline(mode, labelLength(label));
 
         ctx.ui.setHeader((tui, theme) => {
@@ -337,6 +452,8 @@ export default function (pi: ExtensionAPI) {
                         fadingIn && accentRgb
                             ? blend(darken(accentRgb, FADE_DARK), accentRgb, smoothstep(t / tl.introEnd))
                             : undefined;
+                    // path reveals fade each cell individually from dark to bright.
+                    const pathFade = (mode === 'pi' || mode === 'pirho') && t < tl.introEnd && accentRgb;
                     const logoLines: string[] = [];
                     for (let row = 0; row < LOGO_H; row++) {
                         let line: string;
@@ -351,6 +468,15 @@ export default function (pi: ExtensionAPI) {
                                 let cellRgb: Rgb;
                                 if (fadeRgb) {
                                     cellRgb = fadeRgb;
+                                } else if (pathFade) {
+                                    const gr = Math.floor(row / SCALE_Y);
+                                    const gc = Math.floor(col / SCALE_X);
+                                    const idx = order.get(gr * GLYPH_W + gc) ?? 0;
+                                    const revealAt = PIRHO_REVEAL[idx];
+                                    const progress = t / tl.introEnd;
+                                    // each cell fades from dark to full over 15% of intro time
+                                    const cellAge = (progress - revealAt) / 0.15;
+                                    cellRgb = blend(darken(accentRgb, FADE_DARK), accentRgb, smoothstep(Math.max(0, Math.min(1, cellAge))));
                                 } else {
                                     const inten = shimmerIntensity(dir, row, col, t, tl);
                                     cellRgb = inten > 0 ? blend(accentRgb, highlightRgb, inten) : accentRgb;

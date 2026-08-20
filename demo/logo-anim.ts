@@ -1,16 +1,28 @@
 // tetris-style pi logo animation, ported from pi.dev's home-inline.js.
-// renders as a custom overlay via ctx.ui.custom().
-// trigger with /logo to play the animation.
+// run with: bun run demo/logo-anim.ts
 
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { ansiFg, parseHex, type Rgb, RESET } from './lib/utils';
+// standalone demo - inline utils
+
+type Rgb = [number, number, number];
+
+function parseHex(hex: string): Rgb | undefined {
+    const m = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    if (!m) return undefined;
+    return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+}
+
+function ansiFg(rgb: Rgb): string {
+    return `\x1b[38;2;${rgb[0]};${rgb[1]};${rgb[2]}m`;
+}
+
+const RESET = '\x1b[0m';
 
 // board dimensions (the animation uses an 8x9 grid, visible area is centered 4x4)
 const BOARD_W = 8;
 const BOARD_H = 9;
 
-// colors from pi.dev (hex)
-const COLORS: Record<string, Rgb> = {
+// colors from pi.dev (hex) - dark mode
+const COLORS_DARK: Record<string, Rgb> = {
     cyan:   parseHex('#4B607C')!,   // top piece (tidal blue)
     red:    parseHex('#8F4632')!,   // left piece (terracotta)
     green:  parseHex('#A3A473')!,   // right piece (sage)
@@ -18,6 +30,32 @@ const COLORS: Record<string, Rgb> = {
     flash:  parseHex('#fff5b4')!,   // line clear flash
     white:  parseHex('#ffffff')!,   // settled logo
 };
+
+// colors for light mode - more saturated/darker to show on light bg
+const COLORS_LIGHT: Record<string, Rgb> = {
+    cyan:   parseHex('#2D4A6E')!,   // darker tidal blue
+    red:    parseHex('#A03820')!,   // darker terracotta  
+    green:  parseHex('#6B7A30')!,   // darker sage
+    orange: parseHex('#C06A20')!,   // darker sunkissed
+    flash:  parseHex('#FFD700')!,   // gold flash
+    white:  parseHex('#1a1a1a')!,   // dark gray (inverted)
+};
+
+// detect light/dark mode: --light / --dark flags, or COLORFGBG env, or default light
+function isLightMode(): boolean {
+    if (process.argv.includes('--light')) return true;
+    if (process.argv.includes('--dark')) return false;
+    const colorfgbg = process.env.COLORFGBG;
+    if (colorfgbg) {
+        // format is "fg;bg" - bg > 8 typically means light
+        const parts = colorfgbg.split(';');
+        const bg = parseInt(parts[parts.length - 1], 10);
+        return bg > 8 || bg === 7;
+    }
+    return true;
+}
+
+const COLORS = isLightMode() ? COLORS_LIGHT : COLORS_DARK;
 
 // piece definitions: color, cells (row, col offsets), start/target positions
 interface Piece {
@@ -65,29 +103,51 @@ const RIGHT: Piece = {
     targetY: 4,
 };
 
-// animation sequence and timing (frames at 18 FPS)
-const FPS = 18;
+// animation timing - all derived from TOTAL_MS
+const TOTAL_MS = 2700;  // adjust this one value to change overall speed
+const FPS = 60;
 const FRAME_MS = 1000 / FPS;
+
+// timing ratios (sum to 1.0)
+const RATIO = {
+    initialHold:  0.07,   // pause before first drop
+    dropPhase:    0.55,   // all 4 drops + inter-drop holds
+    flashPhase:   0.18,   // line clear flashing
+    postClear:    0.05,   // pause after clear
+    settle:       0.15,   // pause before white-out
+};
+
+// within dropPhase: each drop is 4 parts motion + 1 part hold (last drop gets 2 parts hold)
+const DROP_MOTION_PARTS = 4;
+const DROP_HOLD_PARTS = 1;
+const LAST_HOLD_PARTS = 2;
+const TOTAL_DROP_PARTS = 4 * DROP_MOTION_PARTS + 3 * DROP_HOLD_PARTS + LAST_HOLD_PARTS; // 21
+
+const dropPhaseMs = TOTAL_MS * RATIO.dropPhase;
+const partMs = dropPhaseMs / TOTAL_DROP_PARTS;
+const dropDuration = partMs * DROP_MOTION_PARTS;
+const dropHold = partMs * DROP_HOLD_PARTS;
+const lastHold = partMs * LAST_HOLD_PARTS;
 
 interface SequenceStep {
     piece: Piece;
-    duration: number;  // frames
-    holdAfter: number; // frames
+    duration: number;  // ms
+    holdAfter: number; // ms
 }
 
 const SEQUENCE: SequenceStep[] = [
-    { piece: BASE,  duration: 91, holdAfter: 11 },
-    { piece: LEFT,  duration: 91, holdAfter: 11 },
-    { piece: TOP,   duration: 91, holdAfter: 11 },
-    { piece: RIGHT, duration: 91, holdAfter: 49 },
+    { piece: BASE,  duration: dropDuration, holdAfter: dropHold },
+    { piece: LEFT,  duration: dropDuration, holdAfter: dropHold },
+    { piece: TOP,   duration: dropDuration, holdAfter: dropHold },
+    { piece: RIGHT, duration: dropDuration, holdAfter: lastHold },
 ];
 
 const TIMING = {
-    initialHold: 28,       // frames before first drop
-    clearFlashCount: 5,    // number of flashes
-    clearFlashStep: 35,    // frames per flash
-    postClearHold: 49,     // frames after clear
-    postDropHold: 154,     // frames before settling to white
+    initialHold:    TOTAL_MS * RATIO.initialHold,
+    clearFlashCount: 4,
+    clearFlashStep: (TOTAL_MS * RATIO.flashPhase) / 8,  // 4 flashes × 2 states
+    postClearHold:  TOTAL_MS * RATIO.postClear,
+    postDropHold:   TOTAL_MS * RATIO.settle,
 };
 
 // final logo cell positions (after line clear)
@@ -105,12 +165,12 @@ function cellKey(y: number, x: number): string {
 
 // animation state
 interface AnimState {
-    frame: number;
+    elapsed: number;                    // total ms elapsed
     settled: Map<string, string>;       // cellKey -> color
     active: { piece: Piece; x: number; y: number } | null;
     phase: 'initial' | 'dropping' | 'hold' | 'flash' | 'postFlash' | 'settle' | 'done';
     stepIndex: number;
-    phaseFrame: number;
+    phaseStart: number;                 // ms when phase started
     flashCount: number;
     showFlash: boolean;
     whiteOut: boolean;
@@ -118,33 +178,33 @@ interface AnimState {
 
 function createState(): AnimState {
     return {
-        frame: 0,
+        elapsed: 0,
         settled: new Map(),
         active: null,
         phase: 'initial',
         stepIndex: 0,
-        phaseFrame: 0,
+        phaseStart: 0,
         flashCount: 0,
         showFlash: false,
         whiteOut: false,
     };
 }
 
-// advance the animation by one frame
-function tick(state: AnimState): boolean {
-    state.frame++;
-    state.phaseFrame++;
+// advance the animation by dt milliseconds
+function tick(state: AnimState, dt: number): boolean {
+    state.elapsed += dt;
+    const phaseElapsed = state.elapsed - state.phaseStart;
 
     switch (state.phase) {
         case 'initial':
-            if (state.phaseFrame >= TIMING.initialHold) {
+            if (phaseElapsed >= TIMING.initialHold) {
                 startDrop(state);
             }
             break;
 
         case 'dropping': {
             const step = SEQUENCE[state.stepIndex];
-            const progress = Math.min(1, state.phaseFrame / step.duration);
+            const progress = Math.min(1, phaseElapsed / step.duration);
             const eased = easeOutCubic(progress);
             const piece = step.piece;
             const y = piece.startY + (piece.targetY - piece.startY) * eased;
@@ -157,19 +217,18 @@ function tick(state: AnimState): boolean {
                 }
                 state.active = null;
                 state.phase = 'hold';
-                state.phaseFrame = 0;
+                state.phaseStart = state.elapsed;
             }
             break;
         }
 
         case 'hold': {
             const step = SEQUENCE[state.stepIndex];
-            if (state.phaseFrame >= step.holdAfter) {
+            if (phaseElapsed >= step.holdAfter) {
                 state.stepIndex++;
                 if (state.stepIndex >= SEQUENCE.length) {
-                    // all pieces dropped, start flash
                     state.phase = 'flash';
-                    state.phaseFrame = 0;
+                    state.phaseStart = state.elapsed;
                     state.flashCount = 0;
                     state.showFlash = true;
                 } else {
@@ -179,40 +238,36 @@ function tick(state: AnimState): boolean {
             break;
         }
 
-        case 'flash':
-            if (state.phaseFrame >= TIMING.clearFlashStep) {
-                state.phaseFrame = 0;
-                state.showFlash = !state.showFlash;
-                if (!state.showFlash) {
-                    state.flashCount++;
-                    if (state.flashCount >= TIMING.clearFlashCount) {
-                        // clear the base row
-                        for (let x = 1; x <= 6; x++) {
-                            state.settled.delete(cellKey(6, x));
-                        }
-                        state.phase = 'postFlash';
-                        state.phaseFrame = 0;
-                    }
+        case 'flash': {
+            const flashPhase = Math.floor(phaseElapsed / TIMING.clearFlashStep);
+            state.showFlash = flashPhase % 2 === 0;
+            if (flashPhase >= TIMING.clearFlashCount * 2) {
+                // clear the base row
+                for (let x = 1; x <= 6; x++) {
+                    state.settled.delete(cellKey(6, x));
                 }
+                state.phase = 'postFlash';
+                state.phaseStart = state.elapsed;
             }
             break;
+        }
 
         case 'postFlash':
-            if (state.phaseFrame >= TIMING.postClearHold) {
+            if (phaseElapsed >= TIMING.postClearHold) {
                 state.phase = 'settle';
-                state.phaseFrame = 0;
+                state.phaseStart = state.elapsed;
             }
             break;
 
         case 'settle':
-            if (state.phaseFrame >= TIMING.postDropHold) {
+            if (phaseElapsed >= TIMING.postDropHold) {
                 state.whiteOut = true;
                 state.phase = 'done';
             }
             break;
 
         case 'done':
-            return false; // animation complete
+            return false;
     }
 
     return true;
@@ -220,7 +275,7 @@ function tick(state: AnimState): boolean {
 
 function startDrop(state: AnimState): void {
     state.phase = 'dropping';
-    state.phaseFrame = 0;
+    state.phaseStart = state.elapsed;
     const piece = SEQUENCE[state.stepIndex].piece;
     state.active = { piece, x: piece.startX, y: piece.startY };
 }
@@ -294,64 +349,45 @@ function render(state: AnimState): string[] {
     return lines;
 }
 
-export default function (pi: ExtensionAPI) {
-    pi.registerCommand('logo', {
-        description: 'play the tetris-style pi logo animation',
-        handler: async (_args, ctx) => {
-            if (ctx.mode !== 'tui') {
-                ctx.ui.notify('logo animation requires TUI mode', 'warning');
-                return;
-            }
+// ANSI helpers for terminal animation
+const HIDE_CURSOR = '\x1b[?25l';
+const SHOW_CURSOR = '\x1b[?25h';
+const CLEAR_SCREEN = '\x1b[2J\x1b[H';
+const MOVE_HOME = '\x1b[H';
 
-            const state = createState();
-
-            // use ctx.ui.custom to display the animation as an overlay
-            await ctx.ui.custom<void>((tui, theme, _kb, done) => {
-                let disposed = false;
-                const timer = setInterval(() => {
-                    if (disposed) return;
-                    const cont = tick(state);
-                    tui.requestRender();
-                    if (!cont) {
-                        clearInterval(timer);
-                        // keep showing for a moment, then close
-                        setTimeout(() => {
-                            if (!disposed) {
-                                disposed = true;
-                                done();
-                            }
-                        }, 1000);
-                    }
-                }, FRAME_MS);
-
-                return {
-                    dispose() {
-                        disposed = true;
-                        clearInterval(timer);
-                    },
-                    invalidate() {},
-                    render(_width: number): string[] {
-                        const lines = render(state);
-                        // add a dim hint at the bottom
-                        return [
-                            '',
-                            ...lines,
-                            '',
-                            theme.fg('dim', '  pi · any key to close'),
-                        ];
-                    },
-                    handleInput(data: string): boolean {
-                        // any key closes the overlay
-                        if (data.length > 0) {
-                            disposed = true;
-                            clearInterval(timer);
-                            done();
-                            return true;
-                        }
-                        return false;
-                    },
-                };
-            });
-        },
-    });
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+async function main() {
+    const state = createState();
+
+    // hide cursor and clear screen
+    process.stdout.write(HIDE_CURSOR + CLEAR_SCREEN);
+
+    // handle ctrl+c gracefully
+    process.on('SIGINT', () => {
+        process.stdout.write(SHOW_CURSOR + '\n');
+        process.exit(0);
+    });
+
+    // animation loop
+    while (true) {
+        const lines = render(state);
+        process.stdout.write(MOVE_HOME + lines.join('\n') + '\n');
+
+        const cont = tick(state, FRAME_MS);
+        if (!cont) {
+            // hold final frame for a moment
+            await sleep(1000);
+            break;
+        }
+
+        await sleep(FRAME_MS);
+    }
+
+    // show cursor and exit
+    process.stdout.write(SHOW_CURSOR);
+}
+
+main();

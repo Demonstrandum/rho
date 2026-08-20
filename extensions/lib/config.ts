@@ -47,6 +47,10 @@ export const isStringArray = guard<string[]>(
     'array of string',
     (v) => Array.isArray(v) && v.every((element) => typeof element === 'string'),
 );
+export const isNumberArray = guard<number[]>(
+    'array of number',
+    (v) => Array.isArray(v) && v.every((element) => typeof element === 'number'),
+);
 export const isUnitFloat = guard<number>(
     'number in [0, 1]',
     (v) => typeof v === 'number' && v >= 0 && v <= 1,
@@ -194,7 +198,11 @@ const SCHEMA = {
         ),
     },
     startup: {
-        animate: field('animate', isBool, true, 'whether to play the logo animation on launch'),
+        animate: field('animate', isBool, true, 'play the logo animation on launch'),
+        durationMs: field('duration-ms', isPosInt, 2500, 'total animation duration in ms'),
+        modes: field('modes', isStringArray, ['fade', 'build', 'scatter', 'pi', 'rho', 'tetris'], 'intro modes'),
+        weights: field('weights', isNumberArray, [0.20, 0.10, 0.10, 0.15, 0.15, 0.30], 'mode weights'),
+        shimmerDirs: field('shimmer-dirs', isStringArray, ['ns', 'ew', 'nwse', 'nesw'], 'shimmer axes'),
     },
     images: {
         width: field('width', isPosInt, 180, 'width in terminal cells for inline images'),

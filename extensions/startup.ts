@@ -25,6 +25,10 @@ import { truncateToWidth } from '@earendil-works/pi-tui';
 import { ensureGlobalSetting } from './lib/settings-store';
 import { zip, choose, themeRgb, blend, ansiFg, RESET, type Rgb } from './lib/utils';
 import { config } from './lib/config';
+import {
+    createTetrisState, tickTetris, getTetrisCellState,
+    PIECE_COLORS_DARK, PIECE_COLORS_LIGHT,
+} from './lib/tetris-logo';
 
 // a short discoverability hint. keep it minimal; the footer carries model/token
 // state, so this only points at the two universal entry points.
@@ -267,14 +271,28 @@ const LABEL_SUBS    = ['rho', 'ϱ'];
 const LABEL_WEIGHTS = [ 0.67, 0.33];
 const LABEL_TAIL = ` v${VERSION}`;
 
-type IntroMode = 'fade' | 'build' | 'scatter' | 'pi' | 'pirho';
-const INTRO_MODES: IntroMode[] = ['fade', 'build', 'scatter', 'pi', 'pirho'];
-// weights: fade is common; build/scatter split a portion; pi/pirho share the rest.
-const INTRO_WEIGHTS = [0.30, 0.10, 0.10, 0.25, 0.25];
+type IntroMode = 'fade' | 'build' | 'scatter' | 'pi' | 'pirho' | 'tetris';
 
 // animation timeline (ms), ~2s total. the block fills run a touch slower so the
 // individual cells are legible; the fade path is quick.
-const INTRO_MS: Record<IntroMode, number> = { fade: 400, build: 500, scatter: 500, pi: 900, pirho: 900 };
+const INTRO_MS: Record<IntroMode, number> = {
+    fade: 400, build: 500, scatter: 500, pi: 900, pirho: 900, tetris: 1600,
+};
+
+// mode selection from config
+function getConfiguredModes(): { modes: IntroMode[]; weights: number[] } {
+    const modes: IntroMode[] = [];
+    const weights: number[] = [];
+    for (let i = 0; i < config.startup.modes.length; i++) {
+        const name = config.startup.modes[i];
+        if (['fade', 'build', 'scatter', 'pi', 'pirho', 'tetris'].includes(name)) {
+            modes.push(name as IntroMode);
+            weights.push(config.startup.weights[i] ?? 0);
+        }
+    }
+    if (modes.length === 0) return { modes: ['fade'], weights: [1] };
+    return { modes, weights };
+}
 const SHIMMER_DELAY_MS = 150;
 const SHIMMER_MS_DEFAULT = 500;
 // pi does one path pass; pirho does two passes with a gap, so it needs more.
@@ -296,6 +314,7 @@ interface Timeline {
 function shimmerMs(mode: IntroMode): number {
     if (mode === 'pirho') return SHIMMER_MS_PIRHO;
     if (mode === 'pi') return SHIMMER_MS_PI;
+    if (mode === 'tetris') return SHIMMER_MS_DEFAULT;
     return SHIMMER_MS_DEFAULT;
 }
 
@@ -404,8 +423,13 @@ export default function (pi: ExtensionAPI) {
             // best effort: a settings write failure must never break startup.
         }
 
-        // pick the intro style once per session (weighted fade / build / scatter).
-        const mode = choose(INTRO_MODES, INTRO_WEIGHTS);
+        // pick the intro style once per session from config.
+        const { modes, weights } = getConfiguredModes();
+        const mode = choose(modes, weights);
+        
+        // tetris mode uses its own state machine
+        const tetrisState = mode === 'tetris' ? createTetrisState(INTRO_MS.tetris) : null;
+        
         // block fills reveal cells in order; scatter uses a random permutation.
         const order = mode === 'scatter' ? shuffledOrder()
             : (mode === 'pi' || mode === 'pirho') ? PI_ORDER
@@ -443,9 +467,19 @@ export default function (pi: ExtensionAPI) {
                 render(width: number): string[] {
                     const t = Date.now() - start;
                     const finished = done || t >= tl.settleAt;
+                    
+                    // tick tetris state
+                    if (tetrisState && t < tl.introEnd) {
+                        tickTetris(tetrisState, t);
+                    }
 
                     const accentRgb = themeRgb(theme, 'accent');
                     const highlightRgb = accentRgb ? blend(accentRgb, [255, 255, 255], SHIMMER_HIGHLIGHT_MIX) : undefined;
+                    
+                    // tetris colors based on theme
+                    const isLight = theme.name?.toLowerCase().includes('light') ?? false;
+                    const tetrisColors = isLight ? PIECE_COLORS_LIGHT : PIECE_COLORS_DARK;
+                    
                     // during the color fade-in every cell shares one accent ramp (darkened -> full).
                     const fadingIn = mode === 'fade' && t < tl.introEnd;
                     const fadeRgb =
@@ -454,32 +488,53 @@ export default function (pi: ExtensionAPI) {
                             : undefined;
                     // path reveals fade each cell individually from dark to bright.
                     const pathFade = (mode === 'pi' || mode === 'pirho') && t < tl.introEnd && accentRgb;
+                    // tetris mode uses colored pieces during intro
+                    const tetrisFade = mode === 'tetris' && t < tl.introEnd && tetrisState && accentRgb;
                     const logoLines: string[] = [];
                     for (let row = 0; row < LOGO_H; row++) {
                         let line: string;
                         if (accentRgb && highlightRgb) {
                             line = '';
                             for (let col = 0; col < LOGO_W; col++) {
-                                const ch = cellGlyph(row, col, t, mode, order, tl, finished);
-                                if (ch === ' ') {
-                                    line += ' ';
-                                    continue;
-                                }
+                                // tetris mode handles its own cell state
+                                let ch: string;
                                 let cellRgb: Rgb;
-                                if (fadeRgb) {
-                                    cellRgb = fadeRgb;
-                                } else if (pathFade) {
+                                if (tetrisFade) {
                                     const gr = Math.floor(row / SCALE_Y);
                                     const gc = Math.floor(col / SCALE_X);
-                                    const idx = order.get(gr * GLYPH_W + gc) ?? 0;
-                                    const revealAt = PIRHO_REVEAL[idx];
-                                    const progress = t / tl.introEnd;
-                                    // each cell fades from dark to full over 15% of intro time
-                                    const cellAge = (progress - revealAt) / 0.15;
-                                    cellRgb = blend(darken(accentRgb, FADE_DARK), accentRgb, smoothstep(Math.max(0, Math.min(1, cellAge))));
+                                    const state = getTetrisCellState(tetrisState, gr, gc);
+                                    if (state === 'empty') {
+                                        line += ' ';
+                                        continue;
+                                    }
+                                    ch = '█';
+                                    if (state === 'filled') {
+                                        cellRgb = accentRgb;
+                                    } else if (state === 'flash') {
+                                        cellRgb = tetrisColors.flash;
+                                    } else {
+                                        cellRgb = tetrisColors[state] ?? accentRgb;
+                                    }
                                 } else {
-                                    const inten = shimmerIntensity(dir, row, col, t, tl);
-                                    cellRgb = inten > 0 ? blend(accentRgb, highlightRgb, inten) : accentRgb;
+                                    ch = cellGlyph(row, col, t, mode, order, tl, finished);
+                                    if (ch === ' ') {
+                                        line += ' ';
+                                        continue;
+                                    }
+                                    if (fadeRgb) {
+                                        cellRgb = fadeRgb;
+                                    } else if (pathFade) {
+                                        const gr = Math.floor(row / SCALE_Y);
+                                        const gc = Math.floor(col / SCALE_X);
+                                        const idx = order.get(gr * GLYPH_W + gc) ?? 0;
+                                        const revealAt = PIRHO_REVEAL[idx];
+                                        const progress = t / tl.introEnd;
+                                        const cellAge = (progress - revealAt) / 0.15;
+                                        cellRgb = blend(darken(accentRgb, FADE_DARK), accentRgb, smoothstep(Math.max(0, Math.min(1, cellAge))));
+                                    } else {
+                                        const inten = shimmerIntensity(dir, row, col, t, tl);
+                                        cellRgb = inten > 0 ? blend(accentRgb, highlightRgb, inten) : accentRgb;
+                                    }
                                 }
                                 line += ansiFg(cellRgb) + ch;
                             }

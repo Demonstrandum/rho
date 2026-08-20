@@ -1,7 +1,17 @@
 #!/usr/bin/env bun
 // preview of the startup logo animation.
-//   bun run demo/preview-animation.ts        all modes
-//   bun run demo/preview-animation.ts rho    one mode
+//
+//   bun run demo/preview-animation.ts              every mode, random shimmer
+//   bun run demo/preview-animation.ts build        one mode, random shimmer
+//   bun run demo/preview-animation.ts build ns     one mode, one shimmer axis
+//   bun run demo/preview-animation.ts build all    one mode, every shimmer axis
+//   bun run demo/preview-animation.ts all ns       every mode, one shimmer axis
+//   bun run demo/preview-animation.ts --list       valid names
+//
+// mode and shimmer are independent axes, so either can be pinned while the
+// other varies. the exception is pi and rho, whose shimmer follows the drawn
+// trace rather than a straight line, so a requested axis does not apply; the
+// label reports `path` when that happens rather than a value that was ignored.
 //
 // the animation lives in extensions/lib/pi-logo.ts and is imported, not
 // copied, so this preview always shows what a real session shows.
@@ -10,7 +20,7 @@ import {
     LOGO_W, LOGO_H, CENTER_ROW,
     DEFAULT_INTRO_MS, FRAME_MS, TYPE_PER_CHAR_MS, CURSOR_TAIL_MS,
     FADE_RAMP, FADE_DARK, SHIMMER_HIGHLIGHT_MIX, SHIMMER_DIRS,
-    type IntroMode, type ShimmerDir, type Timeline,
+    type IntroMode, type LinearShimmerDir, type ShimmerDir, type Timeline,
     timeline, cellGlyph, shimmerIntensity, orderFor, shimmerDirFor,
     pathCellFade, darken, smoothstep,
 } from '../extensions/lib/pi-logo';
@@ -99,9 +109,15 @@ function renderFrame(
 
 const LABEL_LEN = (LABEL_HEAD + LABEL_SUB + LABEL_TAIL).length;
 
-function runOne(mode: IntroMode): Promise<void> {
-    const randomDir = SHIMMER_DIRS[Math.floor(Math.random() * SHIMMER_DIRS.length)];
-    const dir = shimmerDirFor(mode, randomDir);
+function pickDir(requested: LinearShimmerDir | undefined): LinearShimmerDir {
+    return requested ?? SHIMMER_DIRS[Math.floor(Math.random() * SHIMMER_DIRS.length)]!;
+}
+
+function runOne(mode: IntroMode, requested: LinearShimmerDir | undefined): Promise<void> {
+    const dir = shimmerDirFor(mode, pickDir(requested));
+    // shimmerDirFor returns the mode itself for pi and rho, meaning the shimmer
+    // follows the trace instead of an axis.
+    const shownDir: string = dir === mode ? 'path' : dir;
     const order = orderFor(mode);
     const introMs = mode === 'tetris' ? 1600 : DEFAULT_INTRO_MS[mode];
     const tl = timeline(introMs, mode, LABEL_LEN);
@@ -114,7 +130,7 @@ function runOne(mode: IntroMode): Promise<void> {
             const t = Date.now() - start;
             const lines = renderFrame(t, mode, dir, order, tl);
             process.stdout.write(`\x1b[${LOGO_H + 1}A`);
-            process.stdout.write(`${DIM}  [${mode}]${RESET}\n`);
+            process.stdout.write(`${DIM}  [${mode} \u00b7 ${shownDir}]${RESET}\n`);
             for (const l of lines) {
                 process.stdout.write(l + '\x1b[K\n');
             }
@@ -128,25 +144,84 @@ function runOne(mode: IntroMode): Promise<void> {
     });
 }
 
-const ALL_MODES: IntroMode[] = ['fade', 'build', 'scatter', 'pi', 'rho'];
+const ALL_MODES: IntroMode[] = ['fade', 'build', 'scatter', 'pi', 'rho', 'tetris'];
 
 // 'pirho' was the old name for the two-trace mode, now 'rho'.
-function parseArg(arg: string | undefined): IntroMode | undefined {
-    if (arg === undefined) return undefined;
+function parseMode(arg: string): IntroMode | undefined {
     const name = arg === 'pirho' ? 'rho' : arg;
     return ALL_MODES.includes(name as IntroMode) ? (name as IntroMode) : undefined;
 }
 
+function parseDir(arg: string): LinearShimmerDir | undefined {
+    return SHIMMER_DIRS.includes(arg as LinearShimmerDir) ? (arg as LinearShimmerDir) : undefined;
+}
+
+function usage(): string {
+    return [
+        'usage: bun run demo/preview-animation.ts [mode] [shimmer]',
+        '',
+        `  mode     ${ALL_MODES.join(', ')}, or all (default)`,
+        `  shimmer  ${SHIMMER_DIRS.join(', ')}, all, or omitted for a random axis`,
+        '',
+        '  pi and rho shimmer along the drawn trace, so a requested axis',
+        '  does not apply to them and the label reads `path`.',
+    ].join('\n');
+}
+
+function fail(message: string): never {
+    process.stderr.write(`${message}\n\n${usage()}\n`);
+    process.exit(1);
+}
+
 async function main() {
-    const requested = parseArg(process.argv[2]?.toLowerCase());
-    const modes = requested ? [requested] : ALL_MODES;
+    const modeArg = process.argv[2]?.toLowerCase();
+    const dirArg = process.argv[3]?.toLowerCase();
+
+    if (modeArg === '--list' || modeArg === '--help' || modeArg === '-h') {
+        process.stdout.write(`${usage()}\n`);
+        return;
+    }
+
+    let modes: IntroMode[];
+    if (modeArg === undefined || modeArg === 'all') {
+        modes = ALL_MODES;
+    } else {
+        const mode = parseMode(modeArg);
+        if (!mode) fail(`unknown mode: ${modeArg}`);
+        modes = [mode];
+    }
+
+    // undefined means "choose a fresh random axis per run", which is what the
+    // real startup does; naming one pins it so runs can be compared.
+    let dirs: (LinearShimmerDir | undefined)[];
+    if (dirArg === undefined) {
+        dirs = [undefined];
+    } else if (dirArg === 'all') {
+        dirs = [...SHIMMER_DIRS];
+    } else {
+        const dir = parseDir(dirArg);
+        if (!dir) fail(`unknown shimmer axis: ${dirArg}`);
+        dirs = [dir];
+    }
+
+    const runs: [IntroMode, LinearShimmerDir | undefined][] = [];
+    for (const mode of modes) for (const dir of dirs) runs.push([mode, dir]);
 
     process.stdout.write('\x1b[?25l');
-    for (const mode of modes) {
-        await runOne(mode);
-        if (modes.length > 1) await new Promise((r) => setTimeout(r, 800));
+    try {
+        for (const [mode, dir] of runs) {
+            await runOne(mode, dir);
+            if (runs.length > 1) await new Promise((r) => setTimeout(r, 800));
+        }
+    } finally {
+        // restore the cursor even on ctrl-c, or the terminal is left without one.
+        process.stdout.write('\x1b[?25h\n');
     }
-    process.stdout.write('\x1b[?25h\n');
 }
+
+process.on('SIGINT', () => {
+    process.stdout.write('\x1b[?25h\n');
+    process.exit(130);
+});
 
 main();

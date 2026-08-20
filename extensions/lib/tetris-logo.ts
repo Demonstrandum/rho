@@ -1,98 +1,121 @@
-// tetris-style intro animation for the pi glyph.
-// drops tetromino-like pieces that assemble into the pi shape, with flash effect.
-// after the animation completes, the glyph is fully revealed for shimmer to run over.
+// tetris-style pi logo animation, faithful port from demo/logo-anim.ts.
+// used by startup.ts as one of the intro animation modes.
 
 import type { Rgb } from './utils';
 
-// the pi glyph shape (same as startup.ts uses)
-const GLYPH: readonly number[][] = [
-    [1, 1, 1, 0],
-    [1, 0, 1, 0],
-    [1, 1, 0, 1],
-    [1, 0, 0, 1],
-];
+// board dimensions (8x9 grid, same as pi.dev)
+const BOARD_W = 8;
+const BOARD_H = 9;
 
-const GLYPH_H = GLYPH.length;
-const GLYPH_W = Math.max(...GLYPH.map((row) => row.length));
-
-// piece definitions for the drop animation.
-// each piece reveals a set of glyph cells when it locks.
-interface Piece {
-    color: string;
-    // cells in glyph coordinates [row, col] that this piece reveals
-    cells: [number, number][];
-    // animation: start off-screen (negative), drop to final row
-    startRow: number;
-    targetRow: number;
-}
-
-// the top bar drops first, then left leg, then right leg.
-// this order gives the visual of "pi" assembling from top to bottom.
-const PIECES: Piece[] = [
-    // top bar (cyan) - the horizontal stroke
-    { color: 'cyan', cells: [[0, 0], [0, 1], [0, 2]], startRow: -1, targetRow: 0 },
-    // left leg (red) - the left vertical with the hook
-    { color: 'red', cells: [[1, 0], [2, 0], [2, 1], [3, 0]], startRow: -2, targetRow: 1 },
-    // right leg (green) - the right vertical
-    { color: 'green', cells: [[1, 2], [2, 3], [3, 3]], startRow: -2, targetRow: 1 },
-];
-
-// colors for the dropping pieces (before they settle to accent)
+// colors for the pieces (before they settle to accent)
 export const PIECE_COLORS_DARK: Record<string, Rgb> = {
-    cyan:   [0x4B, 0x60, 0x7C],
-    red:    [0x8F, 0x46, 0x32],
-    green:  [0xA3, 0xA4, 0x73],
-    flash:  [0xFF, 0xF5, 0xB4],
+    cyan:   [0x4B, 0x60, 0x7C],  // top piece
+    red:    [0x8F, 0x46, 0x32],  // left piece
+    green:  [0xA3, 0xA4, 0x73],  // right piece
+    orange: [0xD4, 0x90, 0x4E],  // base piece
+    flash:  [0xFF, 0xF5, 0xB4],  // line clear flash
 };
 
 export const PIECE_COLORS_LIGHT: Record<string, Rgb> = {
     cyan:   [0x2D, 0x4A, 0x6E],
     red:    [0xA0, 0x38, 0x20],
     green:  [0x6B, 0x7A, 0x30],
+    orange: [0xC0, 0x6A, 0x20],
     flash:  [0xFF, 0xD7, 0x00],
 };
 
-// timing ratios for the tetris intro (sum to 1.0)
+// piece definitions: color, cells (row, col offsets), start/target positions
+interface Piece {
+    color: string;
+    cells: [number, number][];
+    startX: number;
+    startY: number;
+    targetX: number;
+    targetY: number;
+}
+
+const BASE: Piece = {
+    color: 'orange',
+    cells: [[0, 0], [0, 1], [0, 2], [0, 3]],
+    startX: 1,
+    startY: -2,
+    targetX: 1,
+    targetY: 6,
+};
+
+const LEFT: Piece = {
+    color: 'red',
+    cells: [[0, 0], [1, 0], [1, 1], [2, 0]],
+    startX: 0,
+    startY: -3,
+    targetX: 2,
+    targetY: 3,
+};
+
+const TOP: Piece = {
+    color: 'cyan',
+    cells: [[0, 0], [0, 1], [0, 2], [1, 2]],
+    startX: 2,
+    startY: -2,
+    targetX: 2,
+    targetY: 2,
+};
+
+const RIGHT: Piece = {
+    color: 'green',
+    cells: [[0, 0], [1, 0], [2, 0], [2, 1]],
+    startX: 5,
+    startY: -3,
+    targetX: 5,
+    targetY: 4,
+};
+
+// timing ratios (sum to 1.0)
 const RATIO = {
-    initialHold:  0.05,
-    dropPhase:    0.60,
-    flashPhase:   0.15,
-    settle:       0.20,
+    initialHold:  0.07,
+    dropPhase:    0.55,
+    flashPhase:   0.18,
+    postClear:    0.05,
+    settle:       0.15,
 };
 
 const DROP_MOTION_PARTS = 4;
 const DROP_HOLD_PARTS = 1;
 const LAST_HOLD_PARTS = 2;
-const TOTAL_DROP_PARTS = PIECES.length * DROP_MOTION_PARTS + (PIECES.length - 1) * DROP_HOLD_PARTS + LAST_HOLD_PARTS;
+const TOTAL_DROP_PARTS = 4 * DROP_MOTION_PARTS + 3 * DROP_HOLD_PARTS + LAST_HOLD_PARTS;
 const FLASH_COUNT = 4;
+
+const SEQUENCE = [BASE, LEFT, TOP, RIGHT];
+
+// final logo cell positions (after line clear) - maps to the pi glyph
+const FINAL_LOGO = ['3:2', '3:3', '3:4', '4:2', '4:4', '5:2', '5:3', '5:5', '6:2', '6:5'];
 
 function easeOutCubic(t: number): number {
     return 1 - Math.pow(1 - t, 3);
 }
 
+function cellKey(y: number, x: number): string {
+    return `${y}:${x}`;
+}
+
 export interface TetrisState {
-    // which glyph cells are revealed (by piece color, for coloring during animation)
-    revealed: Map<string, string>;
-    // currently dropping piece
-    active: { piece: Piece; progress: number } | null;
-    phase: 'initial' | 'dropping' | 'hold' | 'flash' | 'settle' | 'done';
-    pieceIndex: number;
-    phaseStart: number;
-    flashOn: boolean;
     totalMs: number;
+    settled: Map<string, string>;
+    active: { piece: Piece; x: number; y: number } | null;
+    phase: 'initial' | 'dropping' | 'hold' | 'flash' | 'postFlash' | 'settle' | 'done';
+    stepIndex: number;
+    phaseStart: number;
+    showFlash: boolean;
+    whiteOut: boolean;
     timing: {
-        initialEnd: number;
+        initialHold: number;
         dropDuration: number;
         dropHold: number;
         lastHold: number;
         flashStep: number;
-        flashEnd: number;
-        settleEnd: number;
+        postClearHold: number;
+        postDropHold: number;
     };
-}
-
-function cellKey(r: number, c: number): string {
-    return `${r}:${c}`;
 }
 
 export function createTetrisState(totalMs: number): TetrisState {
@@ -100,46 +123,55 @@ export function createTetrisState(totalMs: number): TetrisState {
     const partMs = dropPhaseMs / TOTAL_DROP_PARTS;
 
     return {
-        revealed: new Map(),
+        totalMs,
+        settled: new Map(),
         active: null,
         phase: 'initial',
-        pieceIndex: 0,
+        stepIndex: 0,
         phaseStart: 0,
-        flashOn: false,
-        totalMs,
+        showFlash: false,
+        whiteOut: false,
         timing: {
-            initialEnd: totalMs * RATIO.initialHold,
+            initialHold: totalMs * RATIO.initialHold,
             dropDuration: partMs * DROP_MOTION_PARTS,
             dropHold: partMs * DROP_HOLD_PARTS,
             lastHold: partMs * LAST_HOLD_PARTS,
             flashStep: (totalMs * RATIO.flashPhase) / (FLASH_COUNT * 2),
-            flashEnd: totalMs * (RATIO.initialHold + RATIO.dropPhase + RATIO.flashPhase),
-            settleEnd: totalMs,
+            postClearHold: totalMs * RATIO.postClear,
+            postDropHold: totalMs * RATIO.settle,
         },
     };
 }
 
+function startDrop(state: TetrisState, elapsed: number): void {
+    const piece = SEQUENCE[state.stepIndex];
+    state.active = { piece, x: piece.startX, y: piece.startY };
+    state.phase = 'dropping';
+    state.phaseStart = elapsed;
+}
+
 export function tickTetris(state: TetrisState, elapsed: number): boolean {
+    const phaseElapsed = elapsed - state.phaseStart;
     const { timing } = state;
 
     switch (state.phase) {
         case 'initial':
-            if (elapsed >= timing.initialEnd) {
-                state.phase = 'dropping';
-                state.phaseStart = elapsed;
-                state.active = { piece: PIECES[0], progress: 0 };
+            if (phaseElapsed >= timing.initialHold) {
+                startDrop(state, elapsed);
             }
             break;
 
         case 'dropping': {
-            const piece = PIECES[state.pieceIndex];
-            const progress = Math.min(1, (elapsed - state.phaseStart) / timing.dropDuration);
-            state.active = { piece, progress };
+            const piece = SEQUENCE[state.stepIndex];
+            const progress = Math.min(1, phaseElapsed / timing.dropDuration);
+            const eased = easeOutCubic(progress);
+            const y = piece.startY + (piece.targetY - piece.startY) * eased;
+            state.active = { piece, x: piece.targetX, y };
 
             if (progress >= 1) {
-                // lock piece - reveal its cells
-                for (const [r, c] of piece.cells) {
-                    state.revealed.set(cellKey(r, c), piece.color);
+                // lock piece
+                for (const [dy, dx] of piece.cells) {
+                    state.settled.set(cellKey(piece.targetY + dy, piece.targetX + dx), piece.color);
                 }
                 state.active = null;
                 state.phase = 'hold';
@@ -149,37 +181,45 @@ export function tickTetris(state: TetrisState, elapsed: number): boolean {
         }
 
         case 'hold': {
-            const holdDur = state.pieceIndex === PIECES.length - 1 ? timing.lastHold : timing.dropHold;
-            if (elapsed - state.phaseStart >= holdDur) {
-                state.pieceIndex++;
-                if (state.pieceIndex >= PIECES.length) {
+            const holdDur = state.stepIndex === SEQUENCE.length - 1 ? timing.lastHold : timing.dropHold;
+            if (phaseElapsed >= holdDur) {
+                state.stepIndex++;
+                if (state.stepIndex >= SEQUENCE.length) {
                     state.phase = 'flash';
                     state.phaseStart = elapsed;
-                    state.flashOn = true;
+                    state.showFlash = true;
                 } else {
-                    state.phase = 'dropping';
-                    state.phaseStart = elapsed;
-                    state.active = { piece: PIECES[state.pieceIndex], progress: 0 };
+                    startDrop(state, elapsed);
                 }
             }
             break;
         }
 
         case 'flash': {
-            const flashPhase = Math.floor((elapsed - state.phaseStart) / timing.flashStep);
-            state.flashOn = flashPhase % 2 === 0;
-            if (elapsed >= timing.flashEnd) {
-                state.phase = 'settle';
+            const flashPhase = Math.floor(phaseElapsed / timing.flashStep);
+            state.showFlash = flashPhase % 2 === 0;
+            if (flashPhase >= FLASH_COUNT * 2) {
+                // clear the base row
+                for (let x = 1; x <= 6; x++) {
+                    state.settled.delete(cellKey(6, x));
+                }
+                state.phase = 'postFlash';
                 state.phaseStart = elapsed;
-                state.flashOn = false;
             }
             break;
         }
 
+        case 'postFlash':
+            if (phaseElapsed >= timing.postClearHold) {
+                state.phase = 'settle';
+                state.phaseStart = elapsed;
+            }
+            break;
+
         case 'settle':
-            if (elapsed >= timing.settleEnd) {
+            if (phaseElapsed >= timing.postDropHold) {
+                state.whiteOut = true;
                 state.phase = 'done';
-                return false;
             }
             break;
 
@@ -190,53 +230,82 @@ export function tickTetris(state: TetrisState, elapsed: number): boolean {
     return true;
 }
 
+// build the 8x9 grid for the current state
+function buildGrid(state: TetrisState): (string | null)[][] {
+    const grid: (string | null)[][] = [];
+    for (let y = 0; y < BOARD_H; y++) {
+        grid[y] = new Array(BOARD_W).fill(null);
+    }
+
+    // place settled cells
+    for (const [key, color] of state.settled) {
+        const [y, x] = key.split(':').map(Number);
+        if (y >= 0 && y < BOARD_H && x >= 0 && x < BOARD_W) {
+            grid[y][x] = color;
+        }
+    }
+
+    // place active piece
+    if (state.active) {
+        const { piece, x: px, y: py } = state.active;
+        for (const [dy, dx] of piece.cells) {
+            const y = Math.floor(py + dy);
+            const x = px + dx;
+            if (y >= 0 && y < BOARD_H && x >= 0 && x < BOARD_W) {
+                grid[y][x] = piece.color;
+            }
+        }
+    }
+
+    // flash effect on row 6
+    if (state.phase === 'flash' && state.showFlash) {
+        for (let x = 0; x < BOARD_W; x++) {
+            if (grid[6][x]) {
+                grid[6][x] = 'flash';
+            }
+        }
+    }
+
+    // white out for final state
+    if (state.whiteOut) {
+        for (let y = 0; y < BOARD_H; y++) {
+            for (let x = 0; x < BOARD_W; x++) {
+                grid[y][x] = null;
+            }
+        }
+        for (const key of FINAL_LOGO) {
+            const [y, x] = key.split(':').map(Number);
+            grid[y][x] = 'white';
+        }
+    }
+
+    return grid;
+}
+
 /**
  * Get the visual state of a glyph cell during tetris animation.
- * Returns: 'empty' | 'flash' | color name | 'filled'
+ * gr, gc are glyph coordinates (0-3).
+ * Returns: 'empty' | 'flash' | color name | 'white'
  */
 export function getTetrisCellState(
     state: TetrisState,
     gr: number,
     gc: number,
-): 'empty' | 'flash' | 'filled' | string {
-    // cell not part of glyph
-    if (GLYPH[gr]?.[gc] !== 1) return 'empty';
+): 'empty' | 'flash' | 'white' | string {
+    const grid = buildGrid(state);
 
-    const key = cellKey(gr, gc);
+    // map glyph to board: glyph[0..3][0..3] -> board[3..6][2..5]
+    const boardY = gr + 3;
+    const boardX = gc + 2;
 
-    // check if revealed by a locked piece
-    const revealedColor = state.revealed.get(key);
-    if (revealedColor) {
-        // during flash phase, all revealed cells flash
-        if (state.phase === 'flash' && state.flashOn) {
-            return 'flash';
-        }
-        // during settle, transition to filled (accent color)
-        return state.phase === 'settle' || state.phase === 'done' ? 'filled' : revealedColor;
-    }
+    const color = grid[boardY]?.[boardX];
+    if (!color) return 'empty';
+    return color;
+}
 
-    // check if being revealed by active dropping piece
-    if (state.active) {
-        const { piece, progress } = state.active;
-        for (const [pr, pc] of piece.cells) {
-            if (pr === gr && pc === gc) {
-                // reveal cells progressively: top cells first, bottom cells last
-                const eased = easeOutCubic(progress);
-                // find min and max rows for this piece to compute relative position
-                const rows = piece.cells.map(([r]) => r);
-                const minRow = Math.min(...rows);
-                const maxRow = Math.max(...rows);
-                const pieceHeight = maxRow - minRow + 1;
-                // cell's relative position within piece (0 = top, 1 = bottom)
-                const cellPos = pieceHeight > 1 ? (gr - minRow) / (pieceHeight - 1) : 0;
-                // cell becomes visible when eased progress exceeds its position
-                // add a small offset so top cell appears immediately when drop starts
-                if (eased >= cellPos * 0.8) {
-                    return piece.color;
-                }
-            }
-        }
-    }
-
-    return 'empty';
+/**
+ * Check if tetris intro is complete (for transitioning to shimmer).
+ */
+export function isTetrisDone(state: TetrisState): boolean {
+    return state.phase === 'done';
 }

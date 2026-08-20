@@ -284,7 +284,9 @@ function getConfiguredModes(): { modes: IntroMode[]; weights: number[] } {
     const modes: IntroMode[] = [];
     const weights: number[] = [];
     for (let i = 0; i < config.startup.modes.length; i++) {
-        const name = config.startup.modes[i];
+        let name = config.startup.modes[i];
+        // config uses 'rho', code uses 'pirho'
+        if (name === 'rho') name = 'pirho';
         if (['fade', 'build', 'scatter', 'pi', 'pirho', 'tetris'].includes(name)) {
             modes.push(name as IntroMode);
             weights.push(config.startup.weights[i] ?? 0);

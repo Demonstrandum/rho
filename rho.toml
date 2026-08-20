@@ -20,7 +20,11 @@ audience = "an expert in the general field, unfamiliar with this repository and 
 enabled = true  # whether the word filter is active (toggle at runtime with /noswap)
 
 [startup]
-animate = true  # whether to play the logo animation on launch
+animate = true
+scale = 1.0  # timing multiplier (0.5 = twice as fast, 1.0 = normal)
+modes = [ "fade", "build", "scatter", "pi", "rho", "tetris" ]
+weights = [ 0.20, 0.10, 0.10, 0.15, 0.15, 0.30 ]
+shimmer-dirs = [ "ns", "ew", "nwse", "nesw" ]
 
 [images]
 width = 180  # width in terminal cells for inline images

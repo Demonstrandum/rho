@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
-// anthropic's messages api rejects a replayed assistant turn that carries more
-// than one `thinking` block:
+// anthropic's messages api rejects a replayed assistant turn that carries two
+// `thinking` blocks side by side:
 //
 //   400 messages.N.content.1: `thinking` or `redacted_thinking` blocks in the
 //   latest assistant message cannot be modified. These blocks must remain as
@@ -12,13 +12,14 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 // again: every later request in that session repeats the pair and fails.
 //
 // probed against the live api with the stored blocks of such a turn, replayed
-// to the model that produced them (tools/thinking-replay-probe.ts): either
-// block alone is accepted, both together are rejected in either order, and the
-// two thinking texts concatenated into a single block carrying the last
-// signature are accepted. an empty or truncated signature is rejected, so the
-// signature is verified and covers the whole turn's thinking rather than one
-// segment of it. sending the pair to a different model is accepted, but that
-// only shows that a model does not validate signatures it did not produce.
+// to the model that produced them (tools/thinking-replay-probe.ts). the rule is
+// adjacency, not block content: either block alone is accepted, both together
+// are rejected in either order and rejected again with the signatures swapped,
+// one text block between them is accepted, and so are the two thinking texts
+// joined into a single block under the later signature. an empty or truncated
+// signature is rejected, so the signature is verified throughout. sending the
+// pair to a different model is accepted, but that only shows that a model does
+// not validate signatures it did not produce.
 //
 // this collapses each run of adjacent thinking blocks in the outgoing anthropic
 // payload into one block holding the concatenated text and the last signature.

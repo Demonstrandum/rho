@@ -85,6 +85,14 @@ const variants: [string, ApiBlock[]][] = [
     ['first thinking block only', apiBlocks.filter((_, i) => i !== thinkingIdx[1])],
     ['second thinking block only', apiBlocks.filter((_, i) => i !== thinkingIdx[0])],
     [
+        'both thinking blocks, whitespace text between them',
+        apiBlocks.flatMap((b, i) => (i === thinkingIdx[1] ? [{ type: 'text', text: ' ' }, b] : [b])),
+    ],
+    [
+        'both thinking blocks, empty text between them',
+        apiBlocks.flatMap((b, i) => (i === thinkingIdx[1] ? [{ type: 'text', text: '' }, b] : [b])),
+    ],
+    [
         'first block only, empty signature',
         apiBlocks.flatMap((b, i) =>
             i === thinkingIdx[1] ? [] : i === thinkingIdx[0] ? [{ ...b, signature: '' }] : [b],

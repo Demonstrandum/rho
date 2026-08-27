@@ -205,7 +205,15 @@ const SCHEMA = {
         shimmerDirs: field('shimmer-dirs', isStringArray, ['ns', 'ew', 'nwse', 'nesw'], 'shimmer axes'),
     },
     images: {
-        width: field('width', isPosInt, 180, 'width in terminal cells for inline images'),
+        width: field('width', isPosInt, 60, 'width in terminal cells for inline images'),
+        maxHeightFraction: field(
+            'max-height-fraction',
+            isUnitFloat,
+            0.4,
+            'largest share of the terminal height an inline image may occupy.',
+            'pi caps image width only, so a tall image can be drawn taller than',
+            'the window and text then lands on top of it. 1 removes the cap.',
+        ),
     },
     stash: {
         demoteTo: field(

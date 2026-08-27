@@ -225,6 +225,17 @@ const SCHEMA = {
             'since a snapshot of everything under home runs past the checkpoint',
             "engine's own two-minute timeout. always: everywhere. never: nowhere",
         ),
+        onFailure: field(
+            'on-failure',
+            isOneOf('disable-session', 'keep-trying'),
+            'disable-session',
+            'what happens after a checkpoint fails. disable-session: report the',
+            'first failure and take no further checkpoint for the rest of the',
+            'session, since the cause (an unreadable path, a work tree too large',
+            'to stage inside the two-minute timeout) does not change while the',
+            'session runs. keep-trying: pi-rewind\'s own behaviour, one attempt',
+            'and one warning per turn',
+        ),
     },
     stash: {
         demoteTo: field(

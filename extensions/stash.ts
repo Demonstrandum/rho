@@ -13,11 +13,16 @@
 // ends back at the text you started with. the stack is recomputed from a
 // snapshot taken when the cycle started, so cycling never reorders it. see
 // lib/stash.ts for those rules.
+//
+// the stack is on disk, so it survives an exit, a resume, and a crash. `[stash]
+// persist` in rho.toml chooses what it is keyed to: the working directory
+// (default), the session, everything, or nothing.
 
 import { DynamicBorder, type ExtensionAPI, type ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Container, type KeyId, matchesKey, type SelectItem, SelectList, Text } from '@earendil-works/pi-tui';
-import { Stash, type StashEntry, type StashEntryId, type PopResult } from './lib/stash';
+import { parseStashState, Stash, type StashEntry, type StashEntryId, type PopResult, type StashState } from './lib/stash';
 import { actionsBoundTo, ensureKeybinding, type KeybindingId } from './lib/keybindings-store';
+import { PersistedState, type StateScope } from './lib/state-store';
 import { config } from './lib/config';
 
 const STATUS_ID = 'rho-stash';
@@ -99,13 +104,36 @@ function demoteBuiltins(): void {
     }
 }
 
+const STATE_NAME = 'stash';
+
+function persistScope(): StateScope | null {
+    const setting = config.stash.persist;
+    return setting === 'off' ? null : setting;
+}
+
 export default function (pi: ExtensionAPI) {
-    const stash = new Stash();
+    // the store needs the cwd and the session id, which arrive with the context
+    // at session_start, so the stack starts empty and is replaced there. a stash
+    // written before that (there is no editor yet) is not possible.
+    let store: PersistedState<StashState> | null = null;
+    const persist = (state: StashState) => {
+        store?.write(state);
+    };
+    let stash = new Stash({ onChange: persist });
 
     // at session_start, not at load: pi installs the global keybindings manager
     // during startup, and the remap needs the resolved bindings to read.
-    pi.on('session_start', async () => {
+    pi.on('session_start', async (_event, ctx) => {
         demoteBuiltins();
+        const scope = persistScope();
+        store = scope === null
+            ? null
+            : PersistedState.open(
+                { name: STATE_NAME, scope, parse: parseStashState },
+                { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() },
+            );
+        stash = new Stash({ initial: store?.read() ?? null, onChange: persist });
+        showStatus(ctx);
     });
 
     const showStatus = (ctx: ExtensionContext, cycle?: PopResult) => {

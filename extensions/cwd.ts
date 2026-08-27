@@ -6,6 +6,10 @@
 // directory and re-registers them, which is what pi does internally for base-tool
 // overrides. the tradeoff: re-registered tools use default rendering, since the
 // public create*Tool factories do not carry the built-ins' custom renderers.
+//
+// the target is stored per session, so a resume returns to the directory the
+// session was last pointed at instead of the one it was started in. `[cwd]
+// remember = false` in rho.toml turns that off.
 
 import { existsSync, statSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -24,6 +28,22 @@ import {
     type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import type { TSchema } from '@earendil-works/pi-ai';
+import { PersistedState } from './lib/state-store';
+import { config } from './lib/config';
+
+const TARGET_VERSION = 1;
+
+interface TargetState {
+    readonly version: typeof TARGET_VERSION;
+    readonly path: string;
+}
+
+function parseTargetState(raw: unknown): TargetState | null {
+    if (typeof raw !== 'object' || raw === null) return null;
+    const s = raw as Record<string, unknown>;
+    if (s.version !== TARGET_VERSION || typeof s.path !== 'string' || s.path === '') return null;
+    return { version: TARGET_VERSION, path: s.path };
+}
 
 // structural view of the built-in tools returned by create*Tool. they carry
 // execute/parameters but not the definition-level renderers, which is why the
@@ -95,6 +115,7 @@ function completionItem(abs: string, written: string, showRelative: boolean): Au
 
 export default function (pi: ExtensionAPI) {
     let currentCwd = process.cwd();
+    let store: PersistedState<TargetState> | null = null;
 
     // no status line here: the footer already prints the cwd on its first line,
     // and it reads process.cwd(), so it stays accurate after a /cwd retarget.
@@ -106,6 +127,19 @@ export default function (pi: ExtensionAPI) {
 
     pi.on('session_start', async (_event, ctx) => {
         currentCwd = ctx.cwd;
+        if (!config.cwd.remember) return;
+        store = PersistedState.open(
+            { name: 'cwd', scope: 'session', parse: parseTargetState },
+            { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() },
+        );
+        const stored = store.read();
+        // a directory that has since been moved or deleted is dropped rather
+        // than reported: the session still works from where pi started it.
+        if (!stored || stored.path === currentCwd || !isDir(stored.path)) return;
+        process.chdir(stored.path);
+        currentCwd = process.cwd();
+        retarget(currentCwd);
+        ctx.ui.notify(`cwd -> ${currentCwd}`, 'info');
     });
 
     pi.registerCommand('cwd', {
@@ -159,6 +193,7 @@ export default function (pi: ExtensionAPI) {
             process.chdir(target);
             currentCwd = process.cwd();
             retarget(currentCwd);
+            store?.write({ version: TARGET_VERSION, path: currentCwd });
             ctx.ui.notify(`cwd -> ${currentCwd}`, 'info');
         },
     });

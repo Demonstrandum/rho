@@ -35,17 +35,72 @@ export type PopResult =
     | { readonly kind: 'empty' }
     | { readonly kind: 'text'; readonly text: string; readonly position: CyclePosition; readonly total: number };
 
+// what survives the process: the stack and the id counter. the cycle and the
+// undo are tied to an editor the next process does not have, so neither is
+// stored; a restored stash starts with no cycle and nothing to undo.
+export const STASH_STATE_VERSION = 1;
+
+export interface StashState {
+    readonly version: typeof STASH_STATE_VERSION;
+    readonly entries: readonly StashEntry[];
+    readonly nextId: number;
+}
+
+function isEntry(raw: unknown): raw is StashEntry {
+    if (typeof raw !== 'object' || raw === null) return false;
+    const e = raw as Record<string, unknown>;
+    return typeof e.id === 'number' && typeof e.text === 'string' && typeof e.at === 'number';
+}
+
+export function parseStashState(raw: unknown): StashState | null {
+    if (typeof raw !== 'object' || raw === null) return null;
+    const s = raw as Record<string, unknown>;
+    if (s.version !== STASH_STATE_VERSION) return null;
+    if (!Array.isArray(s.entries) || !s.entries.every(isEntry)) return null;
+    if (typeof s.nextId !== 'number' || !Number.isInteger(s.nextId) || s.nextId < 1) return null;
+    const entries = s.entries as readonly StashEntry[];
+    const highest = entries.reduce((max, e) => Math.max(max, e.id), 0);
+    // an id counter behind the stack it was stored with would hand out an id
+    // that is already in use, and the picker keys on ids.
+    return { version: STASH_STATE_VERSION, entries, nextId: Math.max(s.nextId, highest + 1) };
+}
+
 export function isBlank(text: string): boolean {
     return text.trim() === '';
 }
 
+export interface StashOptions {
+    readonly initial?: StashState | null;
+    /** called after every change to the stack, with the state to persist. */
+    readonly onChange?: (state: StashState) => void;
+}
+
 export class Stash {
-    private entries: StashEntry[] = [];
+    private entries: StashEntry[];
     private cycle: Cycle | null = null;
-    private nextId = 1;
+    private nextId: number;
+    private readonly onChange: ((state: StashState) => void) | undefined;
     // the stack as it was before the last drop or clear, so both are reversible
     // without a confirmation prompt. one level, replaced by the next removal.
     private undoState: readonly StashEntry[] | null = null;
+
+    constructor(options: StashOptions = {}) {
+        const initial = options.initial ?? null;
+        this.entries = initial ? [...initial.entries] : [];
+        this.nextId = initial ? initial.nextId : 1;
+        this.onChange = options.onChange;
+    }
+
+    snapshot(): StashState {
+        return { version: STASH_STATE_VERSION, entries: [...this.entries], nextId: this.nextId };
+    }
+
+    // every method that changes the stack ends here, so persistence cannot be
+    // forgotten at one call site.
+    private changed<T>(result: T): T {
+        this.onChange?.(this.snapshot());
+        return result;
+    }
 
     get size(): number {
         return this.entries.length;
@@ -69,7 +124,7 @@ export class Stash {
         this.entries = [this.entry(text), ...this.entries];
         this.cycle = null;
         this.undoState = null;
-        return true;
+        return this.changed(true);
     }
 
     clear(): number {
@@ -78,7 +133,7 @@ export class Stash {
         this.undoState = this.entries;
         this.entries = [];
         this.cycle = null;
-        return dropped;
+        return this.changed(dropped);
     }
 
     drop(id: StashEntryId): boolean {
@@ -87,7 +142,7 @@ export class Stash {
         this.undoState = this.entries;
         this.entries = this.entries.filter((_, i) => i !== index);
         this.cycle = null;
-        return true;
+        return this.changed(true);
     }
 
     // put the stack back as it was before the last drop or clear. returns the
@@ -98,7 +153,7 @@ export class Stash {
         this.entries = [...this.undoState];
         this.undoState = null;
         this.cycle = null;
-        return restored;
+        return this.changed(restored);
     }
 
     // pop, or advance an in-progress cycle when the editor still holds exactly
@@ -145,14 +200,24 @@ export class Stash {
         if (position.kind === 'origin') {
             this.entries = [...cycle.snapshot];
             cycle.shown = cycle.origin;
-            return { kind: 'text', text: cycle.origin, position, total: cycle.snapshot.length };
+            return this.changed<PopResult>({
+                kind: 'text',
+                text: cycle.origin,
+                position,
+                total: cycle.snapshot.length,
+            });
         }
         const shown = cycle.snapshot[position.index];
         if (!shown) return { kind: 'empty' };
         const rest = cycle.snapshot.filter((_, i) => i !== position.index);
         this.entries = cycle.originEntry ? [cycle.originEntry, ...rest] : rest;
         cycle.shown = shown.text;
-        return { kind: 'text', text: shown.text, position, total: cycle.snapshot.length };
+        return this.changed<PopResult>({
+            kind: 'text',
+            text: shown.text,
+            position,
+            total: cycle.snapshot.length,
+        });
     }
 }
 

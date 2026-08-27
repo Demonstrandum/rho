@@ -25,6 +25,7 @@ import type {
     MarkdownTransformContext,
 } from '@earendil-works/pi-coding-agent';
 import { config } from './lib/config';
+import { PersistedState } from './lib/state-store';
 
 const swapsPath = join(dirname(fileURLToPath(import.meta.url)), 'assets', 'wordswap.json');
 
@@ -308,11 +309,31 @@ const SWAPPED_SPAN = buildSpanPattern([
     ...patternSwaps.map((p) => p.replacement),
 ]);
 
+const TOGGLE_VERSION = 1;
+
+interface ToggleState {
+    readonly version: typeof TOGGLE_VERSION;
+    readonly enabled: boolean;
+}
+
+function parseToggleState(raw: unknown): ToggleState | null {
+    if (typeof raw !== 'object' || raw === null) return null;
+    const s = raw as Record<string, unknown>;
+    if (s.version !== TOGGLE_VERSION || typeof s.enabled !== 'boolean') return null;
+    return { version: TOGGLE_VERSION, enabled: s.enabled };
+}
+
 export default function (pi: ExtensionAPI) {
     if (swaps.length === 0 && patternSwaps.length === 0) return;
 
+    // /noswap used to last until the process ended, so a resume came back with
+    // the filter on whatever rho.toml said. the toggle is stored per session and
+    // only written when the user runs the command, so the config value still
+    // decides every session the command was never used in.
+    let toggleStore: PersistedState<ToggleState> | null = null;
+
     pi.registerCommand('noswap', {
-        description: "toggle the word filter on/off for this session",
+        description: 'toggle the word filter on/off for this session',
         handler: async (args, ctx) => {
             const arg = args.trim().toLowerCase();
             if (arg === '') {
@@ -325,6 +346,7 @@ export default function (pi: ExtensionAPI) {
                 ctx.ui.notify(`unknown argument: ${arg}`, 'error');
                 return;
             }
+            toggleStore?.write({ version: TOGGLE_VERSION, enabled: config.wordswap.enabled });
             ctx.ui.notify(config.wordswap.enabled ? 'word filter on' : 'word filter off', 'info');
         },
     });
@@ -333,6 +355,13 @@ export default function (pi: ExtensionAPI) {
     let ui: ExtensionUIContext | undefined;
     pi.on('session_start', async (_event, ctx) => {
         ui = ctx.ui;
+        if (!config.wordswap.rememberToggle) return;
+        toggleStore = PersistedState.open(
+            { name: 'wordswap-toggle', scope: 'session', parse: parseToggleState },
+            { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() },
+        );
+        const stored = toggleStore.read();
+        if (stored) config.wordswap.enabled = stored.enabled;
     });
 
     pi.on('message_end', async (event) => {

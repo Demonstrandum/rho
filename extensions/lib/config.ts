@@ -359,6 +359,28 @@ const SCHEMA = {
             'is stuck',
         ),
     },
+    search: {
+        maxResults: field(
+            'max-results',
+            isPosInt,
+            12,
+            'how many matches /search shows, and the default for the pi_search tool',
+        ),
+        docRoots: field(
+            'doc-roots',
+            isStringArray,
+            [],
+            'extra markdown files or directories to index alongside pi\'s own',
+            "README.md and docs/. a directory is walked four levels deep for *.md",
+        ),
+        tool: field(
+            'tool',
+            isBool,
+            true,
+            'register the pi_search tool, so the agent can search commands and docs',
+            'too. the /search command is registered either way',
+        ),
+    },
     render: {
         halfBlocks: field(
             'half-blocks',

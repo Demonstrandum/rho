@@ -215,6 +215,17 @@ const SCHEMA = {
             'the window and text then lands on top of it. 1 removes the cap.',
         ),
     },
+    rewind: {
+        autoCheckpoint: field(
+            'auto-checkpoint',
+            isOneOf('git', 'always', 'never'),
+            'git',
+            'when pi-rewind takes a checkpoint of the working directory each turn.',
+            'git: only inside a git work tree, and never in the home directory,',
+            'since a snapshot of everything under home runs past the checkpoint',
+            "engine's own two-minute timeout. always: everywhere. never: nowhere",
+        ),
+    },
     stash: {
         demoteTo: field(
             'demote-to',

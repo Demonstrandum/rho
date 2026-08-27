@@ -1,8 +1,9 @@
-// widen pi's inline image rendering to 180 terminal cells. pi renders images
-// (e.g. from fetch_content) at terminal.imageWidthCells wide; the default is
-// narrow. persist the value once into the global settings, idempotently (same
-// pattern as clear-on-shrink / silence-extra-usage-warning), since pi exposes
-// no runtime setter for it.
+// set the width pi renders inline images at, in terminal cells, from
+// [images] width in rho.toml. pi does not clamp the value to the terminal, so a
+// width above the window's column count makes an image overflow the screen;
+// keep it under `tput cols`. persist it into the global settings, idempotently
+// (same pattern as clear-on-shrink / silence-extra-usage-warning), since pi
+// exposes no runtime setter for it.
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { ensureGlobalSetting } from './lib/settings-store';

@@ -54,6 +54,34 @@ function isBlank(line: string): boolean {
     return line.replace(CSI, '').replace(OSC, '').trim() === '';
 }
 
+/**
+ * an inline image reserves its height as blank lines: after the escape sequence
+ * under the kitty protocol, before it under iterm2. the terminal draws the
+ * picture over that many rows whatever the transcript does, so dropping the
+ * blanks makes the block shorter than the picture and the rows after it are
+ * drawn on top. a block holding an image is therefore left alone.
+ *
+ * pi-tui has this predicate as isImageLine, but does not re-export it through
+ * the package index, so the two prefixes are matched here. an iterm2 line also
+ * has to be recognised before OSC stripping, which would leave it looking
+ * blank.
+ */
+const KITTY_PREFIX = '\x1b_G';
+const ITERM2_PREFIX = '\x1b]1337;File=';
+
+function holdsImage(lines: readonly string[]): boolean {
+    return lines.some((line) => line.includes(KITTY_PREFIX) || line.includes(ITERM2_PREFIX));
+}
+
+/** the blank leading and trailing rows removed, unless an image needs them. */
+export function trimBlankEdges(lines: readonly string[]): string[] {
+    if (holdsImage(lines)) return [...lines];
+    const out = [...lines];
+    while (out.length > 0 && isBlank(out[0]!)) out.shift();
+    while (out.length > 0 && isBlank(out[out.length - 1]!)) out.pop();
+    return out;
+}
+
 // an OSC133 zone marker rides on an assistant message's first line, so it has
 // to survive onto the line that replaces a dropped one.
 function oscOnly(line: string): string {
@@ -88,6 +116,9 @@ if (halfBlocks) {
         const lines: string[] = [...origBoxRender.call(this, width)];
         const paddingY: number = self.paddingY ?? 1;
         if (paddingY === 0 || lines.length < paddingY * 2 + 1) return lines;
+        // a padding row of a box around an image can be the image's own
+        // reserved row, and a half block written there erases the picture.
+        if (holdsImage(lines)) return lines;
 
         const fg = bgFnToFg(self.bgFn);
         if (!fg) return lines;
@@ -108,10 +139,7 @@ if (tightToolRows) {
         this: ToolExecutionComponent,
         width: number,
     ): string[] {
-        const lines: string[] = [...origToolRender.call(this, width)];
-        while (lines.length > 0 && isBlank(lines[0])) lines.shift();
-        while (lines.length > 0 && isBlank(lines[lines.length - 1])) lines.pop();
-        return lines;
+        return trimBlankEdges(origToolRender.call(this, width));
     };
 }
 
@@ -136,7 +164,7 @@ if (tightAfterToolRows || hideIdleStatus) {
             ) {
                 childLines = [...childLines];
                 let carried = '';
-                while (childLines.length > 1 && isBlank(childLines[0])) {
+                while (!holdsImage(childLines) && childLines.length > 1 && isBlank(childLines[0])) {
                     carried += oscOnly(childLines[0]);
                     childLines.shift();
                 }

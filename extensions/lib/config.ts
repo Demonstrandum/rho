@@ -196,6 +196,13 @@ const SCHEMA = {
             true,
             'whether the word filter is active (toggle at runtime with /noswap)',
         ),
+        rememberToggle: field(
+            'remember-toggle',
+            isBool,
+            true,
+            'store what /noswap last set for this session, so a resume comes back',
+            'with the filter as it was left rather than back at `enabled`',
+        ),
     },
     startup: {
         animate: field('animate', isBool, true, 'play the logo animation on launch'),
@@ -213,6 +220,15 @@ const SCHEMA = {
             'largest share of the terminal height an inline image may occupy.',
             'pi caps image width only, so a tall image can be drawn taller than',
             'the window and text then lands on top of it. 1 removes the cap.',
+        ),
+    },
+    cwd: {
+        remember: field(
+            'remember',
+            isBool,
+            true,
+            'store where /cwd last pointed for this session and return there on a',
+            'resume, when the directory still exists',
         ),
     },
     rewind: {
@@ -238,6 +254,15 @@ const SCHEMA = {
         ),
     },
     stash: {
+        persist: field(
+            'persist',
+            isOneOf('project', 'session', 'global', 'off'),
+            'project',
+            'where parked prompts are kept between runs. project: one stack per',
+            'working directory, restored on every start there. session: one stack',
+            'per session, restored on resume. global: one stack everywhere. off:',
+            'in memory only, so the stack dies with the process',
+        ),
         demoteTo: field(
             'demote-to',
             isStringArray,
@@ -299,6 +324,39 @@ const SCHEMA = {
             isGradientSpec,
             ['bashMode', 'userMessageBg'],
             'gradient colour stops for bash mode',
+        ),
+    },
+    sendNow: {
+        send: field(
+            'send',
+            isString,
+            'ctrl+enter',
+            'stop the running turn and send the editor text now, instead of',
+            'queueing it until the turn reaches its next boundary. on an empty',
+            'editor it starts the queued steering messages now instead',
+        ),
+        sendQueued: field(
+            'send-queued',
+            isString,
+            'ctrl+shift+enter',
+            'stop the running turn and send the newest queued steering message,',
+            'whatever the editor holds. the editor text is neither sent nor cleared',
+        ),
+        stallWarnMs: field(
+            'stall-warn-ms',
+            isPosInt,
+            6000,
+            'how long the aborted turn may take to settle before the pending send is',
+            'reported as stalled. the message stays armed either way; pressing the',
+            'send key again puts it back in the editor and disarms it',
+        ),
+        log: field(
+            'log',
+            isBool,
+            false,
+            'append a timestamped line per key press, abort, agent event, and send to',
+            '<data dir>/rho/send-now.log, for finding where a run that will not stop',
+            'is stuck',
         ),
     },
     render: {

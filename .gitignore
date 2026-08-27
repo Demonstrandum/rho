@@ -1,4 +1,7 @@
 node_modules/
+# written by `bun run link` (pi install -l), which registers this checkout as a
+# project-local package
+.pi/
 *.log
 .DS_Store
 ._*

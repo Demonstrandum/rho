@@ -23,12 +23,15 @@
   },
   "scripts": {
     "test": "bun test tests/",
-    "postinstall": "bun tools/link-pi-packages.ts",
+    "postinstall": "bun tools/version-gate.mjs && bun tools/preflight.ts --install && bun tools/link-pi-packages.ts",
+    "doctor": "bun tools/version-gate.mjs && bun tools/preflight.ts",
     "typecheck": "tsc --noEmit",
     "prompt": "bun tools/prompt-explorer.ts",
     "prompt:cli": "bun tools/prompt-explorer.ts --cli",
     "prompt:preview": "bun tools/prompt-explorer.ts --preview",
     "init": "bun tools/init-config.ts",
+    "smoke": "bun ci/smoke.ts",
+    "smoke:docker": "docker build -f ci/Dockerfile -t rho-smoke . && docker run --rm rho-smoke",
     "link": "pi install -l $(pwd)",
     "link:global": "pi install $(pwd)"
   },
@@ -47,6 +50,10 @@
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     "typebox": "^1.1.38"
+  },
+  "engines": {
+    "bun": ">=1.2.0",
+    "node": ">=20"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.2",

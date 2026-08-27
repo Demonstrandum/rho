@@ -40,11 +40,17 @@ bundles my:
 
 ## install
 
+rho needs bun 1.2.0 or newer and pi 0.84.0 or newer. an older bun fails partway
+through the install with an error that names the wrong file, so the install
+checks the version first and says what to upgrade. run `bun run doctor` at any
+time for the same report.
+
 1. install Bun (needed to run pi and rho):
 
    ```bash
    curl -fsSL https://bun.sh/install | bash
    # or on macOS: brew install oven-sh/bun/bun
+   # already installed, but old: bun upgrade
    ```
 
 2. install pi:
@@ -90,7 +96,22 @@ pi install -l ~/rho
 ```bash
 bun install
 bun run typecheck
+bun test tests/
+bun run doctor      # bun / node / pi versions and the pi package link
+bun run smoke       # start pi against a mock model and check it does not crash
 ```
+
+`bun run smoke` is the end-to-end check: it serves a local OpenAI-compatible
+model (`ci/mock-provider.ts`), then runs pi with this checkout as a package in a
+temporary config directory, once headless and once on a pseudo-terminal. it
+verifies that every extension loads, the system prompt is assembled and sent,
+the wordswap hook rewrites a finalized reply, a tool call completes, the startup
+header renders, and pi exits cleanly. no API key and no network are used, and
+nothing outside the temporary directory is read or written.
+
+`bun run smoke:docker` runs the same checks in a clean container
+(`ci/Dockerfile`), which is what `.github/workflows/ci.yml` does on every push
+and once a day, so a pi release that breaks rho shows up there first.
 
 `bun run link` installs the working checkout project-locally, `bun run link:global`
 installs it globally. `/reload` in a session picks up changes without a restart.

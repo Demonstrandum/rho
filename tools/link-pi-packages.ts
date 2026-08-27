@@ -5,7 +5,7 @@
 // instantiates, and prototype patches silently apply to nothing.
 import { existsSync, lstatSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { execSync } from 'node:child_process';
+import { findPiScope } from './pi-location';
 
 const PACKAGES = ['pi-tui', 'pi-coding-agent'];
 
@@ -15,21 +15,7 @@ function warn(msg: string): void {
     console.error(`[link-pi-packages] ${msg}`);
 }
 
-function globalScopeDir(): string | null {
-    try {
-        const piBin = execSync('which pi', { encoding: 'utf8' }).trim();
-        // pi is a symlink into the global pi-coding-agent's dist/cli.js
-        const target = readlinkSync(piBin);
-        const entryDir = dirname(resolve(dirname(piBin), target));
-        // .../@earendil-works/pi-coding-agent/dist -> .../@earendil-works
-        const scope = resolve(entryDir, '..', '..');
-        return existsSync(scope) ? scope : null;
-    } catch {
-        return null;
-    }
-}
-
-const scope = globalScopeDir();
+const scope = findPiScope();
 if (!scope) {
     warn("could not locate pi's global @earendil-works scope from `which pi`; leaving node_modules untouched. rho extensions may fail to load if their local copies are missing or broken.");
     process.exit(0);
@@ -40,6 +26,13 @@ for (const pkg of PACKAGES) {
     const link = join(localScope, pkg);
     if (!existsSync(target)) {
         warn(`global ${pkg} not found at ${target}; skipping.`);
+        continue;
+    }
+    // a link to itself resolves to nothing, so every import of the package
+    // fails. it is what an earlier version of this script produced whenever the
+    // scope search answered with rho's own node_modules.
+    if (resolve(target) === resolve(link)) {
+        warn(`refusing to link ${pkg} to itself at ${link}; is pi installed globally?`);
         continue;
     }
 

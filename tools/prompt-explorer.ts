@@ -3,7 +3,8 @@
 //
 // web ui (default):   bun tools/prompt-explorer.ts
 // terminal tui:       bun tools/prompt-explorer.ts --cli
-// print to stdout:    bun tools/prompt-explorer.ts --preview
+// print with labels:  bun tools/prompt-explorer.ts --preview
+// print plain:        bun tools/prompt-explorer.ts --plain
 //
 // the view expands the master template with source annotations. every line
 // traces back to its origin file and line number. edits and deletions
@@ -867,6 +868,12 @@ async function runWeb(): Promise<void> {
 }
 
 // ── main ───────────────────────────────────────────────────
+
+if (process.argv.includes('--plain')) {
+    // the assembled prompt as the model receives it: no labels, no colour.
+    process.stdout.write(resolveWithSources().map((l) => l.text).join('\n').trim() + '\n');
+    process.exit(0);
+}
 
 if (process.argv.includes('--preview')) {
     preview(resolveWithSources());

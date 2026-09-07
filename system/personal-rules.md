@@ -61,11 +61,13 @@ these apply to everything you write for me, across all projects.
 
 ## writing
 
-- NEVER use em dashes.
+- no em dashes in technical writing.
   not the unicode character, not the double-hyphen `--`, not the triple-hyphen `---`.
-  this applies everywhere: prose, comments, commit messages, json strings, code.
-  no exceptions.
-- use a period, a comma, parentheses, a colon or a semicolon instead.
+  this covers documentation, comments, commit messages, json strings, code, and every explanatory reply.
+  use a period, a comma, parentheses, a colon or a semicolon instead.
+- the one exception is genuinely conversational writing: dialogue, a transcript, reported speech, an interrupted line.
+  there the em dash is the correct mark and nothing else does its job.
+  outside that, it is a tic: LLMs reach for it where a comma or a colon is what the sentence needs.
 - prefer all lower case, except keep names and brands stylised (TypeScript, Bun, pi, npm, GitHub, etc).
 - prefer ascii over unicode, unless forcing ascii becomes illegible.
   examples: write `x_i` or `x[i]` not a unicode subscript, `x^i` not a superscript, `sum(x)` not a capital sigma, `sqrt(x)` not the radical sign, `->` not an arrow glyph.

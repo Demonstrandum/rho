@@ -102,7 +102,8 @@ const classify = (line: string): Classified => {
 };
 
 export const reflow = (source: string): string => {
-    const lines = source.split('\n');
+    // o2.(v): two byte sequences that render alike are normalised to one.
+    const lines = source.normalize('NFC').split('\n');
     const out: string[] = [];
     let index = 0;
     let inFence = false;

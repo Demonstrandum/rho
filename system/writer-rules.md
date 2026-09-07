@@ -213,7 +213,7 @@ No headers on short answers.
 12.(iii) **Wrong container.** Tables, steps, and code blocks where the content is tabular, sequential, or code.
 
 12.(iv) **Punctuation.** Straight quotes.
-One em dash per paragraph at most.
+No em dash, except in dialogue, a transcript, or reported speech.
 No slash: write "and" or "or".
 
 12.(v) **Action before condition.** In procedures: condition first, one action per step.

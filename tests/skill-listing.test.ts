@@ -23,6 +23,22 @@ describe('unescapeSkillBlock', () => {
         expect(unescapeSkillBlock(block('literal &amp;quot; in the text'))).toContain('literal &quot; in the text');
     });
 
+    test('drops the indentation pi puts before every tag', () => {
+        const out = unescapeSkillBlock(block('one line'));
+        expect(out).toContain('\n<skill>\n<name>x</name>\n');
+        expect(out).not.toContain('\n  <skill>');
+    });
+
+    test('trims a description that carries its own newlines', () => {
+        const out = unescapeSkillBlock(block('first line.\nsecond line.\n'));
+        expect(out).toContain('<description>first line.\nsecond line.</description>');
+    });
+
+    test('leaves indentation outside the block alone', () => {
+        const out = unescapeSkillBlock(`  <keep>me</keep>\n${block('x')}`);
+        expect(out.startsWith('  <keep>me</keep>')).toBe(true);
+    });
+
     test('text outside the block is untouched', () => {
         const out = unescapeSkillBlock(`&quot;keep&quot;\n${block('&quot;fix&quot;')}`);
         expect(out.startsWith('&quot;keep&quot;')).toBe(true);

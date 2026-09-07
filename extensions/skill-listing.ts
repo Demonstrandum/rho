@@ -10,6 +10,14 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 // the quote, apostrophe, and ampersand escapes are undone here. the angle
 // brackets are left escaped, since an unescaped < in a description would look
 // like a tag boundary in the block that surrounds it.
+//
+// the indentation goes too. pi indents <skill> by two spaces and its children by
+// four, but a description carrying its own newlines (any skill whose frontmatter
+// wrote one, which is most of them) puts its later lines at column zero, so the
+// listing is ragged rather than nested. the tags already show the nesting, so the
+// leading spaces buy nothing and cost a token per line. the description text is
+// trimmed at the same time, which brings its closing tag back onto its own last
+// line instead of a line of its own.
 const ENTITIES: ReadonlyArray<readonly [RegExp, string]> = [
     [/&quot;/g, '"'],
     [/&apos;/g, "'"],
@@ -19,11 +27,19 @@ const ENTITIES: ReadonlyArray<readonly [RegExp, string]> = [
 ];
 
 const BLOCK = /<available_skills>[\s\S]*?<\/available_skills>/;
+const INDENTED_TAG = /^[ \t]+(?=<)/gm;
+const DESCRIPTION = /<description>([\s\S]*?)<\/description>/g;
 
 export const unescapeSkillBlock = (systemPrompt: string): string =>
-    systemPrompt.replace(BLOCK, (block) =>
-        ENTITIES.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), block),
-    );
+    systemPrompt.replace(BLOCK, (block) => {
+        const unescaped = ENTITIES.reduce(
+            (text, [pattern, replacement]) => text.replace(pattern, replacement),
+            block,
+        );
+        return unescaped
+            .replace(DESCRIPTION, (_, body: string) => `<description>${body.trim()}</description>`)
+            .replace(INDENTED_TAG, '');
+    });
 
 export default function (pi: ExtensionAPI) {
     pi.on('before_agent_start', async (event) => {

@@ -1,7 +1,8 @@
 # prose style
 
-For the `prose` register only, per `o0` in `orthography.md`: text meant to be read rather than parsed.
+For the `prose` register, per `o0` in `orthography.md`: text meant to be read rather than parsed.
 Derived from New Yorker house style, with the typesetting habits removed and the spelling made British.
+One exception to the register: `p1`, spelling, holds in `technical` as well, since a word is spelled the same way wherever it appears.
 
 Rule numbers carry a `p` prefix.
 They are disjoint from the `o` rules and from the writer rules.
@@ -50,6 +51,7 @@ p2.(iii) Not a hyphen and not a closed form.
 
 p2.(iv) This register only.
 In `code` and `technical` the closed form is used, because the diacritic breaks a search for the plain letters.
+See `p7` for the destinations inside a prose document that take the closed form.
 
 ## p3. Numbers
 
@@ -94,8 +96,9 @@ The commas mark the boundaries of the interruption, which is information the rea
 p5.(iii) Comma and period placement stays logical, per `o1.(i)`.
 This is the largest departure from the source style, which puts them inside the closing quote.
 
-p5.(iv) No em dashes, per the personal rules.
-The New Yorker uses them heavily; the ban holds here.
+p5.(iv) No em dash in exposition, per the personal rules.
+In dialogue, a transcript, or reported speech, the em dash is the correct mark and is used.
+The New Yorker uses it in exposition too; that part is not carried over.
 
 p5.(v) No full stop after a contraction ending in the last letter of the word: `Mr`, `Mrs`, `Dr`, `St`, `Ltd`.
 A full stop only after a true truncation: `Prof.`, `vol.`, `ed.`, `Jan.`.
@@ -116,10 +119,17 @@ The source style quotes book titles as well, a legacy of a magazine without ital
 p6.(iii) No capitals on offices or bodies: `the president`, `the administration`, `the department`.
 Capitals only on proper names.
 
-## p7. Typography
+## p7. Character set
 
-p7.(i) If the source text is ASCII: straight quotes, straight apostrophes, `...`, no diaeresis.
+p7.(i) Where the destination is UTF-8 and the text is read by a person, the correct characters are used, including the diaeresis of `p2` and the diacritics of any borrowed word: `naïve`, `façade`, `Erdős`.
 
-p7.(ii) Curly quotes, true ellipses, non-breaking spaces, and ligatures are produced by the renderer, never typed.
+p7.(ii) Where the destination requires ASCII, ASCII is used, and the closed form replaces the diaeresis: `cooperate`.
+That covers a filename, a path, a URL, an identifier, a shell command, a config value, a field a parser reads, and a terminal or font that cannot render the character.
 
-p7.(iii) A prose file that cannot be searched with plain ASCII has failed p7.(i) somewhere.
+p7.(iii) Straight quotes, straight apostrophes, and `...` in the stored text.
+Curly quotes, true ellipses, non-breaking spaces, and ligatures come from the renderer, never from the keyboard.
+The diaeresis is not typography: it marks pronunciation, so it is stored.
+
+p7.(iv) Nothing decorative in either case: no arrows, dingbats, emoji, box glyphs, or symbols standing in for words.
+
+p7.(v) A prose file that other tools read (grep, diff, a build step) is `technical`, not `prose`, and `o2` governs its characters.

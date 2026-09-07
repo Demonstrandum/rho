@@ -15,8 +15,10 @@ o0.(i) Four classes of text.
 `prose`: essays, letters, write-ups meant to be read rather than parsed.
 `verbatim`: anything quoted from a source.
 
-o0.(ii) Every rule below applies to `code` and `technical`.
+o0.(ii) Every rule below applies to `technical`, and in `code` to the prose parts of it: comments, commit messages, documentation strings, and log text.
+A literal, an identifier, and a path are governed by `o6.(i)` instead, where the parser decides.
 In `prose`, the `p` rules in `prose-style.md` override where they conflict, and every rule they do not name still holds.
+`p1`, spelling, holds in `technical` too.
 
 o0.(iii) `verbatim` overrides all classes.
 Quoted text keeps the punctuation and characters of its source, including the ones this file forbids.

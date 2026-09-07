@@ -49,7 +49,9 @@ test('the stated valid-rule set matches the actual Checks headings', () => {
     const content = readFileSync(skillPath, 'utf8');
     const headings = new Set(content.match(/^\d+\.\([ivx]+\)/gm));
 
-    const introMatch = content.match(/may cite are:([\s\S]*?)\. Any other number/);
+    // the list runs to its own line end under one sentence per line, so the
+    // gap before the next sentence is any whitespace, not a single space.
+    const introMatch = content.match(/may cite are:([\s\S]*?)\.\s+Any other number/);
     expect(introMatch).not.toBeNull();
     const stated = new Set(
         introMatch![1]

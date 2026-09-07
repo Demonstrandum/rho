@@ -52,6 +52,11 @@ describe('reflow', () => {
         expect(reflow(source)).toBe('{{#if patterns.length > 0}}\ntext here.\nmore.\n{{/if}}\n');
     });
 
+    test('normalises decomposed characters to NFC', () => {
+        const decomposed = 'A\u030A and coo\u0308perate.\n';
+        expect(reflow(decomposed)).toBe('\u00C5 and co\u00F6perate.\n');
+    });
+
     test('is idempotent', () => {
         const source = '# h\n\nsome prose. more prose that\nwraps.\n\n- a. b\n';
         const once = reflow(source);

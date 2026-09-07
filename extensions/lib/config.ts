@@ -273,6 +273,36 @@ const SCHEMA = {
             'in this list. an empty list leaves pi alone and keeps the report',
         ),
     },
+    history: {
+        persist: field(
+            'persist',
+            isOneOf('project', 'session', 'global', 'off'),
+            'project',
+            'where prompt history is stored. project: one log per working directory,',
+            'so prompts from any session in that dir are reachable. session: one log',
+            'per session, restored on resume. global: one log everywhere. off:',
+            'in memory only, pi\'s own 100-entry cap applies',
+        ),
+        maxEntries: field(
+            'max-entries',
+            isPosInt,
+            500,
+            'how many prompts to keep in the log. includes both sent and unsent',
+        ),
+        saveDrafts: field(
+            'save-drafts',
+            isBool,
+            true,
+            'capture unsent drafts when navigating away (arrow-up) or exiting',
+        ),
+        debounceMs: field(
+            'debounce-ms',
+            isPosInt,
+            750,
+            'how often to snapshot the in-progress draft while typing. a crash loses',
+            'at most this much typing',
+        ),
+    },
     input: {
         halfBlockEdges: field(
             'half-block-edges',

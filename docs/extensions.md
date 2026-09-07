@@ -18,6 +18,9 @@ details in `../anthropic-detection-findings.md`.
 nothing parses that block as xml: the tags group the listing and the model reads the text, so a description reading `Triggers: "analyze logs"` arrives as `&quot;analyze logs&quot;` and the model is shown a spelling of the trigger word that is not the trigger word.
 `&quot;`, `&apos;`, `&#39;`, and `&amp;` are undone on `before_agent_start`, ampersand last so an escaped entity survives as an entity; `&lt;` and `&gt;` are left alone, since an unescaped angle bracket in a description would look like a tag boundary.
 88 entities in this checkout, 440 characters.
+the indentation goes with them.
+pi indents `<skill>` by two spaces and its children by four, but a description carrying its own newlines puts every line after the first at column zero, so the listing is ragged rather than nested, and most skill descriptions are written that way.
+the tags already show the nesting, so the leading spaces are dropped and each description is trimmed, which also brings `</description>` back onto the last line of its text instead of a line of its own: another 169 characters here.
 
 ## writing
 

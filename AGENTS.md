@@ -15,7 +15,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   one line each below; the reasoning is in `docs/extensions.md` and in each file's header comment
   - `system-prompt.ts` assembles `system/prompt.md` and appends it in `before_agent_start`
   - `prompt-defingerprint.ts` rewrites the lines of pi's prompt that anthropic classifies as third-party, keeping OAuth requests on plan billing
-  - `skill-listing.ts` undoes pi's xml escaping of the `<available_skills>` block
+  - `skill-listing.ts` flattens pi's `<available_skills>` block: xml escapes undone, indentation dropped
   - `wordswap.ts` swaps overused phrases in finalized messages, from `assets/wordswap.json`; `/noswap` per message, `[wordswap]`
   - `auditor.ts` `/audit` reviews the last reply against the writer rules with a second model, `[audit]`
   - `stash.ts` `ctrl+s` parks the editor text, `ctrl+r` pops, `/stash` opens the picker, `[stash]`

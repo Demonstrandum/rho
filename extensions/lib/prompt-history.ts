@@ -142,4 +142,20 @@ export class HistoryLog {
         this.entries = [];
         this.persist();
     }
+
+    /** restore a previously removed entry (for undo). inserts by timestamp. */
+    restore(entry: HistoryEntry): void {
+        // find the right position by timestamp (newest first)
+        const index = this.entries.findIndex((e) => e.at < entry.at);
+        if (index === -1) {
+            this.entries.push(entry);
+        } else {
+            this.entries.splice(index, 0, entry);
+        }
+        // ensure nextId stays ahead of all ids
+        if (entry.id >= this.nextId) {
+            this.nextId = entry.id + 1;
+        }
+        this.persist();
+    }
 }

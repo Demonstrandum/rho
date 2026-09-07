@@ -29,6 +29,7 @@
     "prompt": "bun tools/prompt-explorer.ts",
     "prompt:cli": "bun tools/prompt-explorer.ts --cli",
     "prompt:preview": "bun tools/prompt-explorer.ts --preview",
+    "prompt:plain": "bun tools/prompt-explorer.ts --plain",
     "init": "bun tools/init-config.ts",
     "smoke": "bun ci/smoke.ts",
     "smoke:docker": "docker build -f ci/Dockerfile -t rho-smoke . && docker run --rm rho-smoke",

@@ -128,7 +128,7 @@ no symlinking, no manual setup.
   - `personal-rules.md` conventions, design, editing, tooling, writing
   - `writer-rules.md` ASD-STE100 derived prose standard (13 rule categories)
   - `orthography.md` `o` rules: the four registers (`code`, `technical`, `prose`, `verbatim`) and which rules each takes, punctuation placed by scope rather than by appearance, character substitutions, numbers, and one sentence per line
-  - `prose-style.md` `p` rules, for the `prose` register: British spelling with the `-ise`/`-ize` split stated by etymology, the diaeresis, exact numbers in digits and inexact ones spelled out, collective plurals, and New Yorker punctuation minus the typesetting habits
+  - `prose-style.md` `p` rules, for the `prose` register: British spelling with the `-ise`/`-ize` split stated by etymology, the diaeresis, exact numbers in digits and inexact ones spelled out, collective plurals, and close punctuation with the comma outside the closing quote
   - `vocabulary.md` sub-template for the word/pattern swap list (`{{WORDS}}`, `{{PATTERNS}}`)
 - `extensions/assets/spinners.json` spinner definitions keyed by name (each has `category`, `interval`, `frames`); the enabled categories live in `spinner.ts` (`chinese` by default)
 - `extensions/assets/maxims.txt` working messages, one per line, `;` comments, picked at random each turn

@@ -69,11 +69,12 @@ these apply to everything you write for me, across all projects.
   there the em dash is the correct mark and nothing else does its job.
   outside that, it is a tic: LLMs reach for it where a comma or a colon is what the sentence needs.
 - prefer all lower case, except keep names and brands stylised (TypeScript, Bun, pi, npm, GitHub, etc).
-  this governs what i write: replies, documentation, commit messages, comments.
-  a numbered standard (the writer rules, the `o` rules, the `p` rules) keeps sentence case, because a rule that is quoted back by number is read as a citation.
-- prefer ascii over unicode, unless forcing ascii becomes illegible.
-  examples: write `x_i` or `x[i]` not a unicode subscript, `x^i` not a superscript, `sum(x)` not a capital sigma, `sqrt(x)` not the radical sign, `->` not an arrow glyph.
-  in the `prose` register, `p7` decides instead: the correct characters where the destination renders utf-8, ascii where the destination requires it.
+- write notation in readable ascii rather than reaching for a unicode symbol: `->` not an arrow glyph, `x_i` or `x[i]` not a subscript, `x^i` not a superscript, `sum(x)` not a capital sigma, `sqrt(x)` not the radical sign, `<=` not the relation glyph.
+  the point is that ascii notation is legible everywhere and greppable; where forcing it becomes illegible, use the character.
+- letters are not notation.
+  a word's diacritics are its spelling, so naïve, façade, Erdős, and coöperate keep them wherever the destination renders utf-8, and a reply in the terminal is such a destination.
+  ascii-only destinations are the ones a parser reads: a filename, a path, an identifier, a shell command, a config value.
+  there the closed form is used.
 - no emojis.
 - keep comments and docstrings minimal.
   only write one when the code is non-trivial, when it adds context the code cannot show (why, not what), or as a genuine aside.
@@ -84,5 +85,5 @@ these apply to everything you write for me, across all projects.
 - write plainly, not performatively.
   do not build to a point, do not use rhetorical cadence, do not add a flourish to open or close.
   things i never want to see: hollow sign-offs ("done.
-  X is gone."), fake-insight contrasts ("this isn't just X, it's Y"), escalating triads, or teasing colons that promise significance ("and here's the interesting part:").
+  x is gone."), fake-insight contrasts ("this isn't just X, it's Y"), escalating triads, or teasing colons that promise significance ("and here's the interesting part:").
   just say what happened or what is true and stop.

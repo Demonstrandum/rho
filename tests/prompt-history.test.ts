@@ -25,6 +25,10 @@ describe('Editor API surface for prompt-history', () => {
         expect(typeof proto.getText).toBe('function');
     });
 
+    it('has exitHistoryBrowsing on prototype', () => {
+        expect(typeof proto.exitHistoryBrowsing).toBe('function');
+    });
+
     // instance fields: we cannot construct Editor without a TUI, so we
     // check the prototype descriptor does not exist (meaning it is an instance
     // field set in the constructor, which is the expected pattern).

@@ -5,11 +5,16 @@ personal [pi](https://pi.dev) dotfiles, packaged as a pi package (Bun + TypeScri
 ## features
 
 - **system prompt**: ASD-STE100 derived prose standard, writing conventions, and vocabulary rules assembled from fragments and injected at startup.
-- **word filter**: rewrites overused LLM phrases in finalized messages with absurd substitutes. covers all verb forms. supports random alternatives. bypass with `/noswap`.
-- **billing protection**: detects and avoids Anthropic's third-party billing classifier. monitors response headers for extra-usage routing.
+- **word filter**: rewrites overused LLM phrases in finalized messages with absurd substitutes.
+  covers all verb forms.
+  supports random alternatives.
+  bypass with `/noswap`.
+- **billing protection**: detects and avoids Anthropic's third-party billing classifier.
+  monitors response headers for extra-usage routing.
 - **spinner**: custom working indicator with shimmer animation, random working messages, random completion lines with templated values.
 - **startup and UI**: compact startup banner, custom footer, `/context` context-window visualisation.
-- **prose audit**: `/audit` sends the last reply to a second model (haiku by default) to be reviewed against the writing rules, outside the conversation. findings render in the transcript; sending a correction back to the agent is offered, never automatic, with the option to edit it first.
+- **prose audit**: `/audit` sends the last reply to a second model (haiku by default) to be reviewed against the writing rules, outside the conversation.
+  findings render in the transcript; sending a correction back to the agent is offered, never automatic, with the option to edit it first.
 - **commands**: `/audit` (prose review against the writing rules), `/cwd` (change directory mid-session), `/web` (launch pi-web UI).
 - **settings**: auto-configures terminal and display preferences on first run.
 - **bundled packages**: web browsing and librarian (pi-web-access), session rewind (pi-rewind), FTS5 knowledge base (context-mode), output speed display (token-rate-pi).
@@ -28,7 +33,8 @@ bundles my:
   - `auditor.ts` + `lib/audit.ts` add `/audit`, which reviews the last assistant reply against the writer rules with a separate model, through one forced-tool call to `ctx.modelRegistry.complete`; configured under `[audit]` in `rho.toml` (`model`, `feedback`, `timeout-ms`, `audience`)
   - `cwd.ts` adds `/cwd [path]` to change the agent's working directory mid-session
   - `web.ts` adds `/web` to launch the [pi-web](https://github.com/jmfederico/pi-web) UI as a background service (and `/web status|stop|logs|...` passthrough)
-  - `agentica.ts` adds an `agentica` tool (runs python that can call MCP tools via the Agentica MCP Runtime), ported from [MathisWellmann/nixos-config](https://github.com/MathisWellmann/nixos-config)'s `pi-agent.nix`. off by default: only registers when `RHO_AGENTICA_RUNTIME` points at an agentica-mcp-runtime checkout (`RHO_AGENTICA_PYTHON` overrides the interpreter, default `<runtime>/.venv/bin/python`); with the env unset it is a no-op
+  - `agentica.ts` adds an `agentica` tool (runs python that can call MCP tools via the Agentica MCP Runtime), ported from [MathisWellmann/nixos-config](https://github.com/MathisWellmann/nixos-config)'s `pi-agent.nix`.
+    off by default: only registers when `RHO_AGENTICA_RUNTIME` points at an agentica-mcp-runtime checkout (`RHO_AGENTICA_PYTHON` overrides the interpreter, default `<runtime>/.venv/bin/python`); with the env unset it is a no-op
 - **skills/**: on-demand capability packages (`SKILL.md`)
 - **prompts/**: reusable prompt templates (`/name` to expand)
 - **themes/**: `plan9` (light) and `plan9-dark`, plan9/acme-inspired
@@ -40,10 +46,9 @@ bundles my:
 
 ## install
 
-rho needs bun 1.2.0 or newer and pi 0.84.0 or newer. an older bun fails partway
-through the install with an error that names the wrong file, so the install
-checks the version first and says what to upgrade. run `bun run doctor` at any
-time for the same report.
+rho needs bun 1.2.0 or newer and pi 0.84.0 or newer.
+an older bun fails partway through the install with an error that names the wrong file, so the install checks the version first and says what to upgrade.
+run `bun run doctor` at any time for the same report.
 
 1. install Bun (needed to run pi and rho):
 
@@ -66,8 +71,8 @@ time for the same report.
    pi install git:github.com/Demonstrandum/rho
    ```
 
-   this registers the package in `~/.pi/agent/settings.json`. from now on, running
-   `pi` anywhere loads rho's extensions, skills, prompts, and rules automatically.
+this registers the package in `~/.pi/agent/settings.json`.
+from now on, running `pi` anywhere loads rho's extensions, skills, prompts, and rules automatically.
 
 4. select the theme once (persists in settings):
 
@@ -101,20 +106,14 @@ bun run doctor      # bun / node / pi versions and the pi package link
 bun run smoke       # start pi against a mock model and check it does not crash
 ```
 
-`bun run smoke` is the end-to-end check: it serves a local OpenAI-compatible
-model (`ci/mock-provider.ts`), then runs pi with this checkout as a package in a
-temporary config directory, once headless and once on a pseudo-terminal. it
-verifies that every extension loads, the system prompt is assembled and sent,
-the wordswap hook rewrites a finalized reply, a tool call completes, the startup
-header renders, and pi exits cleanly. no API key and no network are used, and
-nothing outside the temporary directory is read or written.
+`bun run smoke` is the end-to-end check: it serves a local OpenAI-compatible model (`ci/mock-provider.ts`), then runs pi with this checkout as a package in a temporary config directory, once headless and once on a pseudo-terminal.
+it verifies that every extension loads, the system prompt is assembled and sent, the wordswap hook rewrites a finalized reply, a tool call completes, the startup header renders, and pi exits cleanly.
+no API key and no network are used, and nothing outside the temporary directory is read or written.
 
-`bun run smoke:docker` runs the same checks in a clean container
-(`ci/Dockerfile`), which is what `.github/workflows/ci.yml` does on every push
-and once a day, so a pi release that breaks rho shows up there first.
+`bun run smoke:docker` runs the same checks in a clean container (`ci/Dockerfile`), which is what `.github/workflows/ci.yml` does on every push and once a day, so a pi release that breaks rho shows up there first.
 
-`bun run link` installs the working checkout project-locally, `bun run link:global`
-installs it globally. `/reload` in a session picks up changes without a restart.
+`bun run link` installs the working checkout project-locally, `bun run link:global` installs it globally.
+`/reload` in a session picks up changes without a restart.
 use `pi config` to enable/disable individual resources.
 
 ## layout
@@ -128,6 +127,5 @@ themes/       *.json
 
 resource paths are declared in `package.json` under the `pi` key.
 
-spinner and message content live in `extensions/spinners.json` and
-`extensions/maxims.txt`. change `ENABLED_CATEGORIES` in `extensions/spinner.ts`
-to switch spinner sets.
+spinner and message content live in `extensions/spinners.json` and `extensions/maxims.txt`.
+change `ENABLED_CATEGORIES` in `extensions/spinner.ts` to switch spinner sets.

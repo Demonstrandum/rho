@@ -69,8 +69,11 @@ these apply to everything you write for me, across all projects.
   there the em dash is the correct mark and nothing else does its job.
   outside that, it is a tic: LLMs reach for it where a comma or a colon is what the sentence needs.
 - prefer all lower case, except keep names and brands stylised (TypeScript, Bun, pi, npm, GitHub, etc).
+  this governs what i write: replies, documentation, commit messages, comments.
+  a numbered standard (the writer rules, the `o` rules, the `p` rules) keeps sentence case, because a rule that is quoted back by number is read as a citation.
 - prefer ascii over unicode, unless forcing ascii becomes illegible.
   examples: write `x_i` or `x[i]` not a unicode subscript, `x^i` not a superscript, `sum(x)` not a capital sigma, `sqrt(x)` not the radical sign, `->` not an arrow glyph.
+  in the `prose` register, `p7` decides instead: the correct characters where the destination renders utf-8, ascii where the destination requires it.
 - no emojis.
 - keep comments and docstrings minimal.
   only write one when the code is non-trivial, when it adds context the code cannot show (why, not what), or as a genuine aside.

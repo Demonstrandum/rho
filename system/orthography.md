@@ -10,8 +10,8 @@ a bare number from the reader is a correction: find what it names, repair it, an
 
 o0.(i) four classes of text.
 `code`: source, comments, commit messages, config, filenames, shell.
-`technical`: documentation, READMEs, issue and pull request text, specifications, and an explanatory reply to the reader.
-`prose`: essays, letters, write-ups meant to be read rather than parsed.
+`technical`: documentation, READMEs, issue and pull request text, specifications.
+`prose`: essays, letters, write-ups, and every reply printed to the reader, since a reply is read and never parsed.
 `verbatim`: anything quoted from a source.
 
 o0.(ii) the `o` rules govern `technical`, and govern the prose parts of `code`: comments, commit messages, documentation strings, log text.
@@ -30,10 +30,11 @@ o0.(v) the file extension is not the class.
 a `.md` file can be `prose` and a `.txt` file can be `technical`.
 when the class is not clear from the request, ask once.
 
-o0.(vi) the destination, not the register, decides the character set.
-a terminal, a rendered document, and a reply to the reader all render UTF-8, so a word keeps its own diacritics there in every register: `naïve`, `façade`, `Erdős`.
-a filename, a path, an identifier, a shell command, and a config value are read by a parser, so they take the closed ASCII form.
-notation is separate: an ASCII spelling such as `->` or `x_i` is used wherever it stays legible, in every register.
+o0.(vi) the register does not decide the character set.
+the only question is whether something downstream constrains the text to ASCII.
+where nothing does, and that is the usual case (a terminal, a rendered document, a markdown file, a reply to the reader), words are written correctly, with their diacritics and with the diaeresis: `naïve`, `façade`, `Erdős`, `coöperate`.
+where something does, the closed ASCII form is used: a filename, a path, an identifier, a shell command, a config value, a field a parser reads, a terminal or font that cannot render the character.
+notation is a separate question: an ASCII spelling such as `->` or `x_i` is used wherever it stays legible, in every register.
 
 ## o1. delimiters
 

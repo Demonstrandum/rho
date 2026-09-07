@@ -47,9 +47,8 @@ p2.(ii) not where the vowel pair is one sound: `cool`, `been`, `feed`, `noise`, 
 p2.(iii) not a hyphen and not a closed form.
 `coöperate`, not `co-operate` and not `cooperate`.
 
-p2.(iv) this register only.
-the diaeresis here is a convention of the style, not part of how the word is spelled elsewhere: `coöperate` is `cooperate` in `technical` and `code`, where the diacritic would break a search for the plain letters.
-a word whose own spelling carries a diacritic, such as `naïve`, keeps it in every register.
+p2.(iv) the closed form is used only where the text is constrained to ASCII: an identifier, a filename, a path, a shell command, a config value.
+prose, documentation, and a reply to the reader are not constrained, so they take the diaeresis.
 
 ## p3. numbers
 
@@ -117,10 +116,10 @@ capitals only on proper names.
 
 ## p7. character set
 
-p7.(i) where the destination is UTF-8 and a person reads the text, the correct characters are used, including the diaeresis and the diacritics of any borrowed word: `naïve`, `façade`, `Erdős`.
-a reply printed in the terminal is such a destination.
+p7.(i) words are written correctly, with the diacritics they carry and with the diaeresis: `naïve`, `façade`, `Erdős`, `coöperate`.
+this holds wherever nothing constrains the text to ASCII, which covers a terminal, a rendered document, a markdown file, and a reply to the reader.
 
-p7.(ii) where the destination requires ASCII, ASCII is used, and the closed form replaces the diaeresis: `cooperate`.
+p7.(ii) where something downstream reads the text as ASCII, the closed form is used: `cooperate`.
 that covers a filename, a path, a URL, an identifier, a shell command, a config value, a field a parser reads, and a terminal or font that cannot render the character.
 
 p7.(iii) straight quotes, straight apostrophes, and `...` in the stored text.
@@ -129,4 +128,5 @@ the diaeresis is not typography: it marks pronunciation, so it is stored.
 
 p7.(iv) nothing decorative in either case: no arrows, dingbats, emoji, box glyphs, or symbols standing in for words.
 
-p7.(v) a prose file that other tools read (grep, diff, a build step) is `technical`, not `prose`, and takes the plain characters of that register.
+p7.(v) grep and diff read UTF-8, so neither is a reason to drop a diacritic.
+the reason to drop one is a destination that cannot carry it.

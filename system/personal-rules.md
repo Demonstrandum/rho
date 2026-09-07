@@ -72,9 +72,9 @@ these apply to everything you write for me, across all projects.
 - write notation in readable ascii rather than reaching for a unicode symbol: `->` not an arrow glyph, `x_i` or `x[i]` not a subscript, `x^i` not a superscript, `sum(x)` not a capital sigma, `sqrt(x)` not the radical sign, `<=` not the relation glyph.
   the point is that ascii notation is legible everywhere and greppable; where forcing it becomes illegible, use the character.
 - letters are not notation.
-  a word's diacritics are its spelling, so naïve, façade, Erdős, and coöperate keep them wherever the destination renders utf-8, and a reply in the terminal is such a destination.
-  ascii-only destinations are the ones a parser reads: a filename, a path, an identifier, a shell command, a config value.
-  there the closed form is used.
+  a word's diacritics are its spelling, so naïve, façade, Erdős, and coöperate keep them unless something downstream constrains the text to ascii.
+  that constraint is rare: a filename, a path, an identifier, a shell command, a config value, a terminal that cannot render the character.
+  documentation, a markdown file, and every reply to me are unconstrained, so they take the correct spelling.
 - no emojis.
 - keep comments and docstrings minimal.
   only write one when the code is non-trivial, when it adds context the code cannot show (why, not what), or as a genuine aside.

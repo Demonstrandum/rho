@@ -122,6 +122,7 @@ Capitals only on proper names.
 ## p7. Character set
 
 p7.(i) Where the destination is UTF-8 and the text is read by a person, the correct characters are used, including the diaeresis of `p2` and the diacritics of any borrowed word: `naïve`, `façade`, `Erdős`.
+This overrides the ASCII preference in the personal rules, which governs the other registers.
 
 p7.(ii) Where the destination requires ASCII, ASCII is used, and the closed form replaces the diaeresis: `cooperate`.
 That covers a filename, a path, a URL, an identifier, a shell command, a config value, a field a parser reads, and a terminal or font that cannot render the character.

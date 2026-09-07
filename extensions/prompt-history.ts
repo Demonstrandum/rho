@@ -24,6 +24,7 @@ import { config } from './lib/config';
 const STATE_NAME = 'prompt-history';
 const PREVIEW_CHARS = 72;
 const KEY_DELETE = 'd';
+const KEY_UNDO = 'u';
 
 // branded symbol so we can mark editors as seeded without polluting the type
 const SEEDED = Symbol('rho-history-seeded');
@@ -197,8 +198,66 @@ export default function (pi: ExtensionAPI) {
         };
     }
 
-    // store entries by value for lookup after selection
-    const entryByValue = new Map<string, HistoryEntry>();
+    type PickerResult =
+        | { readonly kind: 'select'; readonly id: HistoryEntryId }
+        | { readonly kind: 'delete'; readonly id: HistoryEntryId; readonly index: number }
+        | { readonly kind: 'undo' }
+        | { readonly kind: 'cancel' };
+
+    // one showing of the picker. delete/undo reopen it since SelectList has no setter.
+    const showPicker = (
+        context: ExtensionContext,
+        entries: readonly HistoryEntry[],
+        cursor: number,
+        canUndo: boolean,
+    ) =>
+        context.ui.custom<PickerResult>((tui: TUI, theme: Theme, _kb: unknown, done: (r: PickerResult) => void) => {
+            const items = entries.map(makeItem);
+            const listTheme: SelectListTheme = {
+                selectedPrefix: (t: string) => theme.fg('accent', t),
+                selectedText: (t: string) => theme.fg('accent', t),
+                description: (t: string) => theme.fg('muted', t),
+                scrollInfo: (t: string) => theme.fg('dim', t),
+                noMatch: (t: string) => theme.fg('warning', t),
+            };
+
+            const list = new SelectList(items, Math.min(items.length, 12), listTheme);
+            list.setSelectedIndex(cursor);
+            list.onSelect = (selected) => done({ kind: 'select', id: Number(selected.value) as HistoryEntryId });
+            list.onCancel = () => done({ kind: 'cancel' });
+
+            const container = new Container();
+            container.addChild(new DynamicBorder((s: string) => theme.fg('accent', s)));
+            container.addChild(new Text(theme.fg('accent', theme.bold(`prompt history (${items.length})`)), 1, 0));
+            container.addChild(list);
+            const keys = ['up/down move', 'enter select', 'd delete'];
+            if (canUndo) keys.push('u undo');
+            keys.push('esc cancel');
+            container.addChild(new Text(theme.fg('dim', keys.join(', ')), 1, 0));
+            container.addChild(new DynamicBorder((s: string) => theme.fg('accent', s)));
+
+            return {
+                render: (w: number) => container.render(w),
+                invalidate: () => container.invalidate(),
+                handleInput: (data: string) => {
+                    if (matchesKey(data, KEY_DELETE)) {
+                        const selected = list.getSelectedItem();
+                        if (selected) {
+                            const id = Number(selected.value) as HistoryEntryId;
+                            const index = entries.findIndex((e) => e.id === id);
+                            done({ kind: 'delete', id, index });
+                        }
+                        return;
+                    }
+                    if (canUndo && matchesKey(data, KEY_UNDO)) {
+                        done({ kind: 'undo' });
+                        return;
+                    }
+                    list.handleInput(data);
+                    tui.requestRender();
+                },
+            };
+        });
 
     pi.registerCommand('history', {
         description: 'browse and search prompt history',
@@ -208,68 +267,49 @@ export default function (pi: ExtensionAPI) {
                 return;
             }
 
-            const entries = log.all();
-            if (entries.length === 0) {
-                context.ui.notify('no prompt history');
-                return;
-            }
+            // undo stack for deletions within this picker session
+            const undoStack: HistoryEntry[] = [];
+            let cursor = 0;
 
-            // populate lookup map
-            entryByValue.clear();
-            for (const entry of entries) {
-                entryByValue.set(String(entry.id), entry);
-            }
+            for (;;) {
+                const entries = log.all();
+                if (entries.length === 0) {
+                    context.ui.notify('no prompt history');
+                    return;
+                }
 
-            const items = entries.map(makeItem);
+                const result = await showPicker(
+                    context,
+                    entries,
+                    Math.min(cursor, entries.length - 1),
+                    undoStack.length > 0,
+                );
 
-            const result = await context.ui.custom<HistoryEntryId | null>(
-                (tui: TUI, theme: Theme, _kb: unknown, done: (result: HistoryEntryId | null) => void) => {
-                    const listTheme: SelectListTheme = {
-                        selectedPrefix: (t: string) => theme.fg('accent', t),
-                        selectedText: (t: string) => theme.fg('accent', t),
-                        description: (t: string) => theme.fg('muted', t),
-                        scrollInfo: (t: string) => theme.fg('dim', t),
-                        noMatch: (t: string) => theme.fg('warning', t),
-                    };
+                if (result.kind === 'cancel') return;
 
-                    const list = new SelectList(items, Math.min(items.length, 12), listTheme);
-                    list.onSelect = (selected) => {
-                        done(Number(selected.value) as HistoryEntryId);
-                    };
-                    list.onCancel = () => done(null);
+                if (result.kind === 'select') {
+                    const entry = entries.find((e) => e.id === result.id);
+                    if (entry) context.ui.setEditorText(entry.text);
+                    return;
+                }
 
-                    const container = new Container();
-                    container.addChild(new DynamicBorder((s: string) => theme.fg('accent', s)));
-                    container.addChild(new Text(theme.fg('accent', theme.bold(`prompt history (${items.length})`)), 1, 0));
-                    container.addChild(list);
-                    container.addChild(new Text(theme.fg('dim', 'up/down move, enter select, d delete, esc cancel'), 1, 0));
-                    container.addChild(new DynamicBorder((s: string) => theme.fg('accent', s)));
+                if (result.kind === 'delete') {
+                    const entry = entries.find((e) => e.id === result.id);
+                    if (entry) {
+                        undoStack.push(entry);
+                        log.remove(result.id);
+                    }
+                    cursor = result.index;
+                    continue;
+                }
 
-                    return {
-                        render: (w: number) => container.render(w),
-                        invalidate: () => container.invalidate(),
-                        handleInput: (data: string) => {
-                            if (matchesKey(data, KEY_DELETE)) {
-                                const selected = list.getSelectedItem();
-                                if (selected) {
-                                    const id = Number(selected.value) as HistoryEntryId;
-                                    log!.remove(id);
-                                    // close picker after delete since we can't update the list
-                                    done(null);
-                                }
-                                return;
-                            }
-                            list.handleInput(data);
-                            tui.requestRender();
-                        },
-                    };
-                },
-            );
-
-            if (result !== null) {
-                const entry = entryByValue.get(String(result));
-                if (entry) {
-                    context.ui.setEditorText(entry.text);
+                if (result.kind === 'undo') {
+                    const entry = undoStack.pop();
+                    if (entry) {
+                        // re-add to log (record deduplicates, so we insert directly)
+                        log.restore(entry);
+                    }
+                    continue;
                 }
             }
         },

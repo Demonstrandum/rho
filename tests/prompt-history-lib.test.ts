@@ -1,7 +1,7 @@
 // unit tests for the prompt history state machine
 
 import { describe, expect, it, beforeEach } from 'bun:test';
-import { HistoryLog, parseHistoryState, HISTORY_STATE_VERSION, type HistoryState } from '../extensions/lib/prompt-history';
+import { HistoryLog, parseHistoryState, HISTORY_STATE_VERSION, type HistoryState, type HistoryEntry, type HistoryEntryId } from '../extensions/lib/prompt-history';
 
 describe('HistoryLog', () => {
     let log: HistoryLog;
@@ -96,6 +96,31 @@ describe('HistoryLog', () => {
         const results = log.search('hello');
         expect(results.length).toBe(1);
         expect(results[0].text).toBe('Hello World');
+    });
+
+    it('restores a removed entry in correct position', () => {
+        // create entries with distinct timestamps
+        const base = Date.now();
+        const e1: HistoryEntry = { id: 1 as HistoryEntryId, text: 'first', at: base, sent: true };
+        const e2: HistoryEntry = { id: 2 as HistoryEntryId, text: 'second', at: base + 100, sent: true };
+        const e3: HistoryEntry = { id: 3 as HistoryEntryId, text: 'third', at: base + 200, sent: true };
+        const initial: HistoryState = {
+            version: HISTORY_STATE_VERSION,
+            entries: [e3, e2, e1], // newest first
+            nextId: 4,
+        };
+        const localLog = new HistoryLog({ initial });
+        // remove middle entry
+        localLog.remove(e2.id);
+        expect(localLog.size).toBe(2);
+        // restore it
+        localLog.restore(e2);
+        expect(localLog.size).toBe(3);
+        // order should be: third, second, first (by timestamp, newest first)
+        const all = localLog.all();
+        expect(all[0].id).toBe(e3.id);
+        expect(all[1].id).toBe(e2.id);
+        expect(all[2].id).toBe(e1.id);
     });
 });
 

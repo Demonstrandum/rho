@@ -97,6 +97,7 @@ export default function (pi: ExtensionAPI) {
     type EditorProto = {
         submitValue: () => void;
         navigateHistory: (direction: number) => void;
+        exitHistoryBrowsing: () => void;
         getText: () => string;
         history: string[];
         historyIndex: number;
@@ -131,6 +132,16 @@ export default function (pi: ExtensionAPI) {
         }
 
         originalNavigateHistory.call(this, direction);
+    };
+
+    // pi's exitHistoryBrowsing nulls out historyDraft when you type while
+    // browsing, which breaks arrow-down restore. patch it to preserve the draft.
+    const originalExitHistoryBrowsing = proto.exitHistoryBrowsing;
+    proto.exitHistoryBrowsing = function (this: EditorProto) {
+        const savedDraft = this.historyDraft;
+        originalExitHistoryBrowsing.call(this);
+        // restore the draft so arrow-down can still reach it
+        this.historyDraft = savedDraft;
     };
 
     // wrap onChange for debounced draft capture

@@ -4,7 +4,7 @@ personal [pi](https://pi.dev) dotfiles, packaged as a pi package (Bun + TypeScri
 
 ## features
 
-- **system prompt**: ASD-STE100 derived prose standard, writing conventions, and vocabulary rules assembled from fragments and injected at startup.
+- **system prompt**: ASD-STE100 derived prose standard, orthography and prose-style rules, writing conventions, and vocabulary rules assembled from fragments in `system/` and injected at startup.
 - **word filter**: rewrites overused LLM phrases in finalized messages with absurd substitutes.
   covers all verb forms.
   supports random alternatives.
@@ -12,10 +12,11 @@ personal [pi](https://pi.dev) dotfiles, packaged as a pi package (Bun + TypeScri
 - **billing protection**: detects and avoids Anthropic's third-party billing classifier.
   monitors response headers for extra-usage routing.
 - **spinner**: custom working indicator with shimmer animation, random working messages, random completion lines with templated values.
-- **startup and UI**: compact startup banner, custom footer, `/context` context-window visualisation.
+- **startup and UI**: compact startup banner, custom footer, styled input field, half-block box padding, capped inline image height, `/context` context-window visualisation.
 - **prose audit**: `/audit` sends the last reply to a second model (haiku by default) to be reviewed against the writing rules, outside the conversation.
   findings render in the transcript; sending a correction back to the agent is offered, never automatic, with the option to edit it first.
-- **commands**: `/audit` (prose review against the writing rules), `/cwd` (change directory mid-session), `/web` (launch pi-web UI).
+- **editor**: `ctrl+s` parks a prompt on a stack and `ctrl+r` pops it, prompt history that survives a restart, `ctrl+enter` cuts into a running turn.
+- **commands**: `/audit` (prose review), `/cwd` (change directory mid-session), `/stash`, `/history`, `/search` (pi's own commands and docs), `/context`, `/rho config`, `/web` (launch pi-web UI).
 - **settings**: auto-configures terminal and display preferences on first run.
 - **bundled packages**: web browsing and librarian (pi-web-access), session rewind (pi-rewind), FTS5 knowledge base (context-mode), output speed display (token-rate-pi).
 - **themes**: plan9 and plan9-dark.
@@ -24,17 +25,19 @@ personal [pi](https://pi.dev) dotfiles, packaged as a pi package (Bun + TypeScri
 
 bundles my:
 
-- **extensions/**: TypeScript modules that add tools, commands, ui, hooks
-  - `personal-rules.ts` appends my coding/writing rules to the system prompt every session
-  - `spinner.ts` sets the working indicator and shimmering message from `spinners.json` + `maxims.txt` (chinese spinners by default; shimmer adapted from [pi-claude-shimmer](https://github.com/ouzhenkun/pi-claude-shimmer), MIT)
-  - `startup.ts` hides pi's built-in startup block (`quietStartup`) and renders a compact bold-inline header (logo + `prompts`/`skills`/`commands`/`themes` on one line each) via `setHeader`
-  - `silence-extra-usage-warning.ts` persists `warnings.anthropicExtraUsage=false` so the subscription-billing notice is not shown every session
-  - `footer.ts` replaces the built-in footer to swap the token arrow glyphs
+- **extensions/**: TypeScript modules that add tools, commands, ui, hooks.
+  `AGENTS.md` lists all of them in one line each, and `docs/extensions.md` says why each is built the way it is.
+  a few worth naming here:
+  - `system-prompt.ts` assembles the rules in `system/` and appends them every session
+  - `wordswap.ts` rewrites overused phrases in finalized messages, from `extensions/assets/wordswap.json`
+  - `spinner.ts` sets the working indicator and shimmering message from `assets/spinners.json` and `assets/maxims.txt` (chinese spinners by default; shimmer adapted from [pi-claude-shimmer](https://github.com/ouzhenkun/pi-claude-shimmer), MIT)
   - `auditor.ts` + `lib/audit.ts` add `/audit`, which reviews the last assistant reply against the writer rules with a separate model, through one forced-tool call to `ctx.modelRegistry.complete`; configured under `[audit]` in `rho.toml` (`model`, `feedback`, `timeout-ms`, `audience`)
-  - `cwd.ts` adds `/cwd [path]` to change the agent's working directory mid-session
+  - `stash.ts`, `prompt-history.ts`, `send-now.ts` editor stack, persistent history, and a key that cuts into a running turn
+  - `search.ts` adds `/search` and a `pi_search` tool over pi's own commands and documentation
   - `web.ts` adds `/web` to launch the [pi-web](https://github.com/jmfederico/pi-web) UI as a background service (and `/web status|stop|logs|...` passthrough)
   - `agentica.ts` adds an `agentica` tool (runs python that can call MCP tools via the Agentica MCP Runtime), ported from [MathisWellmann/nixos-config](https://github.com/MathisWellmann/nixos-config)'s `pi-agent.nix`.
     off by default: only registers when `RHO_AGENTICA_RUNTIME` points at an agentica-mcp-runtime checkout (`RHO_AGENTICA_PYTHON` overrides the interpreter, default `<runtime>/.venv/bin/python`); with the env unset it is a no-op
+- **system/**: the system prompt fragments (`personal-rules.md`, `writer-rules.md`, `orthography.md`, `prose-style.md`, `vocabulary.md`)
 - **skills/**: on-demand capability packages (`SKILL.md`)
 - **prompts/**: reusable prompt templates (`/name` to expand)
 - **themes/**: `plan9` (light) and `plan9-dark`, plan9/acme-inspired
@@ -119,13 +122,22 @@ use `pi config` to enable/disable individual resources.
 ## layout
 
 ```
-extensions/   *.ts / *.js (auto-discovered)
-skills/       SKILL.md folders + top-level *.md
-prompts/      *.md
-themes/       *.json
+extensions/         *.ts (auto-discovered, top level only)
+extensions/lib/     shared modules, not loaded as extensions
+extensions/assets/  spinners.json, maxims.txt, verbs.txt, wordswap.json
+system/             system prompt fragments
+skills/             SKILL.md folders + top-level *.md
+prompts/            *.md
+themes/             *.json
+docs/               why each extension is built the way it is
+tools/              doctor, prompt explorer, reflow, one-off probes
+ci/                 mock provider, smoke test, Dockerfile
 ```
 
 resource paths are declared in `package.json` under the `pi` key.
 
-spinner and message content live in `extensions/spinners.json` and `extensions/maxims.txt`.
+spinner and message content live in `extensions/assets/spinners.json`, `maxims.txt`, and `verbs.txt`.
 change `ENABLED_CATEGORIES` in `extensions/spinner.ts` to switch spinner sets.
+other behaviour is configured in `rho.toml`; `/rho config` prints the live values.
+
+`bun run prompt:plain` prints the assembled rules, `bun run prompt:full` prints the whole system prompt a session sends.

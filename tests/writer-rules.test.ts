@@ -15,19 +15,19 @@ test('writer-rules.md exists and is non-empty', () => {
 test('writer-rules.md contains the expected rule sections', () => {
     const content = readFileSync(rulesPath, 'utf8');
     const expectedSections = [
-        '## 1. Assertions',
-        '## 2. Terms',
-        '## 3. Compression',
-        '## 4. Presupposition',
-        '## 5. Figures',
-        '## 6. Vocabulary',
-        '## 7. Sentences',
-        '## 8. Rhetoric',
-        '## 9. Endings',
-        '## 10. Register',
-        '## 11. Commentary',
-        '## 12. Formatting',
-        '## 13. Failure and correction',
+        '## 1. assertions',
+        '## 2. terms',
+        '## 3. compression',
+        '## 4. presupposition',
+        '## 5. figures',
+        '## 6. vocabulary',
+        '## 7. sentences',
+        '## 8. rhetoric',
+        '## 9. endings',
+        '## 10. register',
+        '## 11. commentary',
+        '## 12. formatting',
+        '## 13. failure and correction',
     ];
     for (const section of expectedSections) {
         expect(content).toContain(section);
@@ -36,8 +36,8 @@ test('writer-rules.md contains the expected rule sections', () => {
 
 test('writer-rules.md references the auditor and the filter', () => {
     const content = readFileSync(rulesPath, 'utf8');
-    expect(content).toContain('## Audit');
-    expect(content).toContain('## Filter');
+    expect(content).toContain('## audit');
+    expect(content).toContain('## filter');
 });
 
 test('PromptLoader resolves includes and evaluates expressions', () => {

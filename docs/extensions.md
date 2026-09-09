@@ -18,6 +18,14 @@ the block is built once and reused, because it sits in the cached prefix of ever
 the working directory and the model can change mid-session (`/cwd`, `ctrl+l`), and those do rebuild it, since one cache miss is cheaper than a prompt that names the wrong model.
 every line is switchable from `[env]`.
 
+`git-snapshot.ts` + `lib/git-snapshot.ts` append a `<git>` block: the branch and its divergence from upstream, the dirty files, and the last few commit subjects.
+without it a session opens with the agent running `git status` and `git log` by hand to learn what it is standing in, and an agent that skips those edits from a wrong picture of the tree.
+the read starts at `session_start` and is awaited at the first turn: `git status` on a large work tree is not instant and `session_start` is awaited during startup, so blocking there delays the first paint, while by the time a prompt has been typed the read has finished.
+a read that has not finished is dropped rather than waited on, and so is a directory that is not a work tree.
+the dirty list is capped by `[git] max-files` and what is dropped is reported as a count, because a truncated list read as complete asserts a cleanliness that is not there.
+the block states that it does not update, which is the part that matters on a resume: the read runs again for every session, so the text is at worst one session old, and the agent is told to look again before acting on it.
+`lib/git-snapshot.ts` holds the parsing and the rendering, so both are testable without a repository.
+
 `prompt-defingerprint.ts` rewrites the lines of pi's built-in system prompt that anthropic's server-side classifier signatures as third-party (the pi documentation section); requests carrying them are routed to extra-usage billing only, so the rewrite keeps subscription OAuth requests on plan billing.
 details in `../anthropic-detection-findings.md`.
 

@@ -59,6 +59,25 @@ these apply to everything you write for me, across all projects.
   leave the working tree alone.
   if you genuinely need to set changes aside, stop and ask me, or make a commit on a branch so nothing is lost.
 
+## risky actions
+
+- local and reversible is yours to do: reading, editing, running tests, committing.
+  ask me first for anything hard to reverse or visible to anyone else.
+- that covers: pushing, force-pushing, deleting a branch or a remote ref, `reset --hard`, `checkout`/`restore`/`clean` over uncommitted work, amending a published commit, removing or downgrading a dependency, editing CI configuration, opening or closing or commenting on a PR or an issue, sending a message anywhere, and uploading anything to a third-party service.
+- a paste site, a gist, and a diagram renderer are publication.
+  read the content for anything private before it goes, and assume a delete does not unpublish it.
+- approving one action approves that action, not the class.
+  a push i asked for last turn is not a standing licence to push.
+  a durable instruction in this file or in `AGENTS.md` is the only thing that grants one.
+- run `git status` before any command that can discard uncommitted work, and commit what you find rather than losing it.
+  a file you created this session is yours to delete freely.
+- unfamiliar state (a branch, a lock file, an untracked file, a config you did not write) is someone's work in progress until shown otherwise.
+  investigate it, do not clear it.
+  where something must move out of the way, rename it or commit it rather than deleting it.
+- an obstacle is not a reason to reach for the destructive shortcut.
+  fix the cause rather than passing `--no-verify`, `--force`, or `-f` to get past the check that found it.
+- when a run fails, fix the code rather than the test that caught it, unless the test is what is wrong.
+
 ## writing
 
 - no em dashes in technical writing.

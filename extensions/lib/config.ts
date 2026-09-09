@@ -411,6 +411,40 @@ const SCHEMA = {
             'too. the /search command is registered either way',
         ),
     },
+    env: {
+        enabled: field(
+            'enabled',
+            isBool,
+            true,
+            'append an <env> block naming the working directory, the platform, the',
+            'date, and the model, so none of it costs a tool call',
+        ),
+        git: field(
+            'git',
+            isBool,
+            true,
+            'whether the block says if the working directory is a git work tree',
+        ),
+        platform: field(
+            'platform',
+            isBool,
+            true,
+            'whether the block names the operating system and its release',
+        ),
+        date: field(
+            'date',
+            isBool,
+            true,
+            "today's date, frozen at session start. without it a model dates things",
+            'from its training cutoff',
+        ),
+        model: field(
+            'model',
+            isBool,
+            true,
+            'whether the block names the active model and thinking level',
+        ),
+    },
     render: {
         halfBlocks: field(
             'half-blocks',

@@ -11,6 +11,13 @@ resolves `{{include:...}}` directives, fills `{{WORDS}}`/`{{PATTERNS}}` variable
 
 `lib/prompt-loader.ts` `PromptLoader` class: reads a template, resolves includes, fills variables, caches.
 
+`env-block.ts` appends an `<env>` block stating the working directory, whether it is a git work tree, the platform and its release, the date, and the active model with its thinking level.
+pi gives the working directory and then says the agent can inspect `PI_*` environment variables for the rest, which is a shell call for something a line of text can carry.
+the date is the one that matters most: with no date in the prompt a model reasons from its training cutoff and dates every recent release wrongly.
+the block is built once and reused, because it sits in the cached prefix of every request and a byte that changes between turns invalidates the cache from that point on; a session running past midnight would otherwise pay a full re-read for a date nobody asked for.
+the working directory and the model can change mid-session (`/cwd`, `ctrl+l`), and those do rebuild it, since one cache miss is cheaper than a prompt that names the wrong model.
+every line is switchable from `[env]`.
+
 `prompt-defingerprint.ts` rewrites the lines of pi's built-in system prompt that anthropic's server-side classifier signatures as third-party (the pi documentation section); requests carrying them are routed to extra-usage billing only, so the rewrite keeps subscription OAuth requests on plan billing.
 details in `../anthropic-detection-findings.md`.
 

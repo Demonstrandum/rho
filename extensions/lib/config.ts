@@ -473,6 +473,23 @@ const SCHEMA = {
             'give up on git status and git log after this long and append no block',
         ),
     },
+    scratch: {
+        location: field(
+            'location',
+            isOneOf('project', 'data-dir', 'off'),
+            'project',
+            'where the session scratch directory goes. project puts it in',
+            '.rho/scratch/<session>/ inside the working tree, where a workspace-confined',
+            'tool can still read it; data-dir puts it under the rho data directory;',
+            'off registers nothing and leaves /tmp as the only option',
+        ),
+        keepDays: field(
+            'keep-days',
+            isPosInt,
+            7,
+            'remove scratch directories untouched for this many days, when a session opens',
+        ),
+    },
     render: {
         halfBlocks: field(
             'half-blocks',

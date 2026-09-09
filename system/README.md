@@ -18,7 +18,7 @@ resolution order: includes first, then variables, then blank-line cleanup.
 
 | file | what it governs |
 |---|---|
-| `personal-rules.md` | conventions, design, editing, tooling, writing |
+| `personal-rules.md` | conventions, design, editing, tooling, risky actions, writing |
 | `writer-rules.md` | ASD-STE100 derived prose standard (13 rule categories) |
 | `orthography.md` | registers, punctuation scope, characters, numbers, one sentence per line (`o` rules) |
 | `prose-style.md` | the `prose` register: British spelling, diaeresis, numbers, agreement, punctuation (`p` rules) |

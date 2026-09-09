@@ -50,7 +50,7 @@ if an entry here is growing past two lines, that is the signal to move it.
 - `themes/` color themes (`.json`)
 - `system/` the system prompt, assembled from fragments (see `system/README.md`)
   - `prompt.md` master template; shows the full shape with `{{include:...}}` directives
-  - `personal-rules.md` conventions, design, editing, tooling, writing
+  - `personal-rules.md` conventions, design, editing, tooling, risky actions, writing
   - `writer-rules.md` ASD-STE100 derived prose standard (13 rule categories)
   - `orthography.md` `o` rules: the four registers (`code`, `technical`, `prose`, `verbatim`) and which rules each takes, punctuation placed by scope rather than by appearance, character substitutions, numbers, and one sentence per line
   - `prose-style.md` `p` rules, for the `prose` register: British spelling with the `-ise`/`-ize` split stated by etymology, the diaeresis, exact numbers in digits and inexact ones spelled out, collective plurals, and close punctuation with the comma outside the closing quote

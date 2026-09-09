@@ -445,6 +445,34 @@ const SCHEMA = {
             'whether the block names the active model and thinking level',
         ),
     },
+    git: {
+        snapshot: field(
+            'snapshot',
+            isBool,
+            true,
+            'append a <git> block naming the branch, its divergence from upstream, the',
+            'dirty files, and the last few commits, read once at session start',
+        ),
+        commits: field(
+            'commits',
+            isPosInt,
+            5,
+            'how many recent commit subjects the block carries',
+        ),
+        maxFiles: field(
+            'max-files',
+            isPosInt,
+            20,
+            'cap on the dirty-file list, so a repo mid-rebase cannot flood the prompt.',
+            'what is dropped is reported as a count',
+        ),
+        timeoutMs: field(
+            'timeout-ms',
+            isPosInt,
+            2_000,
+            'give up on git status and git log after this long and append no block',
+        ),
+    },
     render: {
         halfBlocks: field(
             'half-blocks',

@@ -15,6 +15,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   one line each below; the reasoning is in `docs/extensions.md` and in each file's header comment
   - `system-prompt.ts` assembles `system/prompt.md` and appends it in `before_agent_start`
   - `env-block.ts` appends an `<env>` block: cwd, git work tree, platform, date, model, `[env]`
+  - `git-snapshot.ts` appends a `<git>` block: branch, upstream divergence, dirty files, recent commits, `[git]`
   - `prompt-defingerprint.ts` rewrites the lines of pi's prompt that anthropic classifies as third-party, keeping OAuth requests on plan billing
   - `skill-listing.ts` flattens pi's `<available_skills>` block: xml escapes undone, indentation dropped
   - `wordswap.ts` swaps overused phrases in finalized messages, from `assets/wordswap.json`; `/noswap` per message, `[wordswap]`

@@ -26,6 +26,15 @@ the dirty list is capped by `[git] max-files` and what is dropped is reported as
 the block states that it does not update, which is the part that matters on a resume: the read runs again for every session, so the text is at worst one session old, and the agent is told to look again before acting on it.
 `lib/git-snapshot.ts` holds the parsing and the rendering, so both are testable without a repository.
 
+`scratchpad.ts` + `lib/scratchpad.ts` give the session one directory for intermediate files, name it in a `<scratch>` block, and export it as `RHO_SCRATCH` so a bash call reaches it without the path being retyped.
+the alternative is what happened before it: temporary work goes to `/tmp`, mixed with every other process's files, surviving the session, and refused by any tool confined to the workspace.
+context-mode rejects a read outside the project root, so a `/tmp` file written by bash cannot then be summarised by `ctx_execute_file`.
+that refusal decides the default location: `.rho/scratch/<session>/` inside the working tree is readable by every tool and needs one `.gitignore` line.
+`[scratch] location = data-dir` moves it under the rho data directory for a working tree that must stay untouched, and `off` registers nothing.
+a session id keeps two concurrent sessions in one project apart, and an in-memory session shares one directory, which is the choice `lib/state-store.ts` makes for the same case.
+directories untouched for `[scratch] keep-days` are removed when a session opens.
+a working tree that cannot be written to yields no scratch directory rather than a failed session.
+
 `prompt-defingerprint.ts` rewrites the lines of pi's built-in system prompt that anthropic's server-side classifier signatures as third-party (the pi documentation section); requests carrying them are routed to extra-usage billing only, so the rewrite keeps subscription OAuth requests on plan billing.
 details in `../anthropic-detection-findings.md`.
 

@@ -3,6 +3,8 @@ node_modules/
 # project-local package
 .pi/
 *.log
+# per-session scratch directory, from scratchpad.ts ([scratch] location)
+.rho/
 .DS_Store
 ._*
 _*.*

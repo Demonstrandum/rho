@@ -14,6 +14,7 @@ if an entry here is growing past two lines, that is the signal to move it.
 - `extensions/` typescript extensions (tools, commands, ui, hooks), auto-discovered from top-level `*.ts`.
   one line each below; the reasoning is in `docs/extensions.md` and in each file's header comment
   - `system-prompt.ts` assembles `system/prompt.md` and appends it in `before_agent_start`
+  - `bun-runtime.ts` stops a node session: patches pi's shebang to bun, re-runs under bun, else exits with a note, `[runtime]`
   - `env-block.ts` appends an `<env>` block: cwd, git work tree, platform, date, model, `[env]`
   - `git-snapshot.ts` appends a `<git>` block: branch, upstream divergence, dirty files, recent commits, `[git]`
   - `scratchpad.ts` gives the session a scratch directory, names it in the prompt and in `RHO_SCRATCH`, `[scratch]`
@@ -44,7 +45,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `web.ts` `/web` runs the pi-web UI as a background service.
   - `rho.ts` `/rho config` shows and writes the live `rho.toml`
   - `agentica.ts` an `agentica` MCP tool, registered only when `RHO_AGENTICA_RUNTIME` is set.
-  - `lib/` shared modules, in a subdirectory so auto-discovery does not load them: `config.ts` (`rho.toml`), `state-store.ts` (on-disk extension state, scoped global/project/session), `settings-store.ts` (idempotent settings writes), `prompt-loader.ts`, `disenshittification.ts` (the house-style rewrite), `reflow.ts` (one sentence per line), `template.ts`, `source-str.ts`, `utils.ts`, `audit.ts`, `stash.ts`, `prompt-history.ts`, `pi-docs.ts`, `steering-mirror.ts`, `keybindings-store.ts`, `checkpoint-breaker.ts`, `exec-preview.ts`, `pi-logo.ts`, `tetris-logo.ts`
+  - `lib/` shared modules, in a subdirectory so auto-discovery does not load them: `config.ts` (`rho.toml`), `bun-launcher.ts` (locate and repair pi's launcher shebang), `state-store.ts` (on-disk extension state, scoped global/project/session), `settings-store.ts` (idempotent settings writes), `prompt-loader.ts`, `disenshittification.ts` (the house-style rewrite), `reflow.ts` (one sentence per line), `template.ts`, `source-str.ts`, `utils.ts`, `audit.ts`, `stash.ts`, `prompt-history.ts`, `pi-docs.ts`, `steering-mirror.ts`, `keybindings-store.ts`, `checkpoint-breaker.ts`, `exec-preview.ts`, `pi-logo.ts`, `tetris-logo.ts`
   - `assets/` data files (`spinners.json`, `maxims.txt`, `verbs.txt`, `wordswap.json`, `agentica_helper.py`)
 - `skills/` on-demand skills (`SKILL.md` folders + top-level `.md`)
 - `prompts/` prompt templates, expanded with `/name`
@@ -73,6 +74,7 @@ one line each; the detail is in `docs/extensions.md`.
 - `ci/Dockerfile` (`bun run smoke:docker`) node 24 slim plus bun, rho installed as a user package so the install path is covered.
 - `.github/workflows/ci.yml` `checks` (typecheck + `bun test`) and `smoke`, on push, pull request, dispatch, and daily.
 - `tools/version-gate.mjs`, `tools/preflight.ts` (`bun run doctor`), `tools/pi-location.ts` install-time checks and pi discovery.
+- `tools/bun-shebang.ts` (`bun run bun-shebang`) points pi's launcher at bun; runs from `postinstall`, since `pi update` restores the node shebang.
 - `tools/prompt-explorer.ts` (`bun run prompt`, `prompt:cli`, `prompt:preview`, `prompt:plain`) shows the assembled prompt.
 - `tools/prompt-full.ts` (`bun run prompt:full`) shows the prompt as the provider receives it, pi's text included.
 - `tools/reflow.ts` (cli over `extensions/lib/reflow.ts`) rewrites markdown to one sentence per line; run it after editing markdown here.

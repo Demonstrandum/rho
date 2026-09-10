@@ -226,6 +226,45 @@ export default function (pi: ExtensionAPI) {
         return delivered;
     };
 
+    /**
+     * What is waiting in conversations this session has never seen.
+     *
+     * marks are per session, so a session attaching for the first time asks
+     * about nothing and reports nothing missed however much is waiting. This
+     * asks Slack which conversations exist and summarises the recent traffic
+     * in one message, rather than replaying each one as a separate turn: an
+     * inbox is for reading, and only a live message deserves an answer.
+     */
+    const inbox = async (): Promise<string | null> => {
+        if (attached === null) return null;
+        const seen = new Set(Object.keys(stored.marks));
+        const found = await attached.web.conversations();
+        if (!found.ok) return null;
+        const fresh = found.value.filter((channel) => !seen.has(channel));
+        if (fresh.length === 0) return null;
+
+        const lines: string[] = [];
+        for (const channel of fresh) {
+            const recent = await attached.web.history(channel, config.slack.catchUp);
+            if (!recent.ok || recent.value.length === 0) continue;
+            const last = recent.value[recent.value.length - 1];
+            if (last === undefined) continue;
+            // Marked as read: an inbox summary is not an exchange, and the
+            // next attach should not show it again.
+            mark(channel, last.ts);
+            const at = new Date(Number.parseFloat(last.ts) * 1000).toISOString().slice(11, 16);
+            lines.push(
+                `${channel} (${recent.value.length}) last [${at} UTC] ${last.name}: ${last.text.slice(0, 120)}`,
+            );
+        }
+        if (lines.length === 0) return null;
+        return [
+            `Slack inbox, ${lines.length} conversation${lines.length === 1 ? '' : 's'} this session had not seen:`,
+            ...lines,
+            'Nothing here is addressed to you now. Use slack_read to open one, and answer only if it asks for something.',
+        ].join('\n');
+    };
+
     const registerTools = (): void => {
         if (toolsRegistered) return;
         toolsRegistered = true;
@@ -299,6 +338,51 @@ export default function (pi: ExtensionAPI) {
                 );
                 if (sent.ok && exchange !== null && target === exchange.channel) exchange.repliedExplicitly = true;
                 return said(sent.ok ? `Sent ${basename(path)} to ${target}.` : `Slack refused it: ${sent.error}`);
+            },
+        });
+
+        pi.registerTool({
+            name: 'slack_read',
+            label: 'Slack read',
+            description:
+                "Read a conversation's recent messages, or one thread's replies. Use it to see what was said before this session attached, to re-read a thread that has scrolled out of the conversation, or to check a channel nobody has written in yet. Reading marks the conversation read.",
+            promptSnippet: 'Read past Slack messages in a conversation or a thread',
+            promptGuidelines: [
+                'Use slack_read when the answer depends on something said in Slack that is not in front of you.',
+                'Reading a conversation is not being addressed by it: do not reply to what slack_read returns unless it asks for something.',
+            ],
+            parameters: Type.Object({
+                channel: Type.Optional(
+                    Type.String({
+                        description:
+                            'Channel or user ID. Defaults to the conversation the current message came from.',
+                    }),
+                ),
+                thread: Type.Optional(
+                    Type.String({
+                        description:
+                            "Thread timestamp, to read one thread's replies rather than the conversation itself.",
+                    }),
+                ),
+                limit: Type.Optional(
+                    Type.Integer({ minimum: 1, maximum: 200, description: 'How many messages. Default 20.' }),
+                ),
+            }),
+            async execute(_id, params: { channel?: string; thread?: string; limit?: number }) {
+                const said = (text: string) => ({ content: [{ type: 'text' as const, text }], details: undefined });
+                if (attached === null) return said('Slack is not attached to this session.');
+                const target = params.channel ?? exchange?.channel ?? null;
+                if (target === null) return said('No channel: nothing has arrived from Slack, so pass one.');
+                const read = await attached.web.history(target, params.limit ?? 20, params.thread ?? null);
+                if (!read.ok) return said(`Slack refused it: ${read.error}`);
+                if (read.value.length === 0) return said(`${target} is empty.`);
+                const last = read.value[read.value.length - 1];
+                if (last !== undefined) mark(target, last.ts);
+                const lines = read.value.map((m) => {
+                    const at = new Date(Number.parseFloat(m.ts) * 1000).toISOString().slice(11, 16);
+                    return `[${at} UTC] ${m.name}: ${m.text}`;
+                });
+                return said(`${target}, ${read.value.length} messages:\n${lines.join('\n')}`);
             },
         });
 
@@ -412,10 +496,12 @@ export default function (pi: ExtensionAPI) {
         save({ app: name });
 
         const missed = await catchUp();
-        return {
-            ok: true,
-            note: missed === 0 ? `Slack attached as ${name}.` : `Slack attached as ${name}, ${missed} missed.`,
-        };
+        const waiting = await inbox();
+        if (waiting !== null) {
+            pi.sendMessage({ customType: 'slack', content: waiting, display: true }, { deliverAs: 'followUp' });
+        }
+        const counted = missed === 0 ? '' : `, ${missed} missed`;
+        return { ok: true, note: `Slack attached as ${name}${counted}.` };
     };
 
     const statusLines = (): readonly string[] => {

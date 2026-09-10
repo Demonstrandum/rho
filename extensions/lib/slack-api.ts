@@ -120,7 +120,11 @@ export class SlackWeb {
         // shape that works for both, so everything goes out that way.
         const form = new URLSearchParams();
         for (const [key, value] of Object.entries(body)) {
-            if (value !== undefined && value !== null) form.set(key, String(value));
+            if (value === undefined || value === null) continue;
+            // Arrays and objects are JSON inside a form field: files.complete
+            // UploadExternal takes a files array, and String() on that is
+            // "[object Object]", which Slack rejects as invalid_arguments.
+            form.set(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
         }
         try {
             response = await fetch(`https://slack.com/api/${method}`, {

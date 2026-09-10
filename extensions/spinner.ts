@@ -119,7 +119,8 @@ function loadSpinners(): SpinnerDef[] {
     return pool.length > 0 ? pool : all;
 }
 
-function loadMaxims(): string[] {
+/** the working-message pool, also drawn on by the goal loop's spinner. */
+export function loadMaxims(): string[] {
     return loadLines(maximsPath);
 }
 

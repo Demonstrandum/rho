@@ -28,8 +28,10 @@ import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
 import { config } from './lib/config';
 import { PersistedState } from './lib/state-store';
-import { formatDuration } from './spinner';
+import { withSpinner } from './lib/widget-spinner';
+import { formatDuration, loadMaxims } from './spinner';
 import {
+    chooseMessage,
     classifyFailure,
     directiveText,
     evaluate,
@@ -42,6 +44,7 @@ import {
 const ENTRY_TYPE = 'rho-goal';
 const STATE_NAME = 'goal';
 const STATUS_ID = 'rho-goal';
+const WIDGET_KEY = 'rho-goal-spinner';
 
 /** every word that means "stop this goal now", as claude code accepts them. */
 const CLEAR_WORDS = new Set(['clear', 'stop', 'off', 'reset', 'none', 'cancel']);
@@ -220,8 +223,14 @@ export default function (pi: ExtensionAPI) {
 
         evaluating = true;
         let result: Awaited<ReturnType<typeof evaluate>>;
+        const condition = goal.condition;
         try {
-            result = await evaluate(ctx, goal.condition, ctx.sessionManager.buildContextEntries());
+            // the judge runs between turns, where pi draws nothing, so the wait
+            // gets a spinner of its own rather than looking like a finished
+            // session that has stopped answering.
+            result = await withSpinner(ctx, WIDGET_KEY, chooseMessage(config.goal.checkingMessages, loadMaxims()), () =>
+                evaluate(ctx, condition, ctx.sessionManager.buildContextEntries()),
+            );
         } finally {
             evaluating = false;
         }

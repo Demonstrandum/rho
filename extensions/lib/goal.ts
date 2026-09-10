@@ -338,6 +338,19 @@ export function directiveText(condition: string): string {
     ].join('\n');
 }
 
+/**
+ * what the spinner says while the judge reads. a string is used every time, a
+ * non-empty array is drawn from per check, and an empty array falls back to the
+ * pool the caller supplies (the maxims, so a check reads like every other wait
+ * in the session rather than announcing itself).
+ */
+export function chooseMessage(spec: string | readonly string[], fallback: readonly string[]): string {
+    if (typeof spec === 'string') return spec.trim() === '' ? 'checking the condition' : spec;
+    const pool = spec.length > 0 ? spec : fallback;
+    const picked = pool[Math.floor(Math.random() * pool.length)];
+    return picked === undefined || picked.trim() === '' ? 'checking the condition' : picked;
+}
+
 /** the fed-back unmet verdict: a work instruction rather than a retry. */
 export function feedbackText(condition: string, reason: string): string {
     return [

@@ -19,37 +19,14 @@ import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
 import { config } from './lib/config';
 import { formatDuration } from './spinner';
+import { withSpinner } from './lib/widget-spinner';
 import { proseOf, runAudit, type AuditResult, type Finding } from './lib/audit';
 
 const ENTRY_TYPE = 'rho-audit-report';
 const WIDGET_KEY = 'rho-audit-spinner';
 
-// ctx.modelRegistry only exposes complete(), not stream(), to extensions (see
-// model-registry.d.ts), so there is no sanctioned way to show the reviewer's
-// tokens as they generate. this animates instead, so the wait is visibly alive
-// rather than a static status line: a spinner frame plus elapsed time, written
-// as a widget (not setWorkingMessage/setWorkingIndicator, which the docs tie to
-// an active agent turn and do not fire for a plain command).
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const SPINNER_INTERVAL_MS = 90;
-
-async function withSpinner<T>(ctx: ExtensionCommandContext, label: string, work: () => Promise<T>): Promise<T> {
-    const start = Date.now();
-    let frame = 0;
-    const tick = (): void => {
-        const glyph = ctx.ui.theme.fg('accent', SPINNER_FRAMES[frame % SPINNER_FRAMES.length]);
-        ctx.ui.setWidget(WIDGET_KEY, [`${glyph} ${ctx.ui.theme.fg('dim', `${label} ${formatDuration(Date.now() - start)}`)}`]);
-        frame++;
-    };
-    tick();
-    const timer = setInterval(tick, SPINNER_INTERVAL_MS);
-    try {
-        return await work();
-    } finally {
-        clearInterval(timer);
-        ctx.ui.setWidget(WIDGET_KEY, undefined);
-    }
-}
+// the wait is drawn by lib/widget-spinner.ts, shared with the goal loop, which
+// holds the reasoning for animating a widget rather than the working message.
 
 type AuditEntry =
     | { readonly kind: 'findings'; readonly reviewer: string; readonly findings: readonly Finding[]; readonly cost: number }
@@ -166,7 +143,9 @@ export default function (pi: ExtensionAPI) {
                 return;
             }
 
-            const result = await withSpinner(ctx, `auditing with ${config.audit.model}`, () => runAudit(ctx, prose));
+            const result = await withSpinner(ctx, WIDGET_KEY, `auditing with ${config.audit.model}`, () =>
+                runAudit(ctx, prose),
+            );
 
             const destination = config.audit.feedback;
             if (destination !== 'context') pi.appendEntry<AuditEntry>(ENTRY_TYPE, toEntry(result));

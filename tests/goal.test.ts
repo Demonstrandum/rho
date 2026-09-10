@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
 import type { SessionEntry } from '@earendil-works/pi-coding-agent';
 import {
+    chooseMessage,
     classifyFailure,
     directiveText,
     feedbackText,
@@ -96,6 +97,21 @@ test('stored goal state is validated rather than cast', () => {
     expect(parseActiveGoal({ condition: 'x', setAt: 'now', iterations: 0, blocks: 0 })).toBeNull();
     expect(parseActiveGoal({ condition: 'x', setAt: 1, iterations: 1.5, blocks: 0 })).toBeNull();
     expect(parseActiveGoal({ condition: 'x', setAt: 1, iterations: 0, blocks: 0, lastReason: 3 })).toBeNull();
+});
+
+test('a checking message is a string, a pool, or the fallback pool', () => {
+    expect(chooseMessage('judging', ['maxim'])).toBe('judging');
+    expect(chooseMessage(['only one'], ['maxim'])).toBe('only one');
+    expect(chooseMessage([], ['maxim'])).toBe('maxim');
+
+    // nothing to draw from at all still leaves the spinner something to say.
+    expect(chooseMessage([], [])).toBe('checking the condition');
+    expect(chooseMessage('   ', ['maxim'])).toBe('checking the condition');
+
+    const pool = ['a', 'b', 'c'];
+    const drawn = new Set(Array.from({ length: 200 }, () => chooseMessage(pool, [])));
+    expect([...drawn].every((message) => pool.includes(message))).toBe(true);
+    expect(drawn.size).toBeGreaterThan(1);
 });
 
 test('the directive and the feedback both carry the condition', () => {

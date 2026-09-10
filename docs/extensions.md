@@ -218,6 +218,7 @@ the judge itself may rule the condition impossible, which clears the goal with a
 the transcript is trimmed to `[goal] transcript-fraction` of the judge's context window, oldest entries first, and a trimmed transcript carries a notice telling the judge to answer `insufficient evidence in transcript` when the evidence it needs may be in the dropped part.
 the budget is in characters at four to a token, which is the ratio pi estimates with, since an extension has no tokeniser.
 verdicts render through `registerEntryRenderer`, so each check is visible in the transcript without entering the LLM context; only the fed-back reason does.
+the judge runs between turns, where pi draws nothing, so `lib/widget-spinner.ts` animates a widget for the wait; `[goal] checking-messages` says what it reads, as one string used every time, an array drawn from per check, or the empty default, which draws from `assets/maxims.txt` so a check reads like every other wait in the session.
 the condition is on disk through `lib/state-store.ts` at session scope (`[goal] persist`), so a resume restores it, with the timer, the turn count, and the block count reset, since those measure this run of the loop rather than the condition.
 not ported: claude code's check-ins on long-running background work, which back off from 30 minutes and cap at three while idle.
 pi has no background task registry an extension can read, so the loop instead skips a turn whose message queue is not empty and evaluates once the queued message has landed.
@@ -252,6 +253,8 @@ the reasoning, the traps, and what is deliberately not built are in `extensions/
 ## shared libraries
 
 `lib/config.ts` the `rho.toml` loader: every `[section] key` named in these entries resolves through it.
+the file is kebab-case throughout, sections included: a section is named by its schema property, which has to be a javascript identifier, so `tomlName` derives `[send-now]` from `sendNow` on the way out and resolves it back on the way in.
+a name spelled any other way that squashes to a known one (`[sendNow]`, `halfBlocks`, `half_blocks`) still applies its values, and the problem list names the spelling to move to, so renaming a section never costs anyone their settings.
 
 `lib/state-store.ts` `PersistedState<T>`, the store for extension state that used to die with the process (the stash stack, the `/noswap` toggle, the `/cwd` target, the prompt history).
 one json file per scope under `<data dir>/rho/state/<scope>/`: `global` (one file), `project` (one file per working directory, named `<basename>-<sha256 prefix>` so two projects sharing a basename stay separate), `session` (one file per session uuid, so a resume finds its own state).
@@ -259,6 +262,10 @@ a `StateSpec<T>` carries the file name, the scope, and a `parse` validator, so a
 writes go to a temp file and a rename, so a kill mid-write leaves the previous file intact.
 opening a session-scoped store prunes files of that name not written to for 30 days.
 an in-memory session (no uuid) gets no file and every call is a no-op.
+
+`lib/widget-spinner.ts` the animated widget both out-of-turn model calls wait behind (`/audit`'s review, the goal loop's judge).
+`ctx.modelRegistry` exposes `complete()` and not `stream()`, so neither call can show tokens as they generate, and `setWorkingMessage`/`setWorkingIndicator` are documented as belonging to an active agent turn, which neither a command handler nor a settled session is.
+with no UI (print or json mode) the work runs and nothing is drawn.
 
 `lib/settings-store.ts` shared helper (`ensureGlobalSetting`) for the idempotent nested global-settings writes.
 it lives in a subdirectory because extension auto-discovery loads top-level `*.ts` only.

@@ -201,6 +201,12 @@ export default function (pi: ExtensionAPI) {
     // delivery. Only /slack above is registered, so a session can take over.
     if (!sessionId || ownerId() !== sessionId) return;
 
+    // Checked again at every delivery and every reply, not only at load. A
+    // session that owned Slack when it started keeps its watcher and its
+    // turn_end handler, so without this it goes on answering after another
+    // session has claimed, and one Slack message reaches several sessions.
+    const owns = (): boolean => ownerId() === sessionId;
+
     // The channel a Slack-triggered turn should answer to, and whether the
     // answer has already been sent by hand. Both are cleared once a turn ends.
     let replyTo: string | null = null;
@@ -276,7 +282,7 @@ export default function (pi: ExtensionAPI) {
     // Whatever the turn ends up saying goes back to Slack, so a message there
     // always gets an answer without the agent having to remember to send one.
     pi.on('turn_end', async (event) => {
-        if (done) return;
+        if (done || !owns()) return;
         if (replyTo === null && !repliedExplicitly) {
             // The message may have been delivered before this copy of the
             // extension loaded, so the spool decides where it goes.
@@ -350,6 +356,10 @@ export default function (pi: ExtensionAPI) {
         stopPrevious();
 
         const deliver = (why: 'waiting' | 'live') => {
+            if (!owns()) {
+                stopPrevious();
+                return;
+            }
             const { entries, cursor } = unread();
             if (entries.length === 0) return;
             // Answers go to whoever wrote last.

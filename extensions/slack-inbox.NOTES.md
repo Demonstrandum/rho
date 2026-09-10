@@ -13,7 +13,10 @@ This note says what to change, and why, before it counts as part of rho.
 ## What is wrong with it as a rho feature
 
 - **The config path is named after one migration.** `~/.config/robotics-migration/` should be `~/.config/rho/slack/`, and the extension should be inert when it is absent, so installing rho does not imply a Slack connection.
-- **It loads everywhere.** Sitting in `./extensions` means every pi session in every project connects and injects.
+- ~~**It loads everywhere.**~~ Fixed by an owner file: `~/.config/robotics-migration/slack-inbox.owner` holds one session id, `/slack claim` writes it, and any session that is not the owner loads inert (no tools, no watcher, no delivery).
+  Unattached is the default.
+  The per-session design below is still the right end state; this is the stopgap that stops every pi in every project from ringing.
+  Original defect: Sitting in `./extensions` means every pi session in every project connects and injects.
   A session in an unrelated repo receives DMs meant for another one.
 - **Sessions race.** Two open sessions watch one spool and share one cursor, so a message goes to whichever reads first.
   Delivery should be claimed, once.

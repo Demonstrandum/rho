@@ -21,6 +21,8 @@ const CONFIG = join(homedir(), '.config', 'robotics-migration');
 const SPOOL = join(CONFIG, 'slack-inbox.jsonl');
 const CURSOR = join(CONFIG, 'slack-inbox.cursor');
 const BOT_TOKEN = join(CONFIG, 'slack-bot-token');
+/** The one session allowed to deliver and reply. See `owner()`. */
+const OWNER = join(CONFIG, 'slack-inbox.owner');
 
 /** Slack's limit is 40000 characters; a long reply is cut rather than dropped. */
 const LIMIT = 3500;
@@ -133,7 +135,72 @@ const render = (entries: Entry[]): string => {
     return `${head}\n${lines.join('\n')}\n\n${how}`;
 };
 
+/**
+ * Slack belongs to one session, not to every pi that happens to be running.
+ *
+ * The extension ships in ./extensions, so it loads in every session in every
+ * project, and each copy watched the same spool: one message arrived in all of
+ * them at once. The owner file names the single session id that may act. A
+ * session claims it by writing its own id there (`/slack claim`); every other
+ * session loads inert, registering no tools and no watcher.
+ *
+ * An empty or missing file means nobody owns it, and nobody acts. That is the
+ * safe default: installing rho must not imply a Slack connection.
+ */
+const ownerId = (): string | null => {
+    try {
+        return fs.readFileSync(OWNER, 'utf8').trim() || null;
+    } catch {
+        return null;
+    }
+};
+
+const claim = (id: string | null): void => {
+    fs.mkdirSync(CONFIG, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(OWNER, id ? `${id}\n` : '', { mode: 0o600 });
+};
+
 export default function (pi: ExtensionAPI) {
+    const sessionId = process.env.PI_SESSION_ID ?? null;
+
+    pi.registerCommand('slack', {
+        description: "show, claim, or release this session's Slack attachment; /slack claim, /slack release",
+        getArgumentCompletions: (prefix) => {
+            const verbs = ['claim', 'release'].filter((v) => v.startsWith(prefix));
+            return verbs.length > 0 ? verbs.map((v) => ({ value: v, label: v })) : null;
+        },
+        handler: async (args, ctx) => {
+            const verb = args.trim();
+            const held = ownerId();
+            if (verb === 'claim') {
+                if (!sessionId) {
+                    ctx.ui.notify('No PI_SESSION_ID: cannot claim.', 'error');
+                    return;
+                }
+                claim(sessionId);
+                ctx.ui.notify('Slack attached to this session. Reload the others.', 'info');
+                return;
+            }
+            if (verb === 'release') {
+                claim(null);
+                ctx.ui.notify('Slack released. No session receives messages.', 'info');
+                return;
+            }
+            ctx.ui.notify(
+                held === null
+                    ? 'Slack is unattached. /slack claim attaches this session.'
+                    : held === sessionId
+                      ? 'Slack is attached to this session.'
+                      : `Slack is attached to another session (${held}).`,
+                'info',
+            );
+        },
+    });
+
+    // Inert everywhere but the owning session: no tools, no watcher, no
+    // delivery. Only /slack above is registered, so a session can take over.
+    if (!sessionId || ownerId() !== sessionId) return;
+
     // The channel a Slack-triggered turn should answer to, and whether the
     // answer has already been sent by hand. Both are cleared once a turn ends.
     let replyTo: string | null = null;

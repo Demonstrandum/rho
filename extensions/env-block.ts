@@ -19,25 +19,48 @@ import { config } from './lib/config';
 // directory can change mid-session (ctrl+l, /cwd) and those do rebuild it, since
 // one cache miss is cheaper than a prompt that lies about which model is reading
 // it.
+/**
+ * whether the working directory is a git work tree. `unknown` is the answer when
+ * the question could not be put to git at all, and it is a third state rather
+ * than a fold into `no`: a failed probe reported as `no` states a falsehood about
+ * the directory, and the agent has no way to see that it was a failure.
+ */
+export type RepoState = 'yes' | 'no' | 'unknown';
+
+const REPO_LINE: Record<RepoState, string> = {
+    yes: 'yes',
+    no: 'no',
+    unknown: 'could not be determined; run git yourself before acting on the tree',
+};
+
 interface Facts {
     readonly cwd: string;
-    readonly repo: boolean;
+    readonly repo: RepoState;
     readonly platform: string;
     readonly date: string;
     readonly model: string;
 }
 
-const isGitRepo = async (cwd: string): Promise<boolean> => {
+export const probeRepo = async (cwd: string): Promise<RepoState> => {
     try {
         const proc = Bun.spawn(['git', 'rev-parse', '--is-inside-work-tree'], {
             cwd,
             stdout: 'pipe',
             stderr: 'ignore',
+            // passed rather than inherited, so the lookup of git follows the
+            // PATH this process holds now.
+            env: { ...process.env },
         });
         const out = (await new Response(proc.stdout).text()).trim();
-        return out === 'true';
+        // git answers `false` inside a bare repository, and exits non-zero with
+        // no output outside a work tree. both are answers.
+        if (out === 'true') return 'yes';
+        if (out === 'false') return 'no';
+        return (await proc.exited) === 0 ? 'unknown' : 'no';
     } catch {
-        return false;
+        // git missing from PATH, or a runtime without Bun.spawn: the probe never
+        // ran, so the directory is not what this describes.
+        return 'unknown';
     }
 };
 
@@ -51,7 +74,7 @@ const modelLine = (ctx: ExtensionContext): string => {
 
 const gather = async (ctx: ExtensionContext): Promise<Facts> => ({
     cwd: ctx.cwd,
-    repo: await isGitRepo(ctx.cwd),
+    repo: await probeRepo(ctx.cwd),
     platform: `${platform()} ${release()}`,
     // ISO 8601, per the orthography rules; frozen for the session.
     date: new Date().toISOString().slice(0, 10),
@@ -60,7 +83,7 @@ const gather = async (ctx: ExtensionContext): Promise<Facts> => ({
 
 export const render = (facts: Facts, fields: RenderFields): string => {
     const lines = [`cwd: ${facts.cwd}`];
-    if (fields.git) lines.push(`git repo: ${facts.repo ? 'yes' : 'no'}`);
+    if (fields.git) lines.push(`git repo: ${REPO_LINE[facts.repo]}`);
     if (fields.platform) lines.push(`platform: ${facts.platform}`);
     if (fields.date) lines.push(`date: ${facts.date}`);
     if (fields.model) lines.push(`model: ${facts.model}`);

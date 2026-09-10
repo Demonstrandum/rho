@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { parseBranchLine, render, snapshot, type Snapshot } from '../extensions/lib/git-snapshot';
+import { parseBranchLine, render, renderFailure, snapshot, type Snapshot } from '../extensions/lib/git-snapshot';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const base: Snapshot = {
     branch: 'master',
@@ -65,14 +68,33 @@ describe('render', () => {
 
 describe('snapshot', () => {
     test('reads this repository', async () => {
-        const state = await snapshot({ cwd: process.cwd(), commits: 2, maxFiles: 5, timeoutMs: 5_000 });
-        expect(state).not.toBeNull();
-        expect(state!.branch).toBeTruthy();
-        expect(state!.commits.length).toBeGreaterThan(0);
+        const reading = await snapshot({ cwd: process.cwd(), commits: 2, maxFiles: 5, timeoutMs: 5_000 });
+        expect(reading.kind).toBe('snapshot');
+        if (reading.kind !== 'snapshot') return;
+        expect(reading.state.branch).toBeTruthy();
+        expect(reading.state.commits.length).toBeGreaterThan(0);
     });
 
-    test('a directory outside a work tree yields nothing', async () => {
-        const state = await snapshot({ cwd: '/', commits: 2, maxFiles: 5, timeoutMs: 5_000 });
-        expect(state).toBeNull();
+    test('a directory outside a work tree is named as such', async () => {
+        const outside = mkdtempSync(join(tmpdir(), 'rho-nogit-'));
+        const reading = await snapshot({ cwd: outside, commits: 2, maxFiles: 5, timeoutMs: 5_000 });
+        expect(reading).toEqual({ kind: 'failed', failure: { reason: 'not-a-repo' } });
+        expect(renderFailure({ reason: 'not-a-repo' })).toBeNull();
+    });
+
+    test('a timeout is a failed read, not a directory without a repo', async () => {
+        const reading = await snapshot({ cwd: process.cwd(), commits: 2, maxFiles: 5, timeoutMs: 1 });
+        expect(reading.kind).toBe('failed');
+        if (reading.kind !== 'failed') return;
+        expect(reading.failure.reason).toBe('unavailable');
+    });
+});
+
+describe('renderFailure', () => {
+    test('a failed read says the tree was not read', () => {
+        const out = renderFailure({ reason: 'unavailable', detail: 'git: command not found' });
+        expect(out).toContain('git could not be read: git: command not found');
+        expect(out).toContain('nothing is known about the work tree');
+        expect(out).not.toContain('status: clean');
     });
 });

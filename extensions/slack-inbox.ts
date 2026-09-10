@@ -122,8 +122,14 @@ const render = (entries: Entry[]): string => {
     // first should be an acknowledgement rather than the start of the work:
     // someone waiting on a phone wants to know the message landed, and gets
     // nothing else until there is an answer.
-    const how =
-        'Answer in one short line first, before any tool calls, so the sender knows it arrived. Then do the work and give the result in your final reply; anything in between stays in the terminal.';
+    const how = [
+        'Reply as a colleague would in Slack, not as a report.',
+        'Answer in one short line first, before any tool calls, so the sender knows it arrived.',
+        'Then do the work, and give the result in your final reply; anything in between stays in the terminal.',
+        'A one-line question gets a one-line answer. Never several paragraphs.',
+        'No headings, no bullet lists, no preamble. Say the thing.',
+        'If the full detail is worth having, it belongs in the terminal, and Slack gets the summary plus an offer.',
+    ].join(' ');
     return `${head}\n${lines.join('\n')}\n\n${how}`;
 };
 
@@ -144,10 +150,12 @@ export default function (pi: ExtensionAPI) {
         name: 'slack_reply',
         label: 'Slack reply',
         description:
-            'Send a message to Slack. Use it to answer a Slack message with something other than the reply shown in the terminal, or to write to a different channel. Without it, the reply to a Slack-triggered turn is forwarded automatically.',
-        promptSnippet: 'Reply to Slack explicitly instead of forwarding the whole reply',
+            'Send a message to Slack. Use it to answer a Slack message with something other than the reply shown in the terminal, or to write to a different channel. Without it, the reply to a Slack-triggered turn is forwarded automatically. Keep it to a line or two, the way a colleague replies: no headings, no bullet lists, no preamble.',
+        promptSnippet: 'Reply to Slack explicitly, in a line or two, instead of forwarding the whole reply',
         promptGuidelines: [
             'Use slack_reply when a turn came from Slack and the person there needs a shorter or different answer than the one in the terminal.',
+            'Slack replies are short: a one-line question gets a one-line answer, and long detail stays in the terminal.',
+            'Acknowledge a Slack message immediately, before starting the work, and report the outcome when it is done.',
         ],
         parameters: Type.Object({
             text: Type.String({ description: 'The message to send.' }),

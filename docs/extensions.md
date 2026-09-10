@@ -201,6 +201,27 @@ the class is not exported, so the instance whose prototype is patched comes from
 that export name is minified; `tests/checkpoint-breaker.test.ts` pins it, because a rename would leave every turn waiting on a checkpoint that cannot succeed.
 `keep-trying` restores pi-rewind's behaviour of one attempt and one warning per turn.
 
+`goal.ts` + `lib/goal.ts` port claude code's `/goal`: `/goal <condition>` sets a stopping condition, and the session keeps working until a second model says the condition holds.
+the division of labour is the whole point: the model doing the work does not decide when the work is done, since an agent twenty turns into a migration is the worst available judge of whether the migration is finished.
+after each turn a separate model reads the transcript and answers one forced `report_verdict` call, `{ok, reason, impossible?}`, through `ctx.modelRegistry.complete` (the same path `lib/audit.ts` uses, whose `forcedToolChoice` and `resolveReviewer` are shared rather than copied).
+an unmet verdict is fed back as the next turn's input, so the loop carries the difference between the current state and the condition rather than re-sending the original prompt; `/loop` in claude code, which re-runs a prompt on a timer, has no such signal.
+the judge gets no tools, which is a constraint on the writer of the condition: it can only rule on what the agent has already put in the transcript, so `npm test exits 0` is decidable and "the code is clean" collects `insufficient evidence in transcript` forever.
+thinking blocks are left out of the rendered transcript for the same reason, since a verdict read off deliberation is the self-assessment this design removes.
+
+pi has no stop hook, so the loop hangs off `agent_settled`, which fires only once pi has decided it will not continue on its own (no retry, no compaction, no queued follow-up), the same position a stop hook occupies.
+four guards keep it finite.
+`[goal] block-cap` consecutive unmet verdicts (8 by default, as in claude code) hand control back with the goal still set and the counter reset, so one message resumes it.
+an aborted turn pauses the loop until the next message, since the abort was the human taking the session back.
+a turn that failed on something a human has to fix clears the goal, matching claude code's four cases (authentication, exhausted balance, context overflow, unavailable model); a rate limit or an overloaded server leaves it set, and nothing is evaluated that turn because there is no new evidence to read.
+the judge itself may rule the condition impossible, which clears the goal with a reason, and its prompt states that the agent's own claim of impossibility is evidence rather than proof.
+
+the transcript is trimmed to `[goal] transcript-fraction` of the judge's context window, oldest entries first, and a trimmed transcript carries a notice telling the judge to answer `insufficient evidence in transcript` when the evidence it needs may be in the dropped part.
+the budget is in characters at four to a token, which is the ratio pi estimates with, since an extension has no tokeniser.
+verdicts render through `registerEntryRenderer`, so each check is visible in the transcript without entering the LLM context; only the fed-back reason does.
+the condition is on disk through `lib/state-store.ts` at session scope (`[goal] persist`), so a resume restores it, with the timer, the turn count, and the block count reset, since those measure this run of the loop rather than the condition.
+not ported: claude code's check-ins on long-running background work, which back off from 30 minutes and cap at three while idle.
+pi has no background task registry an extension can read, so the loop instead skips a turn whose message queue is not empty and evaluates once the queued message has landed.
+
 `search.ts` adds `/search <words>` and a `pi_search` tool over pi's own commands and documentation.
 pi's `/` completion fuzzy-matches command names only (pi-tui's `CombinedAutocompleteProvider` filters with `fuzzyFilter(items, prefix, (item) => item.name)` and attaches the description afterwards, for display), nothing searches the docs, and the agent can reach neither, so `/export` is unreachable from the word "jsonl".
 `lib/pi-docs.ts` builds one index over three sources: the built-in commands parsed out of `<pi>/dist/core/slash-commands.js` (that array is not re-exported and the package `exports` map has only `.`, `./rpc-entry`, `./client`, so a deep import does not resolve; a release that moves the file yields zero built-ins and a warning line rather than an exception), the session commands from `pi.getCommands()` (extension commands, prompt templates, skills, with provenance; built-in interactive commands are documented as excluded, which is why the first source exists), and every heading section of `<pi>/README.md` and `<pi>/docs/*.md` plus any path in `[search] doc-roots`.
@@ -218,6 +239,13 @@ it renders via a `registerEntryRenderer` CustomEntry, which draws in the transcr
 it registers an `agentica` tool (runs python that can call MCP tools via the Agentica MCP Runtime, launched through the helper at `assets/agentica_helper.py`) only when `RHO_AGENTICA_RUNTIME` points at an agentica-mcp-runtime checkout; with the env unset the extension is a no-op.
 `RHO_AGENTICA_PYTHON` overrides the interpreter (default `<runtime>/.venv/bin/python`).
 the nix original gated this behind a build flag; rho has no build step so the gate is runtime and explicit.
+
+`slack.ts` puts one session in reach of a Slack DM: `/slack <app>` attaches, `/slack off` releases, `/slack add <app>` stores an app's two tokens through a UI prompt rather than the transcript, `/slack new <app>` prints Slack's create-app link with the manifest already filled in.
+the socket is held by the session and dies with it, so nothing receives DMs while pi is closed; a high-water mark per conversation and a `conversations.history` call at connect recover what arrived in the meantime, which Socket Mode never redelivers.
+credentials belong to an app and an app is locked to one session, because Slack hands each payload to an arbitrary one of an app's open connections; two sessions on two apps are independent, which is what the named store is for.
+an incoming message gets a reaction as the read mark and a rotating status line (`code-bot is thinking...`) refreshed every 90 seconds, and only the turn that ends without tool calls is forwarded as the answer.
+`lib/slack-api.ts` holds the six Web API calls and the reconnecting Socket Mode client, `lib/slack-config.ts` the app store, the per-app lock, and the manifest.
+the reasoning, the traps, and what is deliberately not built are in `extensions/slack.NOTES.md`.
 
 `rho.ts` `/rho config` shows the live config as TOML, `/rho config overwrite` writes it to the XDG path, `/rho config write PATH` writes it elsewhere.
 
@@ -240,7 +268,7 @@ it lives in a subdirectory because extension auto-discovery loads top-level `*.t
 `lib/utils.ts` small helpers moved verbatim out of `startup.ts` and `spinner.ts`.
 `lib/keybindings-store.ts` reads and writes pi's resolved keybindings, for the stash demotion.
 `lib/steering-mirror.ts` rebuilds pi's steering queue from the events that change it.
-`lib/audit.ts`, `lib/stash.ts`, `lib/prompt-history.ts`, `lib/pi-docs.ts`, `lib/checkpoint-breaker.ts`, `lib/prompt-loader.ts` are described with the extensions that use them, above.
+`lib/audit.ts`, `lib/goal.ts`, `lib/stash.ts`, `lib/prompt-history.ts`, `lib/pi-docs.ts`, `lib/checkpoint-breaker.ts`, `lib/prompt-loader.ts` are described with the extensions that use them, above.
 
 ## ci and tooling
 

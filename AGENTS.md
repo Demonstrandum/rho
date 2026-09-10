@@ -23,6 +23,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `skill-listing.ts` flattens pi's `<available_skills>` block: xml escapes undone, indentation dropped.
   - `wordswap.ts` swaps overused phrases in finalized messages, from `assets/wordswap.json`; `/noswap` per message, `[wordswap]`
   - `auditor.ts` `/audit` reviews the last reply against the writer rules with a second model, `[audit]`
+  - `goal.ts` `/goal <condition>` keeps the session working until a second model judges the condition met, `[goal]`
   - `stash.ts` `ctrl+s` parks the editor text, `ctrl+r` pops, `/stash` opens the picker, `[stash]`
   - `send-now.ts` `ctrl+enter` cuts into a running turn, `ctrl+shift+enter` sends the newest queued message alone, `[send-now]`
   - `prompt-history.ts` prompt history that survives a restart, `/history`, `[history]`
@@ -41,11 +42,12 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `merge-thinking-blocks.ts` merges adjacent thinking blocks in the anthropic payload, which the api rejects.
   - `rewind-guard.ts` gates pi-rewind's per-turn checkpoint to directories where it can finish, `[rewind]`
   - `search.ts` `/search` and a `pi_search` tool over pi's commands and docs, `[search]`
+  - `slack.ts` `/slack <app>` puts a Slack DM in front of this session: socket in-session, read mark, typing status, `[slack]`
   - `context.ts` `/context` context-window readout.
   - `web.ts` `/web` runs the pi-web UI as a background service.
   - `rho.ts` `/rho config` shows and writes the live `rho.toml`
   - `agentica.ts` an `agentica` MCP tool, registered only when `RHO_AGENTICA_RUNTIME` is set.
-  - `lib/` shared modules, in a subdirectory so auto-discovery does not load them: `config.ts` (`rho.toml`), `bun-launcher.ts` (locate and repair pi's launcher shebang), `state-store.ts` (on-disk extension state, scoped global/project/session), `settings-store.ts` (idempotent settings writes), `prompt-loader.ts`, `disenshittification.ts` (the house-style rewrite), `reflow.ts` (one sentence per line), `template.ts`, `source-str.ts`, `utils.ts`, `audit.ts`, `stash.ts`, `prompt-history.ts`, `pi-docs.ts`, `steering-mirror.ts`, `keybindings-store.ts`, `checkpoint-breaker.ts`, `exec-preview.ts`, `pi-logo.ts`, `tetris-logo.ts`
+  - `lib/` shared modules, in a subdirectory so auto-discovery does not load them: `config.ts` (`rho.toml`), `bun-launcher.ts` (locate and repair pi's launcher shebang), `state-store.ts` (on-disk extension state, scoped global/project/session), `settings-store.ts` (idempotent settings writes), `prompt-loader.ts`, `goal.ts` (the goal judge and its transcript rendering), `disenshittification.ts` (the house-style rewrite), `reflow.ts` (one sentence per line), `template.ts`, `source-str.ts`, `utils.ts`, `audit.ts`, `stash.ts`, `prompt-history.ts`, `pi-docs.ts`, `slack-api.ts` (Slack calls and the Socket Mode client), `slack-config.ts` (the app store and the per-app lock), `steering-mirror.ts`, `keybindings-store.ts`, `checkpoint-breaker.ts`, `exec-preview.ts`, `pi-logo.ts`, `tetris-logo.ts`
   - `assets/` data files (`spinners.json`, `maxims.txt`, `verbs.txt`, `wordswap.json`, `agentica_helper.py`)
 - `skills/` on-demand skills (`SKILL.md` folders + top-level `.md`)
 - `prompts/` prompt templates, expanded with `/name`

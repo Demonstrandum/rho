@@ -16,8 +16,32 @@ timeout-ms = 30000  # abort the reviewer call after this long; a timeout reports
 # this parameter and asks for it when absent
 audience = "an expert in the general field, unfamiliar with this repository and this conversation"
 
+[goal]
+# which model judges the condition after each turn, as provider/id, or
+# "current" for the session model. a small fast model is the intended
+# choice: the judge reads a transcript and answers one structured question
+model = "anthropic/claude-haiku-4-5"
+# abort the judge call after this long. a timeout ends the turn and
+# leaves the goal set, so the next turn evaluates again
+timeout-ms = 30000
+# how much of the judge's context window the transcript may fill.
+# older entries are dropped first, and a truncated transcript tells the
+# judge to answer "insufficient evidence" rather than guess
+transcript-fraction = 0.5
+# how many consecutive unmet verdicts may restart the turn before the
+# loop hands control back. the goal stays set and resumes on your next
+# message, so a stalled loop costs this many turns rather than the session
+block-cap = 8
+max-chars = 4000  # longest condition accepted by /goal
+# restore an active goal when the session resumes. the condition comes
+# back; the timer, the turn count, and the token baseline restart
+persist = true
+
 [wordswap]
 enabled = true  # whether the word filter is active (toggle at runtime with /noswap)
+# store what /noswap last set for this session, so a resume comes back
+# with the filter as it was left rather than back at `enabled`
+remember-toggle = true
 
 [startup]
 animate = true  # play the logo animation on launch
@@ -27,14 +51,54 @@ weights = [ 0.2, 0.1, 0.1, 0.15, 0.15, 0.3 ]  # mode weights
 shimmer-dirs = [ "ns", "ew", "nwse", "nesw" ]  # shimmer axes
 
 [images]
-width = 180  # width in terminal cells for inline images
+width = 60  # width in terminal cells for inline images
+# largest share of the terminal height an inline image may occupy.
+# pi caps image width only, so a tall image can be drawn taller than
+# the window and text then lands on top of it. 1 removes the cap.
+max-height-fraction = 0.4
+
+[cwd]
+# store where /cwd last pointed for this session and return there on a
+# resume, when the directory still exists
+remember = true
+
+[rewind]
+# when pi-rewind takes a checkpoint of the working directory each turn.
+# git: only inside a git work tree, and never in the home directory,
+# since a snapshot of everything under home runs past the checkpoint
+# engine's own two-minute timeout. always: everywhere. never: nowhere
+auto-checkpoint = "git"
+# what happens after a checkpoint fails. disable-session: report the
+# first failure and take no further checkpoint for the rest of the
+# session, since the cause (an unreadable path, a work tree too large
+# to stage inside the two-minute timeout) does not change while the
+# session runs. keep-trying: pi-rewind's own behaviour, one attempt
+# and one warning per turn
+on-failure = "disable-session"
 
 [stash]
+# where parked prompts are kept between runs. project: one stack per
+# working directory, restored on every start there. session: one stack
+# per session, restored on resume. global: one stack everywhere. off:
+# in memory only, so the stack dies with the process
+persist = "project"
 # spare keys for the built-in actions that share ctrl+s / ctrl+r with the
 # stash. pi reports every such shared key at startup, even under
 # quietStartup, so each colliding action is moved to the next unused key
 # in this list. an empty list leaves pi alone and keeps the report
 demote-to = [ "f2", "f3", "f4", "f5", "f6" ]
+
+[history]
+# where prompt history is stored. project: one log per working directory,
+# so prompts from any session in that dir are reachable. session: one log
+# per session, restored on resume. global: one log everywhere. off:
+# in memory only, pi's own 100-entry cap applies
+persist = "project"
+max-entries = 500  # how many prompts to keep in the log. includes both sent and unsent
+save-drafts = true  # capture unsent drafts when navigating away (arrow-up) or exiting
+# how often to snapshot the in-progress draft while typing. a crash loses
+# at most this much typing
+debounce-ms = 750
 
 [input]
 # replace the thin ─ border lines with half-block characters (▄ top, ▀
@@ -59,6 +123,109 @@ tint = 0.3
 #   { colors = ["border", "userMessageBg"], stops = [0.0, 0.35] }
 gradient-colors = [ "border", "userMessageBg" ]
 bash-colors = [ "bashMode", "userMessageBg" ]  # gradient colour stops for bash mode
+
+[sendNow]
+# stop the running turn and send the editor text now, instead of
+# queueing it until the turn reaches its next boundary. on an empty
+# editor it starts the queued steering messages now instead
+send = "ctrl+enter"
+# stop the running turn and send the newest queued steering message,
+# whatever the editor holds. the editor text is neither sent nor cleared
+send-queued = "ctrl+shift+enter"
+# how long the aborted turn may take to settle before the pending send is
+# reported as stalled. the message stays armed either way; pressing the
+# send key again puts it back in the editor and disarms it
+stall-warn-ms = 6000
+# append a timestamped line per key press, abort, agent event, and send to
+# <data dir>/rho/send-now.log, for finding where a run that will not stop
+# is stuck
+log = false
+
+[search]
+max-results = 12  # how many matches /search shows, and the default for the pi_search tool
+# extra markdown files or directories to index alongside pi's own
+# README.md and docs/. a directory is walked four levels deep for *.md
+doc-roots = []
+# register the pi_search tool, so the agent can search commands and docs
+# too. the /search command is registered either way
+tool = true
+
+[runtime]
+# stop the session when pi is running under node. rho calls Bun APIs, and
+# under node those calls fail in ways that reach the prompt as false
+# statements about the work tree
+enforce-bun = true
+# rewrite the shebang of pi's launcher from node to bun, so the next launch
+# is bun. every pi update restores the node shebang, so this runs again
+patch-launcher = true
+# when started under node, re-run pi under bun with the same arguments
+# and exit with the status of that run. off means print a note and stop
+reexec = true
+
+[slack]
+# reopen the socket for the app this session last attached to, when the
+# session is resumed and no other session holds that app
+reconnect = true
+# emoji added to an incoming message as the read mark, without colons.
+# empty to add none. needs the reactions:write scope
+read-emoji = "eyes"
+# set the status line under the conversation while the agent works, which
+# renders as "<app name> is thinking...". only an assistant or agent app
+# has that surface; for a plain bot the call fails once and is dropped
+typing = true
+# what the status line rotates through while a turn runs. slack prefixes
+# each with the app name. up to ten
+loading-messages = [ "is reading it", "is working on it", "is still on it" ]
+# also forward the first reply of an exchange as a message, the way the
+# daemon version did. the status line already says the message landed,
+# so this costs a message in the thread for nothing unless the app has
+# no assistant surface
+ack-message = false
+# how many messages per conversation to pull with conversations.history
+# when the socket opens. socket mode delivers nothing that arrived while
+# no socket was open, so this is what recovers them
+catch-up = 50
+# longest reply forwarded to slack; anything longer is cut and marked.
+# slack's own limit is 40000, and a wall of text on a phone is not a reply
+max-chars = 3500
+
+[env]
+# append an <env> block naming the working directory, the platform, the
+# date, and the model, so none of it costs a tool call
+enabled = true
+git = true  # whether the block says if the working directory is a git work tree
+platform = true  # whether the block names the operating system and its release
+# today's date, frozen at session start. without it a model dates things
+# from its training cutoff
+date = true
+model = true  # whether the block names the active model and thinking level
+
+[git]
+# append a <git> block naming the branch, its divergence from upstream, the
+# dirty files, and the last few commits, read once at session start
+snapshot = true
+commits = 5  # how many recent commit subjects the block carries
+# cap on the dirty-file list, so a repo mid-rebase cannot flood the prompt.
+# what is dropped is reported as a count
+max-files = 20
+timeout-ms = 2000  # give up on git status and git log after this long and append no block
+
+[scratch]
+# where the session scratch directory goes. project puts it in
+# .rho/scratch/<session>/ inside the working tree, where a workspace-confined
+# tool can still read it; data-dir puts it under the rho data directory;
+# off registers nothing and leaves /tmp as the only option
+location = "project"
+keep-days = 7  # remove scratch directories untouched for this many days, when a session opens
+
+[prompt]
+# rewrite the system prompt into the house style before the session
+# starts: em dashes to the mark the sentence needs, characters and
+# spacing per system/orthography.md, lower case at a sentence start,
+# and one line per list item punctuated x; y; z. every markdown file
+# in rho is already a fixed point of this, so it changes only the
+# text pi and the bundled packages contribute
+disenshittify = true
 
 [render]
 # a Box's blank padding rows become half-height block characters, so a

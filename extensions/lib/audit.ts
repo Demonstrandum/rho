@@ -100,11 +100,11 @@ const systemPrompt = [
  */
 type ForcedToolChoice = 'any' | 'required' | { readonly type: 'tool'; readonly name: string };
 
-function forcedToolChoice(api: Api): ForcedToolChoice | undefined {
+export function forcedToolChoice(api: Api, tool: string = TOOL_NAME): ForcedToolChoice | undefined {
     switch (api) {
         case 'anthropic-messages':
         case 'bedrock-converse-stream':
-            return { type: 'tool', name: TOOL_NAME };
+            return { type: 'tool', name: tool };
         case 'google-generative-ai':
         case 'google-vertex':
             return 'any';
@@ -129,6 +129,7 @@ export function resolveReviewer(
     spec: string,
     sessionModel: Model<Api> | undefined,
     registry: ModelLookup,
+    setting: string = 'audit.model',
 ): { readonly ok: true; readonly model: Model<Api> } | { readonly ok: false; readonly message: string } {
     if (spec === 'current') {
         return sessionModel
@@ -137,7 +138,7 @@ export function resolveReviewer(
     }
     const slash = spec.indexOf('/');
     if (slash <= 0 || slash === spec.length - 1) {
-        return { ok: false, message: `audit.model must be "provider/id" or "current", got "${spec}"` };
+        return { ok: false, message: `${setting} must be "provider/id" or "current", got "${spec}"` };
     }
     const model = registry.find(spec.slice(0, slash), spec.slice(slash + 1));
     return model ? { ok: true, model } : { ok: false, message: `reviewer model ${spec} is unavailable` };
@@ -181,7 +182,7 @@ export async function runAudit(ctx: AuditContext, text: string): Promise<AuditRe
     if (!resolved.ok) return { kind: 'error', reviewer: config.audit.model, message: resolved.message };
 
     const reviewer = `${resolved.model.provider}/${resolved.model.id}`;
-    const toolChoice = forcedToolChoice(resolved.model.api);
+    const toolChoice = forcedToolChoice(resolved.model.api, TOOL_NAME);
     const timeout = deadline(ctx.signal, config.audit.timeoutMs);
     try {
         const response = await ctx.modelRegistry.complete(

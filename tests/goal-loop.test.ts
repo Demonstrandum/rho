@@ -34,6 +34,8 @@ interface Harness {
     readonly sent: string[];
     readonly notified: string[];
     readonly entries: RecordedEntry[];
+    /** widget keys currently drawn, so a spinner left running is visible here. */
+    readonly widgets: Set<string>;
     pending: boolean;
 }
 
@@ -43,6 +45,7 @@ function harness(): Harness {
     const sent: string[] = [];
     const notified: string[] = [];
     const entries: RecordedEntry[] = [];
+    const widgets = new Set<string>();
 
     const pi = {
         on: (name: string, handler: Handler) => handlers.set(name, handler),
@@ -58,9 +61,15 @@ function harness(): Harness {
     const state = { pending: false };
     const ctx = {
         cwd: '/tmp',
+        hasUI: true,
         ui: {
             setStatus: () => {},
             notify: (text: string) => notified.push(text),
+            setWidget: (key: string, lines: string[] | undefined) => {
+                if (lines === undefined) widgets.delete(key);
+                else widgets.add(key);
+            },
+            theme: { fg: (_role: string, text: string) => text },
         },
         // no session id means no state file, so the loop under test writes nothing.
         sessionManager: { getSessionId: () => undefined, getBranch: () => [], buildContextEntries: () => [] },
@@ -94,6 +103,7 @@ function harness(): Harness {
         sent,
         notified,
         entries,
+        widgets,
         get pending() {
             return state.pending;
         },
@@ -129,6 +139,18 @@ test('a met verdict clears the goal and sends nothing back', async () => {
     expect(h.sent).toHaveLength(1);
     await h.settle();
     expect(calls).toBe(1);
+});
+
+test('the spinner is taken down however the check ends', async () => {
+    const h = harness();
+    await h.start();
+    await h.command('tests pass');
+
+    queued = [verdict('unmet', 'still failing'), verdict('error', 'judge did not answer')];
+    await h.settle();
+    expect(h.widgets.size).toBe(0);
+    await h.settle();
+    expect(h.widgets.size).toBe(0);
 });
 
 test('an unmet verdict restarts the turn with the reason as its input', async () => {

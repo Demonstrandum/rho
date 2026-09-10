@@ -47,6 +47,12 @@ export const isStringArray = guard<string[]>(
     'array of string',
     (v) => Array.isArray(v) && v.every((element) => typeof element === 'string'),
 );
+// one line or a pool to draw from, so a setting that names a message does not
+// force a single-element array on anyone who only wants one.
+export const isStringOrStringArray = guard<string | string[]>(
+    'string or array of string',
+    (v) => typeof v === 'string' || (Array.isArray(v) && v.every((element) => typeof element === 'string')),
+);
 export const isNumberArray = guard<number[]>(
     'array of number',
     (v) => Array.isArray(v) && v.every((element) => typeof element === 'number'),
@@ -130,6 +136,17 @@ interface AnyField {
 
 type Section = Record<string, AnyField>;
 type Schema = Record<string, Section>;
+
+/**
+ * the TOML face of a schema identifier. a section is named by its javascript
+ * property, which has to be an identifier, so `sendNow` reached the file as
+ * `[sendNow]` while every key beside it was kebab-case. deriving the name means
+ * the file spells one convention throughout and no section can drift from its
+ * property.
+ */
+export function tomlName(identifier: string): string {
+    return identifier.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+}
 
 /** one property per field, typed by that field's default. */
 type ConfigOf<S extends Schema> = {
@@ -226,6 +243,15 @@ const SCHEMA = {
             isPosInt,
             4000,
             'longest condition accepted by /goal',
+        ),
+        checkingMessages: field(
+            'checking-messages',
+            isStringOrStringArray,
+            [],
+            'what the spinner says while the judge reads the transcript. one string',
+            'is used every time; an array is drawn from at each check; the empty',
+            'array (the default) draws from extensions/assets/maxims.txt, the same',
+            'pool the working message uses',
         ),
         persist: field(
             'persist',
@@ -671,6 +697,11 @@ export type RhoConfig = ConfigOf<typeof SCHEMA>;
 // string-keyed view of SCHEMA, for the walks below.
 const SECTIONS: Schema = SCHEMA;
 
+// TOML name -> schema property, for reading a file back.
+const SECTION_IDS: ReadonlyMap<string, string> = new Map(
+    Object.keys(SCHEMA).map((identifier) => [tomlName(identifier), identifier]),
+);
+
 function defaults(): RhoConfig {
     const out: Record<string, Record<string, unknown>> = {};
     for (const [section, fields] of Object.entries(SECTIONS)) {
@@ -726,49 +757,60 @@ export function resolveConfig(raw: RawConfig): {
 } {
     const out = defaults() as unknown as Record<string, Record<string, unknown>>;
     const problems: ConfigProblem[] = [];
-    const sectionNames = Object.keys(SECTIONS);
+    const sectionNames = [...SECTION_IDS.keys()];
 
+    // a section written under any spelling that squashes to a known one still
+    // applies, so a file holding the old `[sendNow]` keeps its settings instead
+    // of silently falling back to the defaults; the problem list names the
+    // spelling to move to.
+    const tables = new Map<string, Record<string, unknown>>();
     for (const [name, value] of Object.entries(raw)) {
-        if (!(name in SECTIONS)) {
-            const suggestion = nearest(name, sectionNames);
+        const canonical = SECTION_IDS.has(name) ? name : nearest(name, sectionNames);
+        if (canonical === undefined) {
             problems.push({
                 at: name,
-                message: suggestion
-                    ? `unknown section, did you mean [${suggestion}]?`
-                    : `unknown section, ignored (known: ${sectionNames.join(', ')})`,
+                message: `unknown section, ignored (known: ${sectionNames.join(', ')})`,
             });
             continue;
         }
         if (!isTable(value)) {
             problems.push({ at: name, message: `expected a [${name}] table, got ${describe(value)}` });
+            continue;
         }
+        if (canonical !== name) {
+            problems.push({ at: name, message: `section is spelled [${canonical}]; the values were applied` });
+        }
+        tables.set(canonical, value);
     }
 
     for (const [section, fields] of Object.entries(SECTIONS)) {
-        const rawSection = raw[section];
-        if (!isTable(rawSection)) continue;
+        const rawSection = tables.get(tomlName(section));
+        if (rawSection === undefined) continue;
 
         const keys = Object.values(fields).map((f) => f.key);
-        for (const key of Object.keys(rawSection)) {
-            if (keys.includes(key)) continue;
-            const suggestion = nearest(key, keys);
-            problems.push({
-                at: `${section}.${key}`,
-                message: suggestion
-                    ? `unknown key, did you mean ${suggestion}?`
-                    : `unknown key, ignored (known: ${keys.join(', ')})`,
-            });
-        }
+        const properties = new Map(Object.entries(fields).map(([name, f]) => [f.key, name]));
+        const at = tomlName(section);
 
-        for (const [name, f] of Object.entries(fields)) {
-            const value = rawSection[f.key];
-            if (value === undefined) continue;
+        // a key is resolved the way a section is: exact spelling first, then any
+        // spelling that squashes to a known one, so `halfBlocks` and
+        // `half_blocks` set `half-blocks` rather than being dropped.
+        for (const [key, value] of Object.entries(rawSection)) {
+            const canonical = properties.has(key) ? key : nearest(key, keys);
+            if (canonical === undefined) {
+                problems.push({ at: `${at}.${key}`, message: `unknown key, ignored (known: ${keys.join(', ')})` });
+                continue;
+            }
+            const name = properties.get(canonical)!;
+            const f = fields[name];
             if (!f.check(value)) {
                 problems.push({
-                    at: `${section}.${f.key}`,
+                    at: `${at}.${canonical}`,
                     message: `expected ${f.check.label}, got ${JSON.stringify(value)}; using default ${JSON.stringify(f.default)}`,
                 });
                 continue;
+            }
+            if (canonical !== key) {
+                problems.push({ at: `${at}.${key}`, message: `key is spelled ${canonical}; the value was applied` });
             }
             out[section][name] = value;
         }
@@ -785,7 +827,7 @@ function toRaw(cfg: RhoConfig): Record<string, Record<string, unknown>> {
         for (const [name, f] of Object.entries(fields)) {
             emitted[f.key] = live[section][name];
         }
-        out[section] = emitted;
+        out[tomlName(section)] = emitted;
     }
     return out;
 }
@@ -805,7 +847,8 @@ function annotate(toml: string): string {
     for (const line of toml.split('\n')) {
         const header = line.match(/^\[([^\]]+)\]$/);
         if (header) {
-            fields = SECTIONS[header[1]];
+            const identifier = SECTION_IDS.get(header[1]);
+            fields = identifier === undefined ? undefined : SECTIONS[identifier];
             out.push(line);
             continue;
         }

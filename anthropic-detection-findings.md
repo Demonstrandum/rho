@@ -30,7 +30,7 @@ extra usage has a hard spend cap (already overspent), so every such request retu
 every response carries `anthropic-ratelimit-unified-*` headers revealing three layers:
 
 1. plan claims: `5h` and `7d` windows (`...-5h-status=allowed`, `...-5h-utilization=0.07`)
-2. first-party fallback: `...-fallback-percentage=0.5` (claude code's 50% policy)
+2. first-party fallback: `...-fallback-percentage=0.5` (claude code's 50% policy).
 3. overage (extra usage, paid): `...-overage-status=rejected`, `...-overage-disabled-reason=org_spend_cap_reached`, `...-overage-utilization=4.05`
 
 `...-representative-claim=five_hour` on accepted requests = billed to the plan.

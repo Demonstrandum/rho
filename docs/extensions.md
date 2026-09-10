@@ -37,6 +37,25 @@ a working tree that cannot be written to yields no scratch directory rather than
 
 `prompt-defingerprint.ts` rewrites the lines of pi's built-in system prompt that anthropic's server-side classifier signatures as third-party (the pi documentation section); requests carrying them are routed to extra-usage billing only, so the rewrite keeps subscription OAuth requests on plan billing.
 details in `../anthropic-detection-findings.md`.
+its patterns ignore case and its replacements are written in the house style, so it holds whichever side of `prompt-disenshittify.ts` it runs on.
+
+`prompt-disenshittify.ts` rewrites the assembled system prompt into the house style on `before_agent_start`, through `lib/disenshittification.ts`.
+the text it changes is pi's own head and the tool snippets the bundled packages contribute: an em dash between clauses becomes the mark the sentence needs, characters and spacing follow `../system/orthography.md`, a sentence-initial capital falls, and a list item is punctuated `x; y; z.`
+every markdown file in rho is a fixed point of the transform, which `../tests/disenshittification.test.ts` asserts over the whole repository, so nothing written here is touched.
+
+three properties make that safe to run over a prompt.
+protected spans first: fenced and inline code, urls, absolute and relative paths, bare filenames, `{{template}}` directives, and xml tags are masked before any substitution and restored after, since o6 says the bytes inside them are what a parser reads.
+a path is a name on disk, so its case is not the writer's to choose, and `<location>/Users/Sam/...` survives intact.
+line structure second: reflow does not cross a tag, so an `<env>` listing or a multi-line skill `<description>` keeps the breaks its writer set, and a list item arriving on one line leaves on one line.
+idempotence third: every transform and the pipeline satisfy `f(f(x)) = f(x)`, which the tests hold, because the rewrite runs on every session start and the same text also reaches a human through `bun run unshitty`.
+
+case is the one rule that cannot be made complete.
+only a sentence-initial capital falls, because a capital inside a sentence is a name, an acronym, or deliberate, and no list distinguishes them: `Erdős` and every product released next year would need an entry.
+names spelled `Like This` at a sentence start are kept by a small list in the module, and a word with an internal capital or one written in capitals throughout is a name by its shape and needs no entry.
+
+`[prompt] disenshittify = false` turns the rewrite off.
+`RHO_DISENSHITTIFY_OFF=1` disables it for one process, which is how `../tools/unshitty.ts` captures the prompt as it stands before the rewrite in order to diff it.
+the anthropic block (`You are Claude Code, ...`) is never in this text: the transport adds it as a separate system block at request time, and it is what keeps an oauth request on plan billing.
 
 `skill-listing.ts` undoes the xml escaping pi applies to every skill name, description, and path before putting them in the `<available_skills>` block (`formatSkillsForPrompt` in `dist/core/skills.js`).
 nothing parses that block as xml: the tags group the listing and the model reads the text, so a description reading `Triggers: "analyze logs"` arrives as `&quot;analyze logs&quot;` and the model is shown a spelling of the trigger word that is not the trigger word.

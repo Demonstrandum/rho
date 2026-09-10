@@ -6,10 +6,14 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 // ddmin against the live classifier reduced the signature to the co-occurrence of
 // the lines below; these rewrites keep the meaning but drop the signatured token
 // sets. no-ops on lines pi has already reworded upstream.
+//
+// the patterns ignore case and the replacements are written in the house style,
+// so these hold whether prompt-disenshittify.ts has run over the prompt yet or
+// not. see its header for the ordering.
 const RULES: [RegExp, string][] = [
-    [/^- When asked about:.*$/m, '- For questions about pi itself, consult the pi documentation files listed above'],
-    [/^Pi documentation \(read only when.*\):$/m, 'Bundled pi CLI docs, relevant only when the user asks about the harness itself:'],
-    [/^- When working on pi topics, read the docs.*$/m, '- For harness work, read the bundled docs and examples, following their cross-references'],
+    [/^- when asked about:.*$/im, '- for questions about pi itself, consult the pi documentation files listed above.'],
+    [/^pi documentation \(read only when.*\):$/im, 'bundled pi CLI docs, relevant only when the user asks about the harness itself:'],
+    [/^- when working on pi topics, read the docs.*$/im, '- for harness work, read the bundled docs and examples, following their cross-references.'],
 ];
 
 export default function (pi: ExtensionAPI) {

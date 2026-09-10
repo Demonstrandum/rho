@@ -28,24 +28,24 @@ bundles my:
 - **extensions/**: TypeScript modules that add tools, commands, ui, hooks.
   `AGENTS.md` lists all of them in one line each, and `docs/extensions.md` says why each is built the way it is.
   a few worth naming here:
-  - `system-prompt.ts` assembles the rules in `system/` and appends them every session
+  - `system-prompt.ts` assembles the rules in `system/` and appends them every session.
   - `wordswap.ts` rewrites overused phrases in finalized messages, from `extensions/assets/wordswap.json`
-  - `spinner.ts` sets the working indicator and shimmering message from `assets/spinners.json` and `assets/maxims.txt` (chinese spinners by default; shimmer adapted from [pi-claude-shimmer](https://github.com/ouzhenkun/pi-claude-shimmer), MIT)
+  - `spinner.ts` sets the working indicator and shimmering message from `assets/spinners.json` and `assets/maxims.txt` (chinese spinners by default; shimmer adapted from [pi-claude-shimmer](https://github.com/ouzhenkun/pi-claude-shimmer), MIT).
   - `auditor.ts` + `lib/audit.ts` add `/audit`, which reviews the last assistant reply against the writer rules with a separate model, through one forced-tool call to `ctx.modelRegistry.complete`; configured under `[audit]` in `rho.toml` (`model`, `feedback`, `timeout-ms`, `audience`)
-  - `stash.ts`, `prompt-history.ts`, `send-now.ts` editor stack, persistent history, and a key that cuts into a running turn
-  - `search.ts` adds `/search` and a `pi_search` tool over pi's own commands and documentation
-  - `web.ts` adds `/web` to launch the [pi-web](https://github.com/jmfederico/pi-web) UI as a background service (and `/web status|stop|logs|...` passthrough)
+  - `stash.ts`, `prompt-history.ts`, `send-now.ts` editor stack, persistent history, and a key that cuts into a running turn.
+  - `search.ts` adds `/search` and a `pi_search` tool over pi's own commands and documentation.
+  - `web.ts` adds `/web` to launch the [pi-web](https://github.com/jmfederico/pi-web) UI as a background service (and `/web status|stop|logs|...` passthrough).
   - `agentica.ts` adds an `agentica` tool (runs python that can call MCP tools via the Agentica MCP Runtime), ported from [MathisWellmann/nixos-config](https://github.com/MathisWellmann/nixos-config)'s `pi-agent.nix`.
     off by default: only registers when `RHO_AGENTICA_RUNTIME` points at an agentica-mcp-runtime checkout (`RHO_AGENTICA_PYTHON` overrides the interpreter, default `<runtime>/.venv/bin/python`); with the env unset it is a no-op
 - **system/**: the system prompt fragments (`personal-rules.md`, `writer-rules.md`, `orthography.md`, `prose-style.md`, `vocabulary.md`)
 - **skills/**: on-demand capability packages (`SKILL.md`)
-- **prompts/**: reusable prompt templates (`/name` to expand)
+- **prompts/**: reusable prompt templates (`/name` to expand).
 - **themes/**: `plan9` (light) and `plan9-dark`, plan9/acme-inspired
 - **bundled packages** (installed automatically with rho, no separate install):
-  - [`pi-web-access`](https://github.com/nicobailon/pi-web-access): web fetch/search
+  - [`pi-web-access`](https://github.com/nicobailon/pi-web-access): web fetch/search.
   - [`@ayulab/pi-rewind`](https://github.com/ayu-exorcist/oh-my-pi): rewind
-  - [`context-mode`](https://github.com/mksglu/context-mode): context mode
-  - [`token-rate-pi`](https://www.npmjs.com/package/token-rate-pi): average output tokens/sec in the footer status line
+  - [`context-mode`](https://github.com/mksglu/context-mode): context mode.
+  - [`token-rate-pi`](https://www.npmjs.com/package/token-rate-pi): average output tokens/sec in the footer status line.
 
 ## install
 

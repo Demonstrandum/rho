@@ -33,6 +33,11 @@ transcript-fraction = 0.5
 # message, so a stalled loop costs this many turns rather than the session
 block-cap = 8
 max-chars = 4000  # longest condition accepted by /goal
+# what the spinner says while the judge reads the transcript. one string
+# is used every time; an array is drawn from at each check; the empty
+# array (the default) draws from extensions/assets/maxims.txt, the same
+# pool the working message uses
+checking-messages = []
 # restore an active goal when the session resumes. the condition comes
 # back; the timer, the turn count, and the token baseline restart
 persist = true
@@ -124,7 +129,7 @@ tint = 0.3
 gradient-colors = [ "border", "userMessageBg" ]
 bash-colors = [ "bashMode", "userMessageBg" ]  # gradient colour stops for bash mode
 
-[sendNow]
+[send-now]
 # stop the running turn and send the editor text now, instead of
 # queueing it until the turn reaches its next boundary. on an empty
 # editor it starts the queued steering messages now instead

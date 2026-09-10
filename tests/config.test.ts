@@ -8,6 +8,7 @@ import {
     isPosInt,
     isStringArray,
     isOneOf,
+    tomlName,
 } from '../extensions/lib/config';
 import { parse } from 'smol-toml';
 
@@ -160,13 +161,14 @@ test('every guard carries a label used in messages', () => {
     expect(isOneOf('a', 'b').label).toBe('"a" | "b"');
 });
 
-test('a misspelled key is reported with the intended key', () => {
+test('a key spelled another way still sets its field, and says so', () => {
     const cases = ['half_blocks', 'halfBlocks', 'Half-Blocks'];
     for (const key of cases) {
-        const { problems } = resolveConfig({ render: { [key]: false } });
+        const { config, problems } = resolveConfig({ render: { [key]: false } });
+        expect(config.render.halfBlocks).toBe(false);
         expect(problems).toHaveLength(1);
         expect(problems[0].at).toBe(`render.${key}`);
-        expect(problems[0].message).toBe('unknown key, did you mean half-blocks?');
+        expect(problems[0].message).toBe('key is spelled half-blocks; the value was applied');
     }
 });
 
@@ -177,10 +179,33 @@ test('an unrecognisable key lists the known keys', () => {
     expect(problems[0].message).toContain('half-blocks');
 });
 
-test('a misspelled section is reported with the intended section', () => {
-    const { problems } = resolveConfig({ Render: { 'half-blocks': false } });
+test('a section spelled another way still applies, and says so', () => {
+    const { config, problems } = resolveConfig({ Render: { 'half-blocks': false } });
+    expect(config.render.halfBlocks).toBe(false);
     expect(problems).toHaveLength(1);
-    expect(problems[0].message).toBe('unknown section, did you mean [render]?');
+    expect(problems[0].message).toBe('section is spelled [render]; the values were applied');
+});
+
+test('a camelCase section identifier is written and read as kebab-case', () => {
+    expect(tomlName('sendNow')).toBe('send-now');
+    expect(tomlName('render')).toBe('render');
+    expect(toToml(DEFAULTS)).toContain('[send-now]');
+    expect(toToml(DEFAULTS)).not.toContain('[sendNow]');
+
+    // the old spelling keeps working, so an existing file loses no settings.
+    const { config, problems } = resolveConfig({ sendNow: { send: 'ctrl+j' } });
+    expect(config.sendNow.send).toBe('ctrl+j');
+    expect(problems[0].message).toBe('section is spelled [send-now]; the values were applied');
+});
+
+test('the whole emitted file is kebab-case, sections and keys alike', () => {
+    const kebab = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+    const emitted = parse(toToml(DEFAULTS)) as Record<string, Record<string, unknown>>;
+
+    for (const [section, table] of Object.entries(emitted)) {
+        expect(section).toMatch(kebab);
+        for (const key of Object.keys(table)) expect(key).toMatch(kebab);
+    }
 });
 
 test('an unknown section is reported and ignored', () => {

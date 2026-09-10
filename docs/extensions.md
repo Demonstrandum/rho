@@ -18,6 +18,17 @@ the block is built once and reused, because it sits in the cached prefix of ever
 the working directory and the model can change mid-session (`/cwd`, `ctrl+l`), and those do rebuild it, since one cache miss is cheaper than a prompt that names the wrong model.
 every line is switchable from `[env]`.
 
+`bun-runtime.ts` + `lib/bun-launcher.ts` stop a session that is running under node, after trying to move it to bun.
+pi ships `dist/bundle/cli.js` with `#!/usr/bin/env node` and the shim on `PATH` is a symlink to that file, so one line decides the interpreter, and `pi update` restores it on every upgrade.
+rho is written against bun: `env-block.ts` and `lib/git-snapshot.ts` read the work tree with `Bun.spawn`, and under node that raises `ReferenceError: Bun is not defined`, which their `catch` turns into `git repo: no` and a missing `<git>` block.
+the prompt then states a falsehood about the directory with nothing on screen to say why, which is worse than not starting, so the wrong runtime is a hard stop rather than a degraded session.
+the extension patches the shebang of `cli.js` and of `rpc-entry.js` beside it, then re-runs pi under bun by path with the same arguments and exits with the child's status: the patch fixes later launches, the re-run fixes the current one and does not depend on the patch having landed.
+`RHO_BUN_REEXEC` marks the child, and a child that arrives under node again means something outside rho selects node, so that case prints the note instead of looping.
+only a first line naming node is rewritten; anything else is reported and left alone, since guessing at an install of an unexpected shape breaks a launcher that works.
+the factory runs while pi is still starting up, before the TUI owns the terminal, which is what makes stderr and `process.exit` usable here.
+`[runtime]` switches the whole check off (`enforce-bun`), the patch (`patch-launcher`), or the re-run (`reexec`).
+`tools/bun-shebang.ts` runs the same repair from `postinstall`, and `bun run doctor` reports the launcher's interpreter.
+
 `git-snapshot.ts` + `lib/git-snapshot.ts` append a `<git>` block: the branch and its divergence from upstream, the dirty files, and the last few commit subjects.
 without it a session opens with the agent running `git status` and `git log` by hand to learn what it is standing in, and an agent that skips those edits from a wrong picture of the tree.
 the read starts at `session_start` and is awaited at the first turn: `git status` on a large work tree is not instant and `session_start` is awaited during startup, so blocking there delays the first paint, while by the time a prompt has been typed the read has finished.
@@ -248,6 +259,10 @@ it fails with the upgrade command when bun is older than 1.2.0, or when the inst
 
 `tools/preflight.ts` (`bun run doctor`) checks bun, node, pi, git, and that pi's `@earendil-works` package directory is findable.
 `--install` is the postinstall form, where a missing pi is a warning rather than an error, since installing rho before pi is a normal order.
+
+`tools/bun-shebang.ts` (`bun run bun-shebang`, `--check`) points pi's launcher at bun, from `postinstall` so a `pi update` that restores the node shebang is undone at the next install.
+it shares `extensions/lib/bun-launcher.ts` with `bun-runtime.ts`, so the install-time repair and the startup repair are one implementation.
+a failure is a warning at install time, since a machine can install rho before pi.
 
 `tools/pi-location.ts` finds pi's install, shared by `preflight.ts` and `link-pi-packages.ts`.
 it strips `node_modules/.bin` from `PATH` before asking for pi, because `bun run` prepends it and rho's devDependency copy of pi would answer instead of the installed one, and it walks up from the resolved cli entry to the directory named `@earendil-works` rather than counting `..` steps, since pi's entry path has moved between releases (`dist/cli.js`, `dist/bundle/cli.js`).

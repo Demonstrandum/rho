@@ -18,6 +18,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { findPiBinary, findPiScope, userPath } from './pi-location';
+import { findLauncher, readLauncher } from '../extensions/lib/bun-launcher';
 
 /** the versions rho is developed against. bump with the code that needs it. */
 const MINIMUM = {
@@ -180,6 +181,48 @@ function checkPiScope(mode: Mode): Report {
     return { name: 'pi packages', found: scope, problem: null };
 }
 
+/**
+ * rho calls Bun APIs from its extensions, so what matters is the interpreter
+ * pi's launcher names, not which runtime installed rho. pi ships a node
+ * shebang and restores it on every update.
+ */
+function checkPiRuntime(mode: Mode): Report {
+    const launcher = findLauncher();
+    if (launcher === null) {
+        return {
+            name: 'pi runtime',
+            found: null,
+            problem: {
+                severity: 'warning',
+                detail: 'pi is not on PATH, so its launcher shebang cannot be read',
+                fix: 'bun install -g @earendil-works/pi-coding-agent',
+            },
+        };
+    }
+    const found = readLauncher(launcher);
+    if ('detail' in found) {
+        return {
+            name: 'pi runtime',
+            found: launcher,
+            problem: {
+                severity: 'warning',
+                detail: `${launcher} could not be read: ${found.detail}`,
+                fix: 'bun tools/bun-shebang.ts',
+            },
+        };
+    }
+    if (found.interpreter === 'bun') return { name: 'pi runtime', found: `bun (${launcher})`, problem: null };
+    return {
+        name: 'pi runtime',
+        found: `${found.interpreter} (${launcher})`,
+        problem: {
+            severity: mode === 'install' ? 'warning' : 'error',
+            detail: `pi's launcher starts with "${found.shebang}"; rho needs bun, and under node its git readers fail silently`,
+            fix: 'bun tools/bun-shebang.ts',
+        },
+    };
+}
+
 function checkGit(): Report {
     return {
         name: 'git',
@@ -193,7 +236,7 @@ function checkGit(): Report {
 }
 
 export function runPreflight(mode: Mode): readonly Report[] {
-    return [checkBun(), checkNode(), checkPi(mode), checkPiScope(mode), checkGit()];
+    return [checkBun(), checkNode(), checkPi(mode), checkPiScope(mode), checkPiRuntime(mode), checkGit()];
 }
 
 function report(mode: Mode): number {

@@ -411,6 +411,30 @@ const SCHEMA = {
             'too. the /search command is registered either way',
         ),
     },
+    runtime: {
+        enforceBun: field(
+            'enforce-bun',
+            isBool,
+            true,
+            'stop the session when pi is running under node. rho calls Bun APIs, and',
+            'under node those calls fail in ways that reach the prompt as false',
+            'statements about the work tree',
+        ),
+        patchLauncher: field(
+            'patch-launcher',
+            isBool,
+            true,
+            "rewrite the shebang of pi's launcher from node to bun, so the next launch",
+            'is bun. every pi update restores the node shebang, so this runs again',
+        ),
+        reexec: field(
+            'reexec',
+            isBool,
+            true,
+            'when started under node, re-run pi under bun with the same arguments',
+            'and exit with the status of that run. off means print a note and stop',
+        ),
+    },
     env: {
         enabled: field(
             'enabled',

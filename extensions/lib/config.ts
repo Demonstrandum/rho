@@ -490,6 +490,19 @@ const SCHEMA = {
             'remove scratch directories untouched for this many days, when a session opens',
         ),
     },
+    prompt: {
+        disenshittify: field(
+            'disenshittify',
+            isBool,
+            true,
+            'rewrite the system prompt into the house style before the session',
+            'starts: em dashes to the mark the sentence needs, characters and',
+            'spacing per system/orthography.md, lower case at a sentence start,',
+            'and one line per list item punctuated x; y; z. every markdown file',
+            'in rho is already a fixed point of this, so it changes only the',
+            'text pi and the bundled packages contribute',
+        ),
+    },
     render: {
         halfBlocks: field(
             'half-blocks',

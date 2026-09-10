@@ -17,8 +17,9 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `env-block.ts` appends an `<env>` block: cwd, git work tree, platform, date, model, `[env]`
   - `git-snapshot.ts` appends a `<git>` block: branch, upstream divergence, dirty files, recent commits, `[git]`
   - `scratchpad.ts` gives the session a scratch directory, names it in the prompt and in `RHO_SCRATCH`, `[scratch]`
-  - `prompt-defingerprint.ts` rewrites the lines of pi's prompt that anthropic classifies as third-party, keeping OAuth requests on plan billing
-  - `skill-listing.ts` flattens pi's `<available_skills>` block: xml escapes undone, indentation dropped
+  - `prompt-defingerprint.ts` rewrites the lines of pi's prompt that anthropic classifies as third-party, keeping OAuth requests on plan billing.
+  - `prompt-disenshittify.ts` rewrites the whole system prompt into the house style: dashes, characters, case, list punctuation, `[prompt]`.
+  - `skill-listing.ts` flattens pi's `<available_skills>` block: xml escapes undone, indentation dropped.
   - `wordswap.ts` swaps overused phrases in finalized messages, from `assets/wordswap.json`; `/noswap` per message, `[wordswap]`
   - `auditor.ts` `/audit` reviews the last reply against the writer rules with a second model, `[audit]`
   - `stash.ts` `ctrl+s` parks the editor text, `ctrl+r` pops, `/stash` opens the picker, `[stash]`
@@ -27,39 +28,39 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `cwd.ts` `/cwd [path]` changes the agent's working directory mid-session, `[cwd]`
   - `input-field.ts` styles the input field: half-block edges, background, gradient, `[input]`
   - `spinner.ts` working indicator and shimmering message, from `assets/spinners.json`, `maxims.txt`, `verbs.txt`
-  - `startup.ts` replaces pi's startup block with a compact header
-  - `footer.ts` replaces the footer to customise the token arrow glyphs
+  - `startup.ts` replaces pi's startup block with a compact header.
+  - `footer.ts` replaces the footer to customise the token arrow glyphs.
   - `halfblock-boxes.ts` four render patches (half-block padding, tighter tool rows, no idle status), `[render]`
   - `ctx-exec-preview.ts` shortens context-mode's exec tool rows, `[render] exec-preview`
   - `clear-on-shrink.ts` persists `terminal.clearOnShrink=true`
   - `image-width.ts` persists `terminal.imageWidthCells`, `[images] width`
   - `image-size.ts` caps inline image height at a fraction of the terminal, `[images] max-height-fraction`
   - `silence-extra-usage-warning.ts` persists `warnings.anthropicExtraUsage=false`
-  - `extra-usage-watch.ts` warns once when response headers show extra-usage billing
-  - `merge-thinking-blocks.ts` merges adjacent thinking blocks in the anthropic payload, which the api rejects
+  - `extra-usage-watch.ts` warns once when response headers show extra-usage billing.
+  - `merge-thinking-blocks.ts` merges adjacent thinking blocks in the anthropic payload, which the api rejects.
   - `rewind-guard.ts` gates pi-rewind's per-turn checkpoint to directories where it can finish, `[rewind]`
   - `search.ts` `/search` and a `pi_search` tool over pi's commands and docs, `[search]`
-  - `context.ts` `/context` context-window readout
-  - `web.ts` `/web` runs the pi-web UI as a background service
+  - `context.ts` `/context` context-window readout.
+  - `web.ts` `/web` runs the pi-web UI as a background service.
   - `rho.ts` `/rho config` shows and writes the live `rho.toml`
-  - `agentica.ts` an `agentica` MCP tool, registered only when `RHO_AGENTICA_RUNTIME` is set
-  - `lib/` shared modules, in a subdirectory so auto-discovery does not load them: `config.ts` (`rho.toml`), `state-store.ts` (on-disk extension state, scoped global/project/session), `settings-store.ts` (idempotent settings writes), `prompt-loader.ts`, `template.ts`, `source-str.ts`, `utils.ts`, `audit.ts`, `stash.ts`, `prompt-history.ts`, `pi-docs.ts`, `steering-mirror.ts`, `keybindings-store.ts`, `checkpoint-breaker.ts`, `exec-preview.ts`, `pi-logo.ts`, `tetris-logo.ts`
+  - `agentica.ts` an `agentica` MCP tool, registered only when `RHO_AGENTICA_RUNTIME` is set.
+  - `lib/` shared modules, in a subdirectory so auto-discovery does not load them: `config.ts` (`rho.toml`), `state-store.ts` (on-disk extension state, scoped global/project/session), `settings-store.ts` (idempotent settings writes), `prompt-loader.ts`, `disenshittification.ts` (the house-style rewrite), `reflow.ts` (one sentence per line), `template.ts`, `source-str.ts`, `utils.ts`, `audit.ts`, `stash.ts`, `prompt-history.ts`, `pi-docs.ts`, `steering-mirror.ts`, `keybindings-store.ts`, `checkpoint-breaker.ts`, `exec-preview.ts`, `pi-logo.ts`, `tetris-logo.ts`
   - `assets/` data files (`spinners.json`, `maxims.txt`, `verbs.txt`, `wordswap.json`, `agentica_helper.py`)
 - `skills/` on-demand skills (`SKILL.md` folders + top-level `.md`)
 - `prompts/` prompt templates, expanded with `/name`
 - `themes/` color themes (`.json`)
 - `system/` the system prompt, assembled from fragments (see `system/README.md`)
-  - `prompt.md` master template; shows the full shape with `{{include:...}}` directives
-  - `personal-rules.md` conventions, design, editing, tooling, risky actions, writing
-  - `writer-rules.md` ASD-STE100 derived prose standard (13 rule categories)
-  - `orthography.md` `o` rules: the four registers (`code`, `technical`, `prose`, `verbatim`) and which rules each takes, punctuation placed by scope rather than by appearance, character substitutions, numbers, and one sentence per line
-  - `prose-style.md` `p` rules, for the `prose` register: British spelling with the `-ise`/`-ize` split stated by etymology, the diaeresis, exact numbers in digits and inexact ones spelled out, collective plurals, and close punctuation with the comma outside the closing quote
+  - `prompt.md` master template; shows the full shape with `{{include:...}}` directives.
+  - `personal-rules.md` conventions, design, editing, tooling, risky actions, writing.
+  - `writer-rules.md` ASD-STE100 derived prose standard (13 rule categories).
+  - `orthography.md` `o` rules: the four registers (`code`, `technical`, `prose`, `verbatim`) and which rules each takes, punctuation placed by scope rather than by appearance, character substitutions, numbers, and one sentence per line.
+  - `prose-style.md` `p` rules, for the `prose` register: British spelling with the `-ise`/`-ize` split stated by etymology, the diaeresis, exact numbers in digits and inexact ones spelled out, collective plurals, and close punctuation with the comma outside the closing quote.
   - `vocabulary.md` sub-template for the word/pattern swap list (`{{WORDS}}`, `{{PATTERNS}}`)
-- `docs/extensions.md` why each extension is built the way it is; read it before changing one
-- `extensions/assets/spinners.json` spinner definitions keyed by name (`category`, `interval`, `frames`); enabled categories live in `spinner.ts` (`chinese` by default)
-- `extensions/assets/maxims.txt` working messages, one per line, `;` comments, picked at random each turn
+- `docs/extensions.md` why each extension is built the way it is; read it before changing one.
+- `extensions/assets/spinners.json` spinner definitions keyed by name (`category`, `interval`, `frames`); enabled categories live in `spinner.ts` (`chinese` by default).
+- `extensions/assets/maxims.txt` working messages, one per line, `;` comments, picked at random each turn.
 - `extensions/assets/verbs.txt` completion verbs, one per line, `;` comments, picked at random for the settle line (`完 <verb> for <duration>`)
-- `package.json` the `pi` manifest declaring resource paths
+- `package.json` the `pi` manifest declaring resource paths.
 - bundled third-party packages (in `dependencies` + `bundledDependencies`, referenced via `node_modules/...` in the `pi` manifest): `pi-web-access`, `@ayulab/pi-rewind`, `context-mode`, `token-rate-pi` (shows average output tokens/sec in the footer status line).
   they install and load automatically with rho.
 
@@ -67,15 +68,16 @@ if an entry here is growing past two lines, that is the signal to move it.
 
 one line each; the detail is in `docs/extensions.md`.
 
-- `ci/mock-provider.ts` a local openai-completions server standing in for a model, scripted by turn
-- `ci/smoke.ts` (`bun run smoke`) end-to-end check in a temporary tree: no api key, no network, nothing written outside it
-- `ci/Dockerfile` (`bun run smoke:docker`) node 24 slim plus bun, rho installed as a user package so the install path is covered
-- `.github/workflows/ci.yml` `checks` (typecheck + `bun test`) and `smoke`, on push, pull request, dispatch, and daily
-- `tools/version-gate.mjs`, `tools/preflight.ts` (`bun run doctor`), `tools/pi-location.ts` install-time checks and pi discovery
-- `tools/prompt-explorer.ts` (`bun run prompt`, `prompt:cli`, `prompt:preview`, `prompt:plain`) shows the assembled prompt
-- `tools/prompt-full.ts` (`bun run prompt:full`) shows the prompt as the provider receives it, pi's text included
-- `tools/reflow.ts` rewrites markdown to one sentence per line; run it after editing markdown here
-- `tools/thinking-replay-probe.ts`, `tools/box-mockup.ts`, `tools/init-config.ts`, `tools/link-pi-packages.ts` one-off probes and setup
+- `ci/mock-provider.ts` a local openai-completions server standing in for a model, scripted by turn.
+- `ci/smoke.ts` (`bun run smoke`) end-to-end check in a temporary tree: no api key, no network, nothing written outside it.
+- `ci/Dockerfile` (`bun run smoke:docker`) node 24 slim plus bun, rho installed as a user package so the install path is covered.
+- `.github/workflows/ci.yml` `checks` (typecheck + `bun test`) and `smoke`, on push, pull request, dispatch, and daily.
+- `tools/version-gate.mjs`, `tools/preflight.ts` (`bun run doctor`), `tools/pi-location.ts` install-time checks and pi discovery.
+- `tools/prompt-explorer.ts` (`bun run prompt`, `prompt:cli`, `prompt:preview`, `prompt:plain`) shows the assembled prompt.
+- `tools/prompt-full.ts` (`bun run prompt:full`) shows the prompt as the provider receives it, pi's text included.
+- `tools/reflow.ts` (cli over `extensions/lib/reflow.ts`) rewrites markdown to one sentence per line; run it after editing markdown here.
+- `tools/unshitty.ts` (`bun run unshitty`, `unshitty:head`) diffs the live system prompt against its rewritten form; `$DIFF` picks the differ.
+- `tools/thinking-replay-probe.ts`, `tools/box-mockup.ts`, `tools/init-config.ts`, `tools/link-pi-packages.ts` one-off probes and setup.
 
 ## how it loads
 

@@ -51,7 +51,7 @@ test('the stated valid-rule set matches the actual Checks headings', () => {
 
     // the list runs to its own line end under one sentence per line, so the
     // gap before the next sentence is any whitespace, not a single space.
-    const introMatch = content.match(/may cite are:([\s\S]*?)\.\s+Any other number/);
+    const introMatch = content.match(/may cite are:([\s\S]*?)\.\s+any other number/);
     expect(introMatch).not.toBeNull();
     const stated = new Set(
         introMatch![1]

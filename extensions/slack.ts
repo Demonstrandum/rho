@@ -668,8 +668,22 @@ export default function (pi: ExtensionAPI) {
                 repliedExplicitly: false,
             };
         }
+        // A resume gives the session a new id, and the state is per session,
+        // so the new id starts blank and nothing reconnects: the app stays
+        // locked to an id that no longer exists and Slack goes quiet with
+        // everything still looking attached. The lock is what survives, so a
+        // lock held by this very process is inherited.
+        if (stored.app === null && sessionId !== null) {
+            for (const name of listApps()) {
+                const lock = readLock(name);
+                if (lock.kind === 'held' && lock.lock.pid === process.pid) {
+                    stored = { ...stored, app: name };
+                    break;
+                }
+            }
+        }
         if (!config.slack.reconnect || stored.app === null) return;
-        const resumed = await connect(stored.app, false);
+        const resumed = await connect(stored.app, true);
         if (ctx.hasUI) ctx.ui.notify(resumed.ok ? resumed.note : `Slack: ${resumed.why}`, resumed.ok ? 'info' : 'warning');
     });
 

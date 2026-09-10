@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { config } from './lib/config';
-import { render, snapshot, type Snapshot } from './lib/git-snapshot';
+import { render, renderFailure, snapshot, type Reading } from './lib/git-snapshot';
 
 // appends a <git> block: the branch and its divergence from upstream, the dirty
 // files, and the last few commit subjects.
@@ -22,7 +22,7 @@ import { render, snapshot, type Snapshot } from './lib/git-snapshot';
 export default function (pi: ExtensionAPI) {
     if (!config.git.snapshot) return;
 
-    let pending: Promise<Snapshot | null> | null = null;
+    let pending: Promise<Reading> | null = null;
     let block: string | null = null;
 
     pi.on('session_start', async (_event, ctx) => {
@@ -37,9 +37,11 @@ export default function (pi: ExtensionAPI) {
 
     pi.on('before_agent_start', async (event) => {
         if (block === null && pending !== null) {
-            const state = await pending;
+            const reading = await pending;
             pending = null;
-            if (state !== null) block = render(state);
+            // a read that failed says so; only a directory outside a work tree
+            // contributes nothing.
+            block = reading.kind === 'snapshot' ? render(reading.state) : renderFailure(reading.failure);
         }
         if (block === null) return;
         return { systemPrompt: `${event.systemPrompt}\n\n${block}` };

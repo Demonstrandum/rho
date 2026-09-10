@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { render, type RenderFields } from '../extensions/env-block';
+import { probeRepo, render, type RenderFields } from '../extensions/env-block';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const facts = {
     cwd: '/Users/samuel/Code/rho',
-    repo: true,
+    repo: 'yes' as const,
     platform: 'darwin 25.5.0',
     date: '2026-09-07',
     model: 'anthropic/claude-opus-4-5, thinking high',
@@ -39,6 +42,32 @@ describe('render', () => {
     });
 
     test('a directory that is not a work tree says so', () => {
-        expect(render({ ...facts, repo: false }, all)).toContain('git repo: no');
+        expect(render({ ...facts, repo: 'no' }, all)).toContain('git repo: no');
+    });
+
+    test('a probe that never ran is not reported as a directory without a repo', () => {
+        const out = render({ ...facts, repo: 'unknown' }, all);
+        expect(out).not.toContain('git repo: no');
+        expect(out).toContain('git repo: could not be determined');
+    });
+});
+
+describe('probeRepo', () => {
+    test('a work tree answers yes', async () => {
+        expect(await probeRepo(process.cwd())).toBe('yes');
+    });
+
+    test('a directory outside a work tree answers no', async () => {
+        expect(await probeRepo(mkdtempSync(join(tmpdir(), 'rho-nogit-')))).toBe('no');
+    });
+
+    test('a probe that cannot run answers unknown', async () => {
+        const path = process.env.PATH;
+        process.env.PATH = join(tmpdir(), 'rho-empty-path');
+        try {
+            expect(await probeRepo(process.cwd())).toBe('unknown');
+        } finally {
+            process.env.PATH = path;
+        }
     });
 });

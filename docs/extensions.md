@@ -16,6 +16,8 @@ pi gives the working directory and then says the agent can inspect `PI_*` enviro
 the date is the one that matters most: with no date in the prompt a model reasons from its training cutoff and dates every recent release wrongly.
 the block is built once and reused, because it sits in the cached prefix of every request and a byte that changes between turns invalidates the cache from that point on; a session running past midnight would otherwise pay a full re-read for a date nobody asked for.
 the working directory and the model can change mid-session (`/cwd`, `ctrl+l`), and those do rebuild it, since one cache miss is cheaper than a prompt that names the wrong model.
+the git line has three states, not two: `probeRepo` answers `yes` or `no` from what git said, and `unknown` when git could not be asked at all.
+folding a failed probe into `no` states a falsehood about the directory and leaves the agent no way to see that the probe was what failed, which is how the node runtime bug stayed invisible.
 every line is switchable from `[env]`.
 
 `bun-runtime.ts` + `lib/bun-launcher.ts` stop a session that is running under node, after trying to move it to bun.
@@ -36,6 +38,9 @@ a read that has not finished is dropped rather than waited on, and so is a direc
 the dirty list is capped by `[git] max-files` and what is dropped is reported as a count, because a truncated list read as complete asserts a cleanliness that is not there.
 the block states that it does not update, which is the part that matters on a resume: the read runs again for every session, so the text is at worst one session old, and the agent is told to look again before acting on it.
 `lib/git-snapshot.ts` holds the parsing and the rendering, so both are testable without a repository.
+a read that produced no snapshot returns a `Failure` naming which of the two happened: `not-a-repo`, from git's own message with `LC_ALL=C` so the match does not depend on the locale, contributes no block; `unavailable`, from a spawn that threw, a timeout, or any other non-zero exit, renders a `<git>` block saying the tree was not read.
+exit 128 is not the discriminator, since git uses it for every fatal error.
+the distinction is what the agent acts on: a missing block reads as "no repository here", and a tree that was never read must not look like that.
 
 `scratchpad.ts` + `lib/scratchpad.ts` give the session one directory for intermediate files, name it in a `<scratch>` block, and export it as `RHO_SCRATCH` so a bash call reaches it without the path being retyped.
 the alternative is what happened before it: temporary work goes to `/tmp`, mixed with every other process's files, surviving the session, and refused by any tool confined to the workspace.

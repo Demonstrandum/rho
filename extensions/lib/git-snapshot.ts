@@ -17,6 +17,20 @@ export interface Snapshot {
     readonly commits: readonly string[];
 }
 
+/**
+ * why a git read produced no snapshot. the two cases are different facts about
+ * the session and must not share a representation: `not-a-repo` is a statement
+ * about the directory, `unavailable` is a statement about the read, and printing
+ * the second as the first tells the agent something false about where it stands.
+ */
+export type Failure =
+    | { readonly reason: 'not-a-repo' }
+    | { readonly reason: 'unavailable'; readonly detail: string };
+
+export type Reading =
+    | { readonly kind: 'snapshot'; readonly state: Snapshot }
+    | { readonly kind: 'failed'; readonly failure: Failure };
+
 export interface SnapshotOptions {
     readonly cwd: string;
     readonly commits: number;
@@ -24,15 +38,43 @@ export interface SnapshotOptions {
     readonly timeoutMs: number;
 }
 
-const run = async (args: readonly string[], cwd: string, timeoutMs: number): Promise<string | null> => {
+type Run = { readonly ok: true; readonly text: string } | { readonly ok: false; readonly failure: Failure };
+
+// LC_ALL=C so the message below is the one git prints, whatever the user's
+// locale. the alternative is reading exit 128, which git uses for every fatal
+// error and not only for a directory outside a work tree.
+const OUTSIDE_WORK_TREE = /not a git repository/i;
+
+const run = async (args: readonly string[], cwd: string, timeoutMs: number): Promise<Run> => {
     try {
-        const proc = Bun.spawn(['git', ...args], { cwd, stdout: 'pipe', stderr: 'ignore' });
-        const timer = setTimeout(() => proc.kill(), timeoutMs);
+        const proc = Bun.spawn(['git', ...args], {
+            cwd,
+            stdout: 'pipe',
+            stderr: 'pipe',
+            env: { ...process.env, LC_ALL: 'C' },
+        });
+        let timedOut = false;
+        const timer = setTimeout(() => {
+            timedOut = true;
+            proc.kill();
+        }, timeoutMs);
         const text = await new Response(proc.stdout).text();
+        const errors = await new Response(proc.stderr).text();
         clearTimeout(timer);
-        return (await proc.exited) === 0 ? text : null;
-    } catch {
-        return null;
+        if ((await proc.exited) === 0) return { ok: true, text };
+        if (timedOut) {
+            return { ok: false, failure: { reason: 'unavailable', detail: `git ${args[0]} timed out after ${timeoutMs}ms` } };
+        }
+        if (OUTSIDE_WORK_TREE.test(errors)) return { ok: false, failure: { reason: 'not-a-repo' } };
+        const first = errors.split('\n').find((line) => line.length > 0) ?? `git ${args[0]} exited non-zero`;
+        return { ok: false, failure: { reason: 'unavailable', detail: first } };
+    } catch (error) {
+        // git missing from PATH, or a runtime without Bun.spawn. either way the
+        // work tree was never read, so nothing is known about it.
+        return {
+            ok: false,
+            failure: { reason: 'unavailable', detail: error instanceof Error ? error.message : String(error) },
+        };
     }
 };
 
@@ -54,23 +96,36 @@ export const parseBranchLine = (line: string): Pick<Snapshot, 'branch' | 'tracki
     };
 };
 
-export const snapshot = async (options: SnapshotOptions): Promise<Snapshot | null> => {
+export const snapshot = async (options: SnapshotOptions): Promise<Reading> => {
     const { cwd, commits, maxFiles, timeoutMs } = options;
     const status = await run(['status', '--porcelain=v1', '-b'], cwd, timeoutMs);
-    if (status === null) return null;
+    if (!status.ok) return { kind: 'failed', failure: status.failure };
 
-    const lines = status.split('\n').filter((line) => line.length > 0);
+    const lines = status.text.split('\n').filter((line) => line.length > 0);
     const header = lines.find((line) => line.startsWith('## ')) ?? '## HEAD';
     const entries = lines.filter((line) => !line.startsWith('## '));
 
+    // an empty repository has no commits, so a failed log is not a failed read.
     const log = await run(['log', `-${commits}`, '--format=%h %s'], cwd, timeoutMs);
 
     return {
-        ...parseBranchLine(header),
-        changes: entries.slice(0, maxFiles),
-        hidden: Math.max(0, entries.length - maxFiles),
-        commits: log === null ? [] : log.split('\n').filter((line) => line.length > 0),
+        kind: 'snapshot',
+        state: {
+            ...parseBranchLine(header),
+            changes: entries.slice(0, maxFiles),
+            hidden: Math.max(0, entries.length - maxFiles),
+            commits: log.ok ? log.text.split('\n').filter((line) => line.length > 0) : [],
+        },
     };
+};
+
+/**
+ * a read that failed gets a block of its own. the agent is told the tree was not
+ * read, rather than being left to infer a clean tree from a missing block.
+ */
+export const renderFailure = (failure: Failure): string | null => {
+    if (failure.reason === 'not-a-repo') return null;
+    return `<git>\ngit could not be read: ${failure.detail}\nnothing is known about the work tree here; run git yourself before acting on it\n</git>`;
 };
 
 export const render = (state: Snapshot): string => {

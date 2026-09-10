@@ -67,6 +67,15 @@ interface SlackState {
     readonly app: AppName | null;
     /** channel -> ts of the last message handled, so a reconnect can catch up. */
     readonly marks: Record<ChannelId, Timestamp>;
+    /**
+     * Where the current exchange is answered.
+     *
+     * Held on disk rather than in memory alone because /reload replaces this
+     * module mid-exchange: the reply the person is waiting for then has
+     * nowhere to go and is dropped without a trace. A conversation survives a
+     * reload; the answer to it should too.
+     */
+    readonly answering: { readonly channel: ChannelId; readonly thread: Timestamp | null } | null;
 }
 
 function parseState(raw: unknown): SlackState | null {
@@ -74,12 +83,23 @@ function parseState(raw: unknown): SlackState | null {
     const s = raw as Record<string, unknown>;
     if (s.version !== STATE_VERSION) return null;
     if (s.app !== null && typeof s.app !== 'string') return null;
+    const a = s.answering;
+    const answering =
+        typeof a === 'object' && a !== null && typeof (a as { channel?: unknown }).channel === 'string'
+            ? {
+                  channel: (a as { channel: string }).channel,
+                  thread:
+                      typeof (a as { thread?: unknown }).thread === 'string'
+                          ? (a as { thread: string }).thread
+                          : null,
+              }
+            : null;
     if (typeof s.marks !== 'object' || s.marks === null) return null;
     const marks: Record<ChannelId, Timestamp> = {};
     for (const [channel, ts] of Object.entries(s.marks as Record<string, unknown>)) {
         if (typeof ts === 'string') marks[channel] = ts;
     }
-    return { version: STATE_VERSION, app: s.app, marks };
+    return { version: STATE_VERSION, app: s.app, marks, answering };
 }
 
 /** what the session is answering, for as long as it is answering it. */
@@ -147,7 +167,7 @@ const render = (message: Incoming): string => {
 
 export default function (pi: ExtensionAPI) {
     let state: PersistedState<SlackState> | null = null;
-    let stored: SlackState = { version: STATE_VERSION, app: null, marks: {} };
+    let stored: SlackState = { version: STATE_VERSION, app: null, marks: {}, answering: null };
     let sessionId: string | null = null;
     let cwd = process.cwd();
 
@@ -202,6 +222,7 @@ export default function (pi: ExtensionAPI) {
             ackSent: false,
             repliedExplicitly: false,
         };
+        save({ answering: { channel: message.channel, thread: message.threadTs } });
         pi.sendMessage(
             { customType: 'slack', content: render(message), display: true },
             { deliverAs: 'followUp', triggerTurn: true },
@@ -401,6 +422,7 @@ export default function (pi: ExtensionAPI) {
                     void attached.web.setTyping(exchange.channel, exchange.thread, null);
                 }
                 exchange = null;
+                save({ answering: null });
                 stopTyping();
                 return { content: [{ type: 'text' as const, text: 'Slack exchange closed.' }], details: undefined };
             },
@@ -635,6 +657,17 @@ export default function (pi: ExtensionAPI) {
         state = PersistedState.open({ name: 'slack', scope: 'session', parse: parseState }, { cwd, sessionId });
         stored = state.read() ?? stored;
         closePrevious();
+        // An exchange interrupted by a reload is resumed, not abandoned: the
+        // person asked a question and is still waiting for the answer, and a
+        // reply with no target is dropped silently.
+        if (stored.answering !== null) {
+            exchange = {
+                channel: stored.answering.channel,
+                thread: stored.answering.thread,
+                ackSent: false,
+                repliedExplicitly: false,
+            };
+        }
         if (!config.slack.reconnect || stored.app === null) return;
         const resumed = await connect(stored.app, false);
         if (ctx.hasUI) ctx.ui.notify(resumed.ok ? resumed.note : `Slack: ${resumed.why}`, resumed.ok ? 'info' : 'warning');
@@ -681,6 +714,7 @@ export default function (pi: ExtensionAPI) {
             void attached.web.setTyping(exchange.channel, exchange.thread, null);
         }
         exchange = null;
+        save({ answering: null });
         stopTyping();
     });
 

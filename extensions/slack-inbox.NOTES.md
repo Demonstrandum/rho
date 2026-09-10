@@ -1,0 +1,78 @@
+# slack-inbox: what it is, and what it should be
+
+Built during the robotics-vm migration to get one person's Slack replies in
+front of a running session. It works, and it is not yet a thing to hand to
+other people. This note says what to change, and why, before it counts as part
+of rho.
+
+## The two pieces today
+
+`bin/slack-inbox` holds a Socket Mode WebSocket and appends each human message
+to `~/.config/robotics-migration/slack-inbox.jsonl`. `extensions/slack-inbox.ts`
+delivers unread lines at session start, watches the file, injects new messages
+with a turn triggered, and forwards replies back: the first turn of an exchange
+as an acknowledgement, the last as the answer, the narration between them kept
+out of Slack. `slack_reply` overrides the text or the channel, `slack_done` ends
+the exchange.
+
+## What is wrong with it as a rho feature
+
+- **The config path is named after one migration.** `~/.config/robotics-migration/`
+  should be `~/.config/rho/slack/`, and the extension should be inert when it is
+  absent, so installing rho does not imply a Slack connection.
+- **It loads everywhere.** Sitting in `./extensions` means every pi session in
+  every project connects and injects. A session in an unrelated repo receives
+  DMs meant for another one.
+- **Sessions race.** Two open sessions watch one spool and share one cursor, so
+  a message goes to whichever reads first. Delivery should be claimed, once.
+
+## How it should work
+
+**One connection, owned by the session.** No `rho slack listen`, no daemon, no
+launchd agent, nothing outside pi. The socket belongs to the pi+rho session that
+asked for it and dies with that session. This drops the mailbox behaviour —
+messages sent while pi is closed are not collected — and that is the right
+trade: a background process that receives your DMs whether or not you are
+working is a surprise, and a second one is a conflict.
+
+**`/slack` attaches the current session.** Tokens can sit in a global config as
+a default, but the command sets them, and the channel, per session, stored in
+the session data pi already keeps on disk. So a session resumed tomorrow is
+still attached to the same channel without being told again, and a session that
+never ran `/slack` is silent. Something like:
+
+```
+/slack                       show status: attached? which channel? which app?
+/slack connect [#channel]    open the socket for this session
+/slack disconnect            close it
+```
+
+**Per-session state, not per-machine state.** The cursor problem disappears with
+the daemon: whatever arrives goes to the session holding the socket, because
+there is only one.
+
+## Look at @pinet/slack-bridge first
+
+<https://pi.dev/packages/@pinet/slack-bridge> almost certainly does all of this
+already: Socket Mode, thread routing, an inbox per agent, `slack_send`,
+default-deny access by user ID, per-channel mention guards, read-only and
+confirmation policies. It also does much more — a broker/follower mesh, a
+maintenance loop, canvases and pins — which may be more than is wanted, but the
+overlap is the whole of the above.
+
+```
+pi install npm:@pinet/slack-bridge
+```
+
+Two ideas worth taking regardless of whether we adopt it:
+
+- **A `manifest.yaml`.** Slack can create an app from a manifest, so setup
+  becomes "paste this file" instead of a list of scopes to tick by hand. Ours
+  needed `connections:write` on an app token, `chat:write`, `im:history`,
+  `users:read`, and a `message.im` subscription, all found by trial. A manifest
+  states them once and cannot drift.
+- **Better still, a create-app link.** `https://api.slack.com/apps?new_app=1&manifest_json=<url-encoded manifest>`
+  opens the create dialog pre-filled from a manifest, so the only manual steps
+  left are generating the two tokens. Worth checking whether that parameter is
+  still supported, and if so shipping the link in `/slack` output so a new user
+  goes from nothing to connected in about a minute.

@@ -51,6 +51,26 @@ never ran `/slack` is silent. Something like:
 the daemon: whatever arrives goes to the session holding the socket, because
 there is only one.
 
+## Slack style belongs in the tool description
+
+An agent left to itself answers a one-line Slack question with five
+paragraphs, headings included. No colleague does that, and it reads as noise on
+a phone. The rules therefore live in the tool description and
+`promptGuidelines`, not only in the text injected with a delivered message, so
+they apply when the model calls `slack_reply` itself:
+
+- reply as a colleague would, not as a report
+- one short line first, before any tool calls, so the sender knows it arrived
+- then the work, and the outcome in the final reply
+- a one-line question gets a one-line answer
+- no headings, no bullet lists, no preamble
+- long detail stays in the terminal; Slack gets the summary and an offer
+
+The mechanism that makes this work is worth keeping in any rewrite: a turn ends
+every time tool calls come back, so a long job produces a run of them. Only the
+first and the last are forwarded. Without that, one question becomes a stream
+of narration in Slack, which is exactly what happened before it was added.
+
 ## Look at @pinet/slack-bridge first
 
 <https://pi.dev/packages/@pinet/slack-bridge> almost certainly does all of this

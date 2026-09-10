@@ -66,6 +66,8 @@ type Method =
     | 'auth.test'
     | 'chat.postMessage'
     | 'conversations.history'
+    | 'conversations.replies'
+    | 'users.conversations'
     | 'files.completeUploadExternal'
     | 'files.getUploadURLExternal'
     | 'reactions.add'
@@ -113,14 +115,21 @@ export class SlackWeb {
 
     private async call<T>(method: Method, body: Record<string, unknown>): Promise<Result<T & Envelope>> {
         let response: Response;
+        // Slack's read methods reject a JSON body with invalid_arguments and
+        // want form encoding; the write methods take either. Form is the one
+        // shape that works for both, so everything goes out that way.
+        const form = new URLSearchParams();
+        for (const [key, value] of Object.entries(body)) {
+            if (value !== undefined && value !== null) form.set(key, String(value));
+        }
         try {
             response = await fetch(`https://slack.com/api/${method}`, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${this.token}`,
-                    'Content-Type': 'application/json; charset=utf-8',
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
                 },
-                body: JSON.stringify(body),
+                body: form.toString(),
             });
         } catch (error) {
             return fail(`${method}: ${(error as Error).message}`);
@@ -285,6 +294,56 @@ export class SlackWeb {
         const chronological = [...human].reverse();
         const out: Incoming[] = [];
         for (const m of chronological) out.push(await this.incoming(channel, m));
+        return ok(out);
+    }
+
+    /**
+     * The conversations this app can see, newest activity first.
+     *
+     * A session that has never been attached has no marks, so `since` has
+     * nothing to ask about and reports no missed messages however many are
+     * waiting. This is what it asks instead.
+     */
+    async conversations(limit = 50): Promise<Result<readonly ChannelId[]>> {
+        type Listed = { channels?: readonly { readonly id?: string; readonly is_archived?: boolean }[] };
+        const ask = (types: string) =>
+            this.call<Listed>('users.conversations', { types, exclude_archived: true, limit });
+        // An app installed before channels:read and groups:read were in the
+        // manifest has neither, and asking for channel types it cannot see
+        // fails the whole call rather than returning the DMs it can. DMs are
+        // where a session is reached, so they are worth having alone.
+        let list = await ask('im,mpim,public_channel,private_channel');
+        if (!list.ok && list.error.includes('missing_scope')) list = await ask('im,mpim');
+        if (!list.ok) return list;
+        const ids = (list.value.channels ?? [])
+            .filter((c) => c.is_archived !== true && typeof c.id === 'string')
+            .map((c) => c.id as ChannelId);
+        return ok(ids);
+    }
+
+    /**
+     * The last `limit` messages of a conversation, oldest first. `thread` asks
+     * for one thread's replies rather than the conversation body, which is
+     * where an assistant app's DMs live.
+     */
+    async history(
+        channel: ChannelId,
+        limit = 20,
+        thread: Timestamp | null = null,
+    ): Promise<Result<readonly Incoming[]>> {
+        const method = thread === null ? 'conversations.history' : 'conversations.replies';
+        const args = thread === null ? { channel, limit } : { channel, ts: thread, limit };
+        const page = await this.call<{ messages?: readonly RawMessage[] }>(method, args);
+        if (!page.ok) return page;
+        const messages = page.value.messages ?? [];
+        // conversations.history returns newest first, conversations.replies
+        // oldest first, so only the former is reversed.
+        const chronological = thread === null ? [...messages].reverse() : [...messages];
+        const out: Incoming[] = [];
+        for (const m of chronological) {
+            if (m.subtype !== undefined) continue;
+            out.push(await this.incoming(channel, m));
+        }
         return ok(out);
     }
 

@@ -311,6 +311,29 @@ const SCHEMA = {
             'resume, when the directory still exists',
         ),
     },
+    personality: {
+        projectFile: field(
+            'project-file',
+            isString,
+            'PERSONALITY.md',
+            'the file /personality reads from the working tree when no argument is',
+            'given and no personality is set. an empty string disables the lookup',
+        ),
+        auto: field(
+            'auto',
+            isBool,
+            true,
+            'load the project file at session start, before the first turn, so it',
+            'lands in the system prompt rather than in the conversation',
+        ),
+        remember: field(
+            'remember',
+            isBool,
+            true,
+            'store the personality for this session and restore it on a resume, in',
+            'the mode it was applied in',
+        ),
+    },
     rewind: {
         autoCheckpoint: field(
             'auto-checkpoint',

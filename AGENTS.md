@@ -17,6 +17,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `bun-runtime.ts` stops a node session: patches pi's shebang to bun, re-runs under bun, else exits with a note, `[runtime]`
   - `env-block.ts` appends an `<env>` block: cwd, git work tree, platform, date, model, `[env]`
   - `git-snapshot.ts` appends a `<git>` block: branch, upstream divergence, dirty files, recent commits, `[git]`
+  - `personality.ts` `/personality <name|path|off>` sets the session's voice; system prompt before the first turn, a message after, `[personality]`
   - `scratchpad.ts` gives the session a scratch directory, names it in the prompt and in `RHO_SCRATCH`, `[scratch]`
   - `prompt-defingerprint.ts` rewrites the lines of pi's prompt that anthropic classifies as third-party, keeping OAuth requests on plan billing.
   - `prompt-disenshittify.ts` rewrites the whole system prompt into the house style: dashes, characters, case, list punctuation, `[prompt]`.
@@ -49,6 +50,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `agentica.ts` an `agentica` MCP tool, registered only when `RHO_AGENTICA_RUNTIME` is set.
   - `lib/` shared modules, in a subdirectory so auto-discovery does not load them: `config.ts` (`rho.toml`), `bun-launcher.ts` (locate and repair pi's launcher shebang), `state-store.ts` (on-disk extension state, scoped global/project/session), `settings-store.ts` (idempotent settings writes), `prompt-loader.ts`, `goal.ts` (the goal judge and its transcript rendering), `widget-spinner.ts` (the wait shown for an out-of-turn model call), `disenshittification.ts` (the house-style rewrite), `reflow.ts` (one sentence per line), `template.ts`, `source-str.ts`, `utils.ts`, `audit.ts`, `stash.ts`, `prompt-history.ts`, `pi-docs.ts`, `slack-api.ts` (Slack calls and the Socket Mode client), `slack-config.ts` (the app store and the per-app lock), `steering-mirror.ts`, `keybindings-store.ts`, `checkpoint-breaker.ts`, `exec-preview.ts`, `pi-logo.ts`, `tetris-logo.ts`
   - `assets/` data files (`spinners.json`, `maxims.txt`, `verbs.txt`, `wordswap.json`, `agentica_helper.py`)
+- `personalities/` pre-authored personalities, one `.md` each, picked by name with `/personality`; a file of the same name in `<rho config dir>/personalities/` shadows one here.
 - `skills/` on-demand skills (`SKILL.md` folders + top-level `.md`)
 - `prompts/` prompt templates, expanded with `/name`
 - `themes/` color themes (`.json`)

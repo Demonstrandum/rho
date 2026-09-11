@@ -1,9 +1,10 @@
-// collapsed and expanded previews for context-mode's exec tools.
+// collapsed and expanded rows for the three tools whose argument is source
+// code: ctx_execute, ctx_execute_file, ctx_batch_execute.
 //
 // pure: no pi imports. a renderer feeds it the tool name, the raw tool
-// arguments, the result text, a width, and a theme, and gets back styled
-// strings. the theme is an interface so the module stays runnable outside pi;
-// pi's own theme object satisfies it, and PLAIN_THEME drops every escape.
+// arguments, the result text, a width, and a theme (theme.ts), and gets back
+// styled strings. preview.ts is the same job for every other tool, where the
+// arguments are read as they are rather than parsed as a command.
 //
 // three pieces:
 //   parseExecCall    unvalidated tool args -> a typed call, or null
@@ -14,6 +15,10 @@
 // longest to shortest, and fitLadders degrades the widest part until the join
 // fits the budget. one command keeping its arguments while its neighbour is
 // down to a bare head is the result of that, not a special case.
+
+import { BRACKET, elidePath, ELLIPSIS, oneLine, quantity, truncate } from '../text';
+import { PLAIN_THEME, type RowColor, type RowTheme } from './theme';
+import { toolTitle } from './title';
 
 export const EXEC_LANGUAGES = [
     'javascript', 'typescript', 'python', 'shell', 'ruby',
@@ -159,8 +164,6 @@ export function parseExecBody(body: string): ExecOutcome {
 // a part's renderings, longest first. never empty.
 export type Ladder = readonly [string, ...string[]];
 
-const ELLIPSIS = '\u2026';
-const BRACKET = `[${ELLIPSIS}]`;
 // joins a full, untruncated set of lines: nothing was dropped, so the glyph
 // says "next line" rather than "something is missing".
 const RETURN = '⮐';
@@ -223,38 +226,15 @@ export function fitLaddersDetailed(ladders: readonly Ladder[], budget: number, s
             return { text: parts.slice(0, keep).join(sep) + tail, exact: false };
         }
     }
-    return { text: truncateEnd(parts[0]!, budget), exact: false };
+    return { text: truncate(parts[0]!, budget), exact: false };
 }
 
 export function fitLadders(ladders: readonly Ladder[], budget: number, sep = '; '): string {
     return fitLaddersDetailed(ladders, budget, sep).text;
 }
 
-export function truncateEnd(text: string, budget: number): string {
-    if (text.length <= budget) return text;
-    if (budget <= 1) return ELLIPSIS;
-    return text.slice(0, budget - 1) + ELLIPSIS;
-}
-
 const PATH_TOKEN = /^-{0,2}[\w.]*=?(\/[^\s]*|~\/[^\s]*)$/;
 const TEMP_SCRIPT = /(?:\/[^\s:]+)+\/([\w.-]+)(?=:\d+)/g;
-
-/**
- * keep the tail of a long path: /a/b/c/pi-coding-agent/dist -> [...]/pi-coding-agent/dist.
- * segments are taken from the end until they carry `minTail` characters, so a
- * generic last segment (dist, src, build) keeps its parent.
- */
-export function elidePath(token: string, max = 20, minTail = 12): string {
-    if (token.length <= max || !token.includes('/')) return token;
-    const segments = token.split('/').filter((s) => s !== '');
-    const tail: string[] = [];
-    for (let i = segments.length - 1; i >= 0; i--) {
-        tail.unshift(segments[i]!);
-        if (tail.join('/').length >= minTail) break;
-    }
-    if (tail.length >= segments.length) return token;
-    return `${BRACKET}/${tail.join('/')}`;
-}
 
 /** /var/folders/xx/.ctx-mode-A1/script.sh:3: -> script.sh:3: */
 export function elideScriptPaths(text: string): string {
@@ -369,7 +349,7 @@ export function tokenize(command: string): string[] {
 
 /** longest to shortest renderings of one shell command. */
 export function shellLadder(command: string): Ladder {
-    const full = command.replace(/\s+/g, ' ').trim();
+    const full = oneLine(command);
     const firstStage = splitPipeline(full)[0]!.trim();
     const bare = firstStage.replace(REDIRECT, '').trim();
     const tokens = tokenize(bare);
@@ -388,10 +368,10 @@ export function codeLadder(language: ExecLanguage, code: string): Ladder {
     const count = lines.length;
     const first = lines.find((l) => !isNoise(language, l)) ?? lines[0] ?? '';
     const flat = first.replace(/\s+/g, ' ');
-    const tag = `${language} ${count} line${count === 1 ? '' : 's'}`;
+    const tag = `${language} ${quantity(count, 'line')}`;
     const rungs = [
         count > 1 ? `${flat} ${BRACKET} +${count - 1}` : flat,
-        `${truncateEnd(flat, 40)} ${BRACKET}`,
+        `${truncate(flat, 40)} ${BRACKET}`,
         tag,
         language,
     ];
@@ -435,28 +415,10 @@ export function callLadders(call: ExecCall): Ladder[] {
             return call.commands.map((c) =>
                 c.label === ''
                     ? shellLadder(c.command)
-                    : ([c.label, truncateEnd(c.label, 16)] as Ladder),
+                    : ([c.label, truncate(c.label, 16)] as Ladder),
             );
     }
 }
-
-/** the subset of pi's ThemeColor this module draws with. */
-export type PreviewColor =
-    | 'toolTitle' | 'toolOutput' | 'text' | 'muted' | 'dim'
-    | 'accent' | 'error' | 'warning' | 'success';
-
-export interface PreviewTheme {
-    fg(color: PreviewColor, text: string): string;
-    bold(text: string): string;
-    /** one entry per line of `code`. */
-    highlight(code: string, language: string): string[];
-}
-
-export const PLAIN_THEME: PreviewTheme = {
-    fg: (_color, text) => text,
-    bold: (text) => text,
-    highlight: (code) => code.split('\n'),
-};
 
 // highlight.js knows shells as bash; the rest of the languages carry their own
 // name through.
@@ -475,7 +437,7 @@ const HIGHLIGHT_LANGUAGE: Record<ExecLanguage, string> = {
     csharp: 'csharp',
 };
 
-function highlightLine(theme: PreviewTheme, text: string, language: ExecLanguage): string {
+function highlightLine(theme: RowTheme, text: string, language: ExecLanguage): string {
     return theme.highlight(text, HIGHLIGHT_LANGUAGE[language])[0] ?? text;
 }
 
@@ -490,15 +452,17 @@ export interface CollapsedPreview {
     output?: string;
 }
 
+// the same names every other row is titled with, so a preview and a plain row
+// never call one tool two things.
 const VERB: Record<ExecToolName, string> = {
-    ctx_execute: 'exec',
-    ctx_execute_file: 'exec file',
-    ctx_batch_execute: 'batch',
+    ctx_execute: toolTitle('ctx_execute'),
+    ctx_execute_file: toolTitle('ctx_execute_file'),
+    ctx_batch_execute: toolTitle('ctx_batch_execute'),
 };
 
 interface StatusTag {
     text: string;
-    color: PreviewColor;
+    color: RowColor;
 }
 
 function statusTag(outcome: ExecOutcome | undefined): StatusTag | undefined {
@@ -538,7 +502,7 @@ const LABEL_SEP = ` \u00b7 `;
 // invoked components, and only the result slot ever sees the parsed outcome.
 // putting the tag on the output line also places it next to the label it
 // qualifies, e.g. "[1] stderr: ...", instead of dangling after the command.
-export function collapseCall(call: ExecCall, width: number, theme: PreviewTheme = PLAIN_THEME): string {
+export function collapseCall(call: ExecCall, width: number, theme: RowTheme = PLAIN_THEME): string {
     const verb = VERB[call.tool];
     const budget = Math.max(8, width - verb.length - 3);
     const isBatch = call.tool === 'ctx_batch_execute';
@@ -554,12 +518,12 @@ export function collapseResult(
     call: ExecCall,
     outcome: ExecOutcome | undefined,
     width: number,
-    theme: PreviewTheme = PLAIN_THEME,
+    theme: RowTheme = PLAIN_THEME,
 ): string | undefined {
     const tag = statusTag(outcome);
     const tagWidth = tag ? tag.text.length + 1 : 0;
     const digest = isBatchSummary(call, outcome)
-        ? theme.fg('toolOutput', truncateEnd(outcome.stdout.replace(/\s+/g, ' ').trim(), Math.max(8, width - tagWidth)))
+        ? theme.fg('toolOutput', truncate(oneLine(outcome.stdout), Math.max(8, width - tagWidth)))
         : outputDigest(outcome, Math.max(8, width - tagWidth), theme);
     if (!tag) return digest;
     return digest ? `${theme.fg(tag.color, tag.text)} ${digest}` : theme.fg(tag.color, tag.text);
@@ -570,7 +534,7 @@ export function collapse(
     call: ExecCall,
     outcome: ExecOutcome | undefined,
     width: number,
-    theme: PreviewTheme = PLAIN_THEME,
+    theme: RowTheme = PLAIN_THEME,
 ): CollapsedPreview {
     return { call: collapseCall(call, width, theme), output: collapseResult(call, outcome, width, theme) };
 }
@@ -579,7 +543,7 @@ export function collapse(
 export function outputDigest(
     outcome: ExecOutcome | undefined,
     width: number,
-    theme: PreviewTheme = PLAIN_THEME,
+    theme: RowTheme = PLAIN_THEME,
 ): string | undefined {
     if (!outcome) return undefined;
     const picked = pickStream(outcome);
@@ -587,13 +551,13 @@ export function outputDigest(
     const { label, text } = picked;
     const lines = elideScriptPaths(text)
         .split('\n')
-        .map((l) => l.replace(/\s+/g, ' ').trim())
+        .map(oneLine)
         .filter((l) => l !== '');
     if (lines.length === 0) return undefined;
     const prefix = `${label}: `;
     const sep = ` ${ELLIPSIS} `;
     const { text: joined, exact } = fitLaddersDetailed(
-        lines.map((l) => [l, truncateEnd(l, 40)] as Ladder),
+        lines.map((l) => [l, truncate(l, 40)] as Ladder),
         Math.max(8, width - prefix.length),
         sep,
     );
@@ -623,7 +587,7 @@ function pickStream(outcome: ExecOutcome): { label: 'stdout' | 'stderr'; text: s
 }
 
 /** the call slot's expanded lines: verb, path (execute_file), full command(s)/code. */
-export function expandCall(call: ExecCall, theme: PreviewTheme = PLAIN_THEME): string[] {
+export function expandCall(call: ExecCall, theme: RowTheme = PLAIN_THEME): string[] {
     const language = callLanguage(call);
     const prompt = theme.fg('dim', '$ ');
     const lines: string[] = [theme.fg('toolTitle', theme.bold(VERB[call.tool]))];
@@ -655,7 +619,7 @@ export function expandCall(call: ExecCall, theme: PreviewTheme = PLAIN_THEME): s
 export function expandResult(
     call: ExecCall,
     outcome: ExecOutcome | undefined,
-    theme: PreviewTheme = PLAIN_THEME,
+    theme: RowTheme = PLAIN_THEME,
 ): string[] {
     if (!outcome) return [];
     switch (outcome.kind) {
@@ -695,7 +659,7 @@ export function expandResult(
 export function expand(
     call: ExecCall,
     outcome: ExecOutcome | undefined,
-    theme: PreviewTheme = PLAIN_THEME,
+    theme: RowTheme = PLAIN_THEME,
 ): string[] {
     return [...expandCall(call, theme), '', ...expandResult(call, outcome, theme)];
 }
@@ -707,8 +671,8 @@ export function expand(
  * folds onto the label; more than one gets the label alone, then each line
  * dimmed and indented by one space, no border.
  */
-function stream(theme: PreviewTheme, label: 'stdout' | 'stderr', text: string): string[] {
-    const color: PreviewColor = label === 'stderr' ? 'error' : 'muted';
+function stream(theme: RowTheme, label: 'stdout' | 'stderr', text: string): string[] {
+    const color: RowColor = label === 'stderr' ? 'error' : 'muted';
     const trimmed = text.trim();
     if (trimmed === '') {
         if (label === 'stderr') return [];

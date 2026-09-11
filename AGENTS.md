@@ -34,7 +34,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `startup.ts` replaces pi's startup block with a compact header.
   - `footer.ts` replaces the footer to customise the token arrow glyphs.
   - `halfblock-boxes.ts` four render patches (half-block padding, tighter tool rows, no idle status), `[render]`
-  - `ctx-exec-preview.ts` shortens context-mode's exec tool rows, `[render] exec-preview`
+  - `tool-rows.ts` names every tool row and gives it its subject; the exec rows keep their command preview, `[tools]`
   - `clear-on-shrink.ts` persists `terminal.clearOnShrink=true`
   - `image-width.ts` persists `terminal.imageWidthCells`, `[images] width`
   - `image-size.ts` caps inline image height at a fraction of the terminal, `[images] max-height-fraction`

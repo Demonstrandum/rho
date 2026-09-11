@@ -181,9 +181,51 @@ pi also reacts to it by parking a 2-line `IdleStatus` in the dock, which `halfbl
 every trim skips a block holding an inline image: an image reserves its height as blank rows (after the escape sequence under kitty, before it under iterm2) and the terminal draws over them regardless, so dropping them leaves the transcript shorter than the picture and the input field and footer are drawn on top of it.
 matched on the kitty and iterm2 prefixes, since pi-tui's `isImageLine` is not re-exported through the package index; an iterm2 line also has to be recognised before OSC stripping, which would leave it looking blank.
 
-`ctx-exec-preview.ts` + `lib/exec-preview.ts` shorten the tool rows context-mode draws for `ctx_execute`, `ctx_execute_file`, and `ctx_batch_execute`: a highlighted one-line command, a status tag and output digest, and full detail on expand.
-gated by `[render] exec-preview`.
-`lib/exec-preview.demo.ts` renders the variants without a session.
+`tool-rows.ts` + `lib/tool-row/` own every tool row: what it is called, and what it says it did.
+a row is drawn in two slots, the call and the result.
+a tool that ships a `renderCall` writes its own name into the call slot (`read`, `bash`), and a tool that ships none gets `ToolExecutionComponent`'s fallback, which is the bare name the model calls and a JSON dump of the arguments under it (`slack_reply`, `ctx_search`, `web_search`).
+so a row's name came from as many places as there are tool authors, and half the rows said nothing about what they did.
+three behaviours, each switched by a key in `[tools]`: `titles`, `detail`, `exec-preview`.
+
+the patch is on the component and not on the tools: context-mode registers its exec tools itself (`mcp-bridge.js`), and `getAllRegisteredTools()` keeps first-registration-wins by extension load order, so a competing registration of the same name either loses silently or wins and then has to reimplement the MCP stdio bridge to have anything to execute.
+patching `getCallRenderer` is keyed on the running tool name instead, so it applies whoever registered the tool, the same way `halfblock-boxes.ts` patches `render`.
+it is one extension rather than two because both behaviours patch that one method: two patches would compose by load order, and the second would wrap a renderer the first had already replaced.
+
+`lib/tool-row/title.ts` derives the display name rather than listing it, so a tool this repo has never heard of still gets one: split the name into words, drop a leading namespace (`ctx`, `mcp`), and join them with spaces, lower case throughout, which is how pi's own rows read.
+`[tools] names` overrides one tool and `TITLES` holds the few where the derivation reads wrong (the exec family, which reads `exec`, `exec file`, `batch`).
+`retitle` splices the name out of a line another renderer produced, on the rendered string, so the title inherits the styling that renderer gave the name; a line whose head is something else is left alone, which is how the exec preview passes through untouched.
+a tool call with no definition at all never reaches a renderer, so `formatToolExecution` takes the same splice.
+
+`lib/tool-row/preview.ts` is the call row of a tool that draws none of its own.
+the arguments are sorted rather than dumped: one of them is the subject (a channel, a path, a URL, with a preposition where the key implies one), one is the text the call carries (a message, a query), and the rest are named on expand, so `slack_reply` reads `slack reply to D0C0PG7LZCJ (Adam)` over a quoted first line of the message.
+this replaces the fallback through `getCallRenderer` rather than through `createCallFallback`, because pi passes the theme to a renderer and not to the fallback.
+
+`lib/tool-row/exec.ts` is the same job for the three tools whose argument is source code, where parsing earns a shortened command: a highlighted one-line command, a status tag and output digest, and the whole command and output on expand.
+shortening is a ladder per part, longest to shortest, and `fitLadders` degrades the widest part until the join fits the width.
+`lib/tool-row/exec.demo.ts` renders the variants without a session.
+
+`lib/tool-row/theme.ts` is the theme port the pure modules take, so they run in a test and in the demo with no session; pi's theme object satisfies it once `highlight` is bound to the standalone `highlightCode` export.
+`lib/tool-row/notes.ts` says what an opaque identifier in a tool's arguments stands for: `D0C0PG7LZCJ` is Adam.
+the extension that owns the identifier learns that while doing its own work, not while rendering, so `slack.ts` writes what it learns and the renderer reads it back.
+the table lives on `globalThis`, because `/reload` replaces the module and the writer and the reader would otherwise hold two copies of it.
+
+`theme.ts` + `lib/theme-sample.ts` change the theme without asking anyone to imagine it.
+`/theme <name>` completes over the loaded themes and applies each one as its name passes under the cursor, because the thing being chosen is a session, not a word in a list.
+`/theme-picker` is the same choice made against a sample session.
+
+previewing needs two things pi does not hand over.
+the completion menu reports what is chosen and not what is merely highlighted, so `lib/autocomplete-focus.ts` patches the editor at the two points where the menu's life changes and gives the highlighted item to whichever watcher claims the menu, by the editor's text rather than by the completion prefix (the prefix of `/theme dar` is `dar`, which names no command).
+and `ctx.ui.setTheme(name)` writes the name into pi's settings, which is right for a choice and wrong for the dozen themes passed over on the way to one: handed a `Theme` object instead, pi applies it and saves nothing, so that is the form a preview takes.
+`lib/preview-hold.ts` holds what the first preview replaced, so a menu closed without a choice goes back to the theme that was there and not to the one previewed before it.
+
+the picker is a full-screen overlay drawn by the things that draw a real session: the startup header above it is `lib/startup-header.ts`, which `startup.ts` also draws, and the footer under it is the session's own, which `footer.ts` leaves in `lib/footer-mirror.ts` on every frame because pi builds a `FooterComponent` from an `AgentSession` an extension is never handed.
+the transcript between them is pi's components: `UserMessageComponent`, `ToolExecutionComponent` (with pi's read renderer, and with a tool that has no renderer, which is the row `tool-rows.ts` fills in), `AssistantMessageComponent` with a thinking block, pi's own `ThemeSelectorComponent` for the list, and a real `CustomEditor` holding a line nobody sent, so the input field is the field, this package's patch of it included.
+the frame is composed to exactly the terminal height every time: the header and the question are pinned, the list, the input field and the footer sit at the bottom, and the sample transcript takes what is left, read from its end the way a session is.
+the spare rows go above the header, as head room, which is where a short session's blank space is; anywhere else they open a gap inside it.
+so nothing moves as the card animates or as a taller theme is previewed, and every line is padded to the width, since an overlay covers only where it puts characters.
+
+`lib/intro-card.ts` is one playing of the wordmark intro: it picks its mode, wordmark and shimmer direction from `[startup]` at construction and renders as a pure function of elapsed milliseconds.
+`startup.ts` draws one at session start and the picker builds another on every preview, which is how a theme is first seen.
 
 `image-width.ts` persists `terminal.imageWidthCells` (from `[images] width` in `rho.toml`, default 60) into the global pi settings, so inline images (e.g. from `fetch_content`) have a set width (idempotent, same helper as `silence-extra-usage-warning`).
 
@@ -286,6 +328,11 @@ with no UI (print or json mode) the work runs and nothing is drawn.
 
 `lib/settings-store.ts` shared helper (`ensureGlobalSetting`) for the idempotent nested global-settings writes.
 it lives in a subdirectory because extension auto-discovery loads top-level `*.ts` only.
+
+`lib/text.ts` the text primitives every extension here was writing for itself: escape stripping and visible-column splicing, truncation and one-line previews, plurals and series and abbreviated counts, durations and relative times, identifier words, and `~` paths.
+it is the layer under the prose modules: `lib/reflow.ts` decides where a sentence ends and `lib/disenshittification.ts` rewrites to the house style, while this holds the operations both of those, and every renderer, need.
+a function belongs here when two call sites would otherwise each write it and the answer does not depend on where it is shown.
+`abbreviate` carries the one distinction that is real rather than accidental: `compact` keeps a fixed number of columns for a status line (`2.0k`), `fine` drops a trailing zero and always offers a decimal for a readout (`15.2k`).
 
 `lib/template.ts` the shared `{{...}}` evaluator.
 `lib/source-str.ts` a String subclass carrying source provenance through template interpolation, used by the prompt explorer.

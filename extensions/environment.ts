@@ -30,6 +30,7 @@ import {
 import { operationsFor, waitFor } from './lib/remote/client';
 import type { Connection } from './lib/remote/client';
 import { deploy, parseTarget } from './lib/remote/deploy';
+import { PersistedState } from './lib/state-store';
 
 interface Environment {
     readonly name: string;
@@ -60,9 +61,40 @@ const published = globalThis as typeof globalThis & { [PUBLISHED]?: Where | unde
 
 export const currentEnvironment = (): Where | undefined => published[PUBLISHED];
 
+/** What a session remembers about where it was working. */
+interface Remembered {
+    readonly version: 1;
+    readonly host: string | null;
+    readonly name: string | null;
+    readonly cwd: string | null;
+}
+
+const parseRemembered = (raw: unknown): Remembered | null => {
+    if (typeof raw !== 'object' || raw === null) return null;
+    const value = raw as Record<string, unknown>;
+    if (value.version !== 1) return null;
+    return {
+        version: 1,
+        host: typeof value.host === 'string' ? value.host : null,
+        name: typeof value.name === 'string' ? value.name : null,
+        cwd: typeof value.cwd === 'string' ? value.cwd : null,
+    };
+};
+
 export default function (pi: ExtensionAPI) {
     const environments = new Map<string, Environment>();
     let current: string | null = null;
+    let memory: PersistedState<Remembered> | null = null;
+
+    const remember = (): void => {
+        const state = published[PUBLISHED];
+        memory?.write({
+            version: 1,
+            host: state?.host ?? null,
+            name: state?.name ?? null,
+            cwd: state?.cwd ?? null,
+        });
+    };
 
     const active = (): Environment | null => (current === null ? null : (environments.get(current) ?? null));
 
@@ -78,6 +110,9 @@ export default function (pi: ExtensionAPI) {
         if (current === name) {
             dead = { name, why };
             published[PUBLISHED] = undefined;
+            // A machine that went away is still where this session was working,
+            // so a resume offers it rather than forgetting it happened.
+            memory?.write({ version: 1, host: environments.get(name)?.host ?? name, name, cwd: null });
         }
         pi.sendMessage(
             {
@@ -224,6 +259,7 @@ export default function (pi: ExtensionAPI) {
         current = name;
         dead = null;
         await announce(environment);
+        remember();
         return environment;
     };
 
@@ -484,6 +520,7 @@ export default function (pi: ExtensionAPI) {
                     current = null;
                     dead = null;
                     published[PUBLISHED] = undefined;
+                    remember();
                     await announce(null);
                     return said('Working locally.');
                 }
@@ -492,6 +529,7 @@ export default function (pi: ExtensionAPI) {
                 current = target;
                 dead = null;
                 await announce(chosen);
+                remember();
                 return said(`Working on ${target}.`);
             }
 
@@ -532,6 +570,7 @@ export default function (pi: ExtensionAPI) {
                     current = null;
                     dead = null;
                     published[PUBLISHED] = undefined;
+                    remember();
                     await announce(null);
                     ctx.ui.notify('Working locally.', 'info');
                     return;
@@ -544,6 +583,7 @@ export default function (pi: ExtensionAPI) {
                 current = target;
                 dead = null;
                 await announce(chosen);
+                remember();
                 ctx.ui.notify(`Working on ${target}.`, 'info');
                 return;
             }
@@ -582,6 +622,88 @@ export default function (pi: ExtensionAPI) {
         if (hidden) return;
         hidden = true;
         pi.setActiveTools(pi.getActiveTools().filter((name) => !OWN.includes(name)));
+    });
+
+    /**
+     * A resumed session is not where it left off.
+     *
+     * The connection died with the process, so the session comes back on the
+     * laptop while its history is full of another machine. Saying nothing
+     * leaves the model reading commands that ran somewhere it no longer is:
+     * this asks, and then states the answer, so the change is in the
+     * conversation either way.
+     */
+    pi.on('session_start', async (event, ctx) => {
+        memory = PersistedState.open(
+            { name: 'environment', scope: 'session', parse: parseRemembered },
+            { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() },
+        );
+        const last = memory.read();
+        if (last?.host == null) return;
+        const where = last.host;
+
+        if (!ctx.hasUI) {
+            pi.sendMessage(
+                {
+                    customType: 'environment',
+                    content:
+                        `<environment>\nworking locally on this machine\n` +
+                        `this session was working on ${where} before it stopped, and that connection is gone.\n` +
+                        `environment connect ${where} attaches it again\n</environment>`,
+                    display: true,
+                },
+                { deliverAs: 'followUp' },
+            );
+            return;
+        }
+
+        const RECONNECT = `reconnect to ${where}`;
+        const LOCAL = 'work on this machine';
+        const ELSEWHERE = 'connect somewhere else';
+        const choice = await ctx.ui.select(
+            `this session was working on ${where}. that connection did not survive.`,
+            [RECONNECT, LOCAL, ELSEWHERE],
+        );
+
+        if (choice === RECONNECT) {
+            try {
+                const environment = await attach(last.name ?? where, where, (note) => ctx.ui.notify(note, 'info'));
+                if (last.cwd !== null) {
+                    const moved = await environment.connection.request({ kind: 'chdir', path: last.cwd });
+                    if (moved.kind === 'cwd') {
+                        const state = published[PUBLISHED];
+                        if (state !== undefined) state.cwd = moved.path;
+                    }
+                }
+            } catch (error) {
+                ctx.ui.notify(`could not reconnect: ${(error as Error).message}`, 'error');
+                await announce(null);
+            }
+            return;
+        }
+
+        if (choice === ELSEWHERE) {
+            const target = await ctx.ui.input('connect to', 'user@host or user@host:/path');
+            if (typeof target === 'string' && target.trim() !== '') {
+                const trimmed = target.trim();
+                try {
+                    await attach(parseTarget(trimmed).host.split('@').pop() ?? trimmed, trimmed, (note) =>
+                        ctx.ui.notify(note, 'info'),
+                    );
+                } catch (error) {
+                    ctx.ui.notify(`could not attach: ${(error as Error).message}`, 'error');
+                    await announce(null);
+                }
+                return;
+            }
+        }
+
+        // Chose the laptop, or cancelled: the session has moved, so it is said.
+        current = null;
+        dead = null;
+        published[PUBLISHED] = undefined;
+        remember();
+        await announce(null);
     });
 
     pi.on('session_shutdown', async () => {

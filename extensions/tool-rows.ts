@@ -55,7 +55,7 @@ import {
     parseExecCall,
     parseExecResult,
 } from './lib/tool-row/exec';
-import { truncate, visibleWidth } from './lib/text';
+import { oneLine, plain, truncate, visibleWidth } from './lib/text';
 import { noteFor } from './lib/tool-row/notes';
 import { callPreview, resultPreview } from './lib/tool-row/preview';
 import type { RowColor, RowTheme } from './lib/tool-row/theme';
@@ -210,9 +210,37 @@ if (titles || detail || execPreview) {
         // so the callPreview path above never sees it, and without this the
         // only sign of where a command ran was a marker line pushed into the
         // output, which is noise in the model's context and ugly on screen.
-        const marked = (component: Component, where: string, rowTheme: RowTheme): Component => ({
+        /**
+         * the command, while it is still running.
+         *
+         * pi's bash row prints the command from its own execution updates,
+         * which only its local backend emits: a command on another machine
+         * therefore showed the bare tool name for as long as it took to run,
+         * which on a remote is long enough to see. this draws the call from
+         * the arguments, which are complete the moment the call is made, and
+         * gets out of the way as soon as the real row has more than a title.
+         */
+        const pending = (title: string, command: string, width: number, rowTheme: RowTheme): string =>
+            `${rowTheme.fg('toolTitle', rowTheme.bold(title))} ${rowTheme.fg('dim', '$')} ${rowTheme.fg(
+                'accent',
+                truncate(oneLine(command), Math.max(8, width - visibleWidth(title) - 4)),
+            )}`;
+
+        const marked = (component: Component, where: string, rowTheme: RowTheme, args: unknown): Component => ({
             render(width: number): string[] {
                 const lines = component.render(width);
+                // whether the row shows the command, and nothing about how many
+                // lines it has: pi's row gains and loses a spinner line while
+                // the command runs, so a rule that counted lines made the row
+                // alternate between two renderings once a second.
+                const command = (args as { command?: unknown } | null)?.command;
+                if (typeof command === 'string' && command !== '') {
+                    const head = plain(oneLine(command)).trim().slice(0, 12);
+                    const drawn = plain(lines[0] ?? '');
+                    if (head !== '' && !drawn.includes(head)) {
+                        lines[0] = pending(name, command, width, rowTheme);
+                    }
+                }
                 const first = lines[0];
                 if (first === undefined) return lines;
                 const tag = rowTheme.fg('dim', truncate(`(${where})`, Math.max(4, width - 10)));
@@ -235,7 +263,9 @@ if (titles || detail || execPreview) {
             return (args, theme, context) => {
                 const where = whereOf(context.args ?? args);
                 const component = inner(args, theme, context);
-                return where === undefined ? component : marked(component, where, adapt(theme));
+                return where === undefined
+                    ? component
+                    : marked(component, where, adapt(theme), context.args ?? args);
             };
         }
         return (args, theme, context) => {
@@ -246,7 +276,9 @@ if (titles || detail || execPreview) {
             const unwrapped = last instanceof Retitled ? last.inner : last;
             const retitled = new Retitled(inner(args, theme, { ...context, lastComponent: unwrapped }), name, title);
             const where = whereOf(context.args ?? args);
-            return where === undefined ? retitled : marked(retitled, where, adapt(theme));
+            return where === undefined
+                ? retitled
+                : marked(retitled, where, adapt(theme), context.args ?? args);
         };
     };
 

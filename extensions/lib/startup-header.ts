@@ -39,15 +39,24 @@ export interface HeaderOptions {
     commands: readonly SlashCommandInfo[];
     /** the loaded theme names, active one included. */
     themes: readonly string[];
+    /**
+     * this session's id, printed under the header.
+     *
+     * a session that crashes takes /session with it, and the transcript is
+     * addressed by id: without it on screen from the start, the record of what
+     * just went wrong has to be found by timestamp.
+     */
+    sessionId?: string;
 }
 
 export function headerLines(options: HeaderOptions): string[] {
-    const { intro, theme, elapsed, commands, themes } = options;
+    const { intro, theme, elapsed, commands, themes, sessionId } = options;
     const sections: Section[] = [
         { label: 'prompts', items: sortedNames(commands, 'prompt', '/') },
         { label: 'skills', items: sortedNames(commands, 'skill', '') },
         { label: 'commands', items: sortedNames(commands, 'extension', '/') },
         { label: 'themes', items: [...themes].sort((a, b) => a.localeCompare(b)), current: theme.name },
+        ...(sessionId === undefined ? [] : [{ label: 'session', items: [sessionId] }]),
     ].filter((section) => section.items.length > 0);
 
     const labelWidth = sections.reduce((max, section) => Math.max(max, section.label.length), 0);

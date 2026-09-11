@@ -61,6 +61,7 @@ export default function (pi: ExtensionAPI) {
                         intro,
                         theme,
                         elapsed: Date.now() - start,
+                        sessionId: ctx.sessionManager.getSessionId(),
                         commands: pi.getCommands(),
                         themes: ctx.ui
                             .getAllThemes()

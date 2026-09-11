@@ -191,6 +191,22 @@ export function named(): readonly string[] {
 export function attach(name: string, input: NodeJS.ReadableStream, output: NodeJS.WritableStream): Promise<void> {
     return new Promise((settle, fail) => {
         const socket = connectSocket(socketFor(name));
+
+        // This dies with its connection, in every direction.
+        //
+        // Watching only the socket left one of these behind every time a
+        // viewer closed: ssh went away, its end of the pipe closed, and the
+        // relay carried on holding a client slot. Fifteen of them accumulated
+        // in one afternoon, and each one is a process the machine is keeping
+        // alive for nobody. The executor learnt this first; this is its twin.
+        let finished = false;
+        const done = () => {
+            if (finished) return;
+            finished = true;
+            socket.destroy();
+            settle();
+        };
+
         socket.on('connect', () => {
             // `{ end: false }` because a viewer that stops sending is still
             // watching: the default ends the socket when stdin does, so piping
@@ -199,8 +215,16 @@ export function attach(name: string, input: NodeJS.ReadableStream, output: NodeJ
             input.pipe(socket, { end: false });
             socket.pipe(output);
         });
-        socket.on('close', () => settle());
-        socket.on('error', (error) => fail(new Error(`no session called ${name}: ${error.message}`)));
+        socket.on('close', done);
+        input.on('end', done);
+        input.on('close', done);
+        output.on('error', done);
+        for (const signal of ['SIGHUP', 'SIGTERM', 'SIGINT'] as const) process.on(signal, done);
+        socket.on('error', (error) => {
+            if (finished) return;
+            finished = true;
+            fail(new Error(`no session called ${name}: ${error.message}`));
+        });
     });
 }
 

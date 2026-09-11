@@ -13,7 +13,7 @@
 // of falls through to its arguments spelled out, which is still shorter than
 // the JSON block pi would print.
 
-import { truncate } from '../text';
+import { oneLine, truncate } from '../text';
 import { PLAIN_THEME, type RowTheme } from './theme';
 
 export interface ArgEntry {
@@ -94,6 +94,56 @@ export function summariseArgs(args: unknown): ArgSummary {
 
 const QUOTE = '> ';
 
+/**
+ * a word that only joins a confirmation to the thing already named on the call
+ * line. "Sent to D0C0PG7LZCJ." minus the identifier is "Sent to", and the
+ * preposition goes with it.
+ */
+const DANGLING = /\s+(?:to|in|on|at|for|from|with)\s*$/i;
+
+/**
+ * a result left saying only that it worked. the row is already the record that
+ * the call happened and its colour is the record that it worked, so a word to
+ * that effect is a second copy of both.
+ */
+const CONFIRMATION = /^(?:sent|done|ok|okay|closed|saved|posted|uploaded|written|created|updated|removed|deleted|complete|completed|success|succeeded)$/i;
+
+export interface ResultPreviewOptions {
+    /** the raw result text of the tool. */
+    text: string;
+    /** the arguments the call was made with, to know what it already said. */
+    args: unknown;
+    note?: string;
+    expanded: boolean;
+    width: number;
+    theme?: RowTheme;
+}
+
+/**
+ * the result row of a tool that draws none of its own.
+ *
+ * a tool that acts on something usually answers by naming it again: the call
+ * says who was written to and the result says it was sent to the same
+ * identifier. what the call already carries is removed, and a result left with
+ * nothing of its own is dropped, because the row is the record that it
+ * happened and its colour is the record that it worked. anything the call did
+ * not say survives, which is what a refusal is.
+ */
+export function resultPreview(options: ResultPreviewOptions): string[] {
+    const { text, args, note, expanded, width } = options;
+    const theme = options.theme ?? PLAIN_THEME;
+    const lines = text.split('\n');
+    if (expanded) return lines.map((line) => theme.fg('toolOutput', line));
+
+    const summary = summariseArgs(args);
+    const said = [summary.subject?.value, note, summary.body].filter((part): part is string => part !== undefined);
+    let rest = oneLine(lines[0] ?? '');
+    for (const part of said) rest = rest.split(part).join('');
+    rest = oneLine(rest).replace(/[\s.,:;]+$/, '').replace(DANGLING, '').replace(/^[\s.,:;]+/, '');
+    if (rest === '' || CONFIRMATION.test(rest)) return [];
+    return [theme.fg('muted', truncate(rest, Math.max(8, width)))];
+}
+
 export interface CallPreviewOptions {
     title: string;
     args: unknown;
@@ -102,6 +152,16 @@ export interface CallPreviewOptions {
     expanded: boolean;
     width: number;
     theme?: RowTheme;
+}
+
+/**
+ * what the row calls its subject. a name is what the reader knows the thing
+ * by, so it takes the subject's place and the identifier behind it is shown
+ * only on expand, where the rest of the arguments are.
+ */
+function subjectText(subject: ArgEntry, note: string | undefined, expanded: boolean): string {
+    if (note === undefined) return subject.value;
+    return expanded ? `${note} (${subject.value})` : note;
 }
 
 /**
@@ -118,18 +178,14 @@ export function callPreview(options: CallPreviewOptions): string[] {
     let used = title.length;
     if (summary.subject !== undefined) {
         const preposition = PREPOSITION[summary.subject.key];
-        const budget = Math.max(8, width - used - (preposition ? preposition.length + 2 : 1) - (note ? note.length + 3 : 0));
-        const value = truncate(summary.subject.value, budget);
+        const budget = Math.max(8, width - used - (preposition ? preposition.length + 2 : 1));
+        const value = truncate(subjectText(summary.subject, note, expanded), budget);
         if (preposition !== undefined) {
             head += ' ' + theme.fg('dim', preposition);
             used += preposition.length + 1;
         }
         head += ' ' + theme.fg('accent', value);
         used += value.length + 1;
-        if (note !== undefined) {
-            head += ' ' + theme.fg('muted', `(${note})`);
-            used += note.length + 3;
-        }
     }
 
     const lines = [head];

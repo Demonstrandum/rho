@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { plain } from '../extensions/lib/text';
-import { callPreview, summariseArgs } from '../extensions/lib/tool-row/preview';
+import { callPreview, resultPreview, summariseArgs } from '../extensions/lib/tool-row/preview';
 import { retitle, toolTitle } from '../extensions/lib/tool-row/title';
 
 test('toolTitle drops a namespace and spaces the words, lower case throughout', () => {
@@ -52,7 +52,7 @@ test('callPreview names the subject and quotes the first line', () => {
         expanded: false,
         width: 80,
     }).map(plain);
-    expect(lines[0]).toBe('slack reply to D0C0PG7LZCJ (Adam)');
+    expect(lines[0]).toBe('slack reply to Adam');
     expect(lines[1]).toBe('> Hey Adam, the build is green \u2026');
     expect(lines).toHaveLength(2);
 });
@@ -70,4 +70,28 @@ test('callPreview expanded gives every line and the remaining arguments', () => 
 test('callPreview falls back to the arguments when nothing names the call', () => {
     const [line] = callPreview({ title: 'batch', args: { concurrency: 4 }, expanded: false, width: 80 }).map(plain);
     expect(line).toBe('batch concurrency=4');
+});
+
+test('a name takes the place of the identifier it stands for', () => {
+    const args = { channel: 'D0C0PG7LZCJ', text: 'done' };
+    const [collapsed] = callPreview({ title: 'slack reply', args, note: 'Adam', expanded: false, width: 80 }).map(plain);
+    expect(collapsed).toBe('slack reply to Adam');
+    // the identifier is what the row is about, so expanding gives it back.
+    const [expanded] = callPreview({ title: 'slack reply', args, note: 'Adam', expanded: true, width: 80 }).map(plain);
+    expect(expanded).toBe('slack reply to Adam (D0C0PG7LZCJ)');
+});
+
+test('a result that only repeats the call is dropped', () => {
+    const args = { channel: 'D0C0PG7LZCJ', text: 'done' };
+    expect(resultPreview({ text: 'Sent to D0C0PG7LZCJ.', args, expanded: false, width: 80 })).toEqual([]);
+    expect(resultPreview({ text: 'Sent to Adam.', args, note: 'Adam', expanded: false, width: 80 })).toEqual([]);
+});
+
+test('a result that says something the call did not is kept', () => {
+    const args = { channel: 'D0C0PG7LZCJ', text: 'done' };
+    const kept = resultPreview({ text: 'Slack refused it: rate limited', args, expanded: false, width: 80 }).map(plain);
+    expect(kept).toEqual(['Slack refused it: rate limited']);
+    // expanding gives the text as the tool wrote it.
+    expect(resultPreview({ text: 'Sent to D0C0PG7LZCJ.', args, expanded: true, width: 80 }).map(plain))
+        .toEqual(['Sent to D0C0PG7LZCJ.']);
 });

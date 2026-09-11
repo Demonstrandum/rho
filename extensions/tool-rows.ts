@@ -56,7 +56,7 @@ import {
     parseExecResult,
 } from './lib/tool-row/exec';
 import { noteFor } from './lib/tool-row/notes';
-import { callPreview } from './lib/tool-row/preview';
+import { callPreview, resultPreview } from './lib/tool-row/preview';
 import type { RowColor, RowTheme } from './lib/tool-row/theme';
 import { retitle, toolTitle } from './lib/tool-row/title';
 
@@ -195,23 +195,25 @@ if (titles || detail || execPreview) {
         };
     };
 
-    if (execPreview) {
-        const origGetResultRenderer = proto.getResultRenderer;
-        proto.getResultRenderer = function (this: ToolExecutionInternals): RenderResultFn | undefined {
-            const name = this.toolName;
-            if (!isExecTool(name)) return origGetResultRenderer.call(this);
+    /** every text block of a result, joined the way the row would print it. */
+    const resultText = (result: AgentToolResult<unknown>): string =>
+        (result.content ?? [])
+            .filter((c): c is { type: 'text'; text: string } =>
+                c.type === 'text' && typeof (c as { text?: unknown }).text === 'string')
+            .map((c) => c.text)
+            .join('\n');
 
+    const origGetResultRenderer = proto.getResultRenderer;
+    proto.getResultRenderer = function (this: ToolExecutionInternals): RenderResultFn | undefined {
+        const name = this.toolName;
+
+        if (execPreview && isExecTool(name)) {
             return (result, options, theme, context) => {
                 const call = parseExecCall(name, context.args);
                 if (!call) return new Lines(() => []);
                 if (options.isPartial) return new Lines(() => [theme.fg('warning', 'running\u2026')]);
 
-                const text = (result.content ?? [])
-                    .filter((c): c is { type: 'text'; text: string } =>
-                        c.type === 'text' && typeof (c as { text?: unknown }).text === 'string')
-                    .map((c) => c.text)
-                    .join('\n');
-                const { outcome } = parseExecResult(text);
+                const { outcome } = parseExecResult(resultText(result));
                 const rowTheme = adapt(theme);
 
                 if (options.expanded) {
@@ -223,8 +225,26 @@ if (titles || detail || execPreview) {
                     return line ? [line] : [];
                 });
             };
-        };
-    }
+        }
+
+        const inner = origGetResultRenderer.call(this);
+        if (inner !== undefined || !detail) return inner;
+
+        // the same row as the call: a tool that answers by naming what the call
+        // already named says nothing here, and the row's colour is the record
+        // that it worked.
+        return (result, options, theme, context) =>
+            new Lines((width) =>
+                resultPreview({
+                    text: resultText(result),
+                    args: context.args,
+                    note: noteOn(context.args),
+                    expanded: options.expanded,
+                    width,
+                    theme: adapt(theme),
+                }),
+            );
+    };
 
     if (titles) {
         // a tool call with no definition at all never reaches a renderer: pi

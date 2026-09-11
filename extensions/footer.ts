@@ -7,7 +7,8 @@
 import type { AssistantMessage, Model } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { abbreviate, capitalise, collapseHome, oneLine, words } from './lib/text';
+import { publishFooter } from './lib/footer-mirror';
 
 const ARROW_IN = '▲  ';
 const ARROW_OUT = '▽  ';
@@ -15,25 +16,9 @@ const ARROW_OUT = '▽  ';
 // pi defaults auto-compaction on; flip if you disable it in settings.
 const SHOW_AUTO = true;
 
-function formatTokens(count: number): string {
-    if (count < 1000) return count.toString();
-    if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
-    if (count < 1000000) return `${Math.round(count / 1000)}k`;
-    if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
-    return `${Math.round(count / 1000000)}M`;
-}
-
-function formatCwd(cwd: string, home: string | undefined): string {
-    if (!home) return cwd;
-    const rel = relative(resolve(home), resolve(cwd));
-    const inside = rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-    if (!inside) return cwd;
-    return rel === '' ? '~' : `~${sep}${rel}`;
-}
-
-function sanitizeStatus(text: string): string {
-    return text.replace(/[\r\n\t]/g, ' ').replace(/ +/g, ' ').trim();
-}
+const formatTokens = (count: number): string => abbreviate(count, 'compact');
+const formatCwd = collapseHome;
+const sanitizeStatus = oneLine;
 
 // turn a raw model id like `claude-opus-4-8` into a friendly display name like
 // `Opus 4.8`. drops vendor prefixes, folds trailing numeric segments into a
@@ -43,7 +28,7 @@ const ACRONYMS = new Set(['gpt', 'ai', 'llm']);
 const isVersionToken = (t: string): boolean => /^\d+(\.\d+)*$/.test(t);
 
 function prettifyModelName(id: string): string {
-    const tokens = id.split(/[-_]/).filter(Boolean);
+    const tokens = words(id);
     while (tokens.length > 1 && VENDOR_PREFIXES.has(tokens[0].toLowerCase())) {
         tokens.shift();
     }
@@ -54,8 +39,7 @@ function prettifyModelName(id: string): string {
     const name = tokens
         .map((t) => {
             const low = t.toLowerCase();
-            if (ACRONYMS.has(low)) return low.toUpperCase();
-            return low.charAt(0).toUpperCase() + low.slice(1);
+            return ACRONYMS.has(low) ? low.toUpperCase() : capitalise(low);
         })
         .join(' ');
     const version = versionTokens.join('.');
@@ -178,7 +162,11 @@ export default function (pi: ExtensionAPI) {
                     const dimStatsLeft = theme.fg('dim', statsLeft);
                     const dimRemainder = theme.fg('dim', statsLine.slice(statsLeft.length));
                     const pwdLine = truncateToWidth(theme.fg('dim', pwd), width, theme.fg('dim', '...'));
-                    return [pwdLine, dimStatsLeft + dimRemainder];
+                    const lines = [pwdLine, dimStatsLeft + dimRemainder];
+                    // the theme picker shows a session, and this is that
+                    // session's footer; it cannot build one of its own.
+                    publishFooter(lines);
+                    return lines;
                 },
             };
         });

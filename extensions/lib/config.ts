@@ -716,6 +716,22 @@ const SCHEMA = {
             'needs terminal.clearOnShrink, which clear-on-shrink.ts sets',
         ),
     },
+    theme: {
+        previewOnFocus: field(
+            'preview-on-focus',
+            isBool,
+            true,
+            'apply a theme as its name passes under the cursor in the /theme',
+            'completion menu, and put the old one back if nothing is chosen',
+        ),
+        persist: field(
+            'persist',
+            isBool,
+            true,
+            "write a chosen theme to pi's settings, so it survives a restart the",
+            'way one picked in /settings does. false keeps it for this session',
+        ),
+    },
     tools: {
         titles: field(
             'titles',

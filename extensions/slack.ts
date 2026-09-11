@@ -31,6 +31,7 @@ import { basename, isAbsolute, join, resolve } from 'node:path';
 import { Type } from 'typebox';
 import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 import { PersistedState } from './lib/state-store';
+import { loadMaxims } from './spinner';
 import { config } from './lib/config';
 import {
     type Acknowledgement,
@@ -134,14 +135,40 @@ const TYPING_REFRESH_MS = 90_000;
  */
 const scratchDir = (): string => process.env.RHO_SCRATCH ?? tmpdir();
 
-const acknowledgement = (): Acknowledgement | null =>
-    config.slack.typing
-        ? {
-              emoji: config.slack.readEmoji,
-              status: config.slack.loadingMessages[0] ?? 'is working on it',
-              loading: config.slack.loadingMessages,
-          }
-        : null;
+/**
+ * What the status line says while a turn runs.
+ *
+ * Configured messages win; otherwise the maxims the spinner already draws on,
+ * so the agent says the same sort of thing in the terminal and in Slack rather
+ * than keeping two lists that drift apart. Slack takes at most ten, and shows
+ * them in order, so they are shuffled per turn instead of always being the
+ * first ten lines of the file.
+ */
+const statusMessages = (): readonly string[] => {
+    const configured = config.slack.loadingMessages;
+    if (configured.length > 0) return configured;
+    const maxims = loadMaxims();
+    if (maxims.length === 0) return ['is working on it'];
+    const shuffled = [...maxims];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const a = shuffled[i] as string;
+        const b = shuffled[j] as string;
+        shuffled[i] = b;
+        shuffled[j] = a;
+    }
+    return shuffled.slice(0, 10);
+};
+
+const acknowledgement = (): Acknowledgement | null => {
+    if (!config.slack.typing) return null;
+    const messages = statusMessages();
+    return {
+        emoji: config.slack.readEmoji,
+        status: messages[0] ?? 'is working on it',
+        loading: messages,
+    };
+};
 
 const render = (message: Incoming): string => {
     const at = new Date(Number.parseFloat(message.ts) * 1000).toISOString().slice(11, 16);

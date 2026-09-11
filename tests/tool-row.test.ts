@@ -57,6 +57,22 @@ test('callPreview names the subject and quotes the first line', () => {
     expect(lines).toHaveLength(2);
 });
 
+test('no row is wider than the width it was given', () => {
+    const long = 'x'.repeat(400);
+    for (const width of [20, 41, 80, 189]) {
+        for (const text of [long, `${long}\nmore`, `short\nmore`]) {
+            const lines = callPreview({
+                title: 'slack reply',
+                args: { channel: 'D0C0PG7LZCJ', text },
+                note: 'Adam',
+                expanded: false,
+                width,
+            }).map(plain);
+            for (const line of lines) expect(line.length).toBeLessThanOrEqual(width);
+        }
+    }
+});
+
 test('callPreview expanded gives every line and the remaining arguments', () => {
     const lines = callPreview({
         title: 'slack reply',

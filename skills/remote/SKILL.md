@@ -76,5 +76,6 @@ this is for one file: `environment connect` is still how the session moves, and 
 ## one command on another machine
 
 `bash` takes an optional `on`: an attached environment name, a `user@host` to attach on demand, or `local`.
+omit it unless the command has to run somewhere other than the current environment: naming the machine the session already points at repeats what the environment block says and reads as though it changed something.
 without it the command runs wherever the environment currently points.
 this is the command equivalent of an addressed path, and it exists so that running one command elsewhere does not mean moving the session there and back, which would change where every later command goes.

@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { parseTarget } from './lib/remote/deploy';
+import { addressName, parseAddress, sshTarget } from './lib/remote/address';
 
 const CACHE = join(process.env.HOME ?? '/tmp', '.cache', 'rho', 'remote');
 const REMOTE_DIR = '.cache/rho/remote';
@@ -305,9 +305,11 @@ export default function (pi: ExtensionAPI) {
     };
 
     const create = async (name: string, address: string, say: (note: string) => void): Promise<string> => {
-        const target = parseTarget(address);
-        const runner = await place(target.host, say);
-        say(`starting ${name} on ${target.host}`);
+        const address_ = parseAddress(address);
+        if (address_ === null) throw new Error(`not a machine address: ${address}`);
+        const host = sshTarget(address_);
+        const runner = await place(host, say);
+        say(`starting ${name} on ${host}`);
         // The agent on the host needs a model key, and the host should not own
         // one: a key in a file there outlives the session and ends up in
         // backups. These go down the ssh channel into the session's
@@ -325,13 +327,13 @@ export default function (pi: ExtensionAPI) {
         }
         const started = await run(
             'ssh',
-            [target.host, `${runner} serve ${name} ${target.path ?? '$HOME'}`],
+            [host, `${runner} serve ${name} ${address_.path ?? '$HOME'}`],
             new TextEncoder().encode(JSON.stringify(carried)),
         );
         if (started.code !== 0) {
             throw new Error(started.err.trim() || started.out.trim() || `could not start ${name}`);
         }
-        hosts.set(name, target.host);
+        hosts.set(name, host);
         return started.out.trim();
     };
 

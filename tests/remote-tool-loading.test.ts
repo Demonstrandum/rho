@@ -9,12 +9,13 @@ import remote from '../extensions/remote';
  */
 
 interface Handler {
-    (event: { text: string; source?: string }): Promise<unknown>;
+    (event: { text: string; source?: string }, ctx?: unknown): Promise<unknown>;
 }
 
 const harness = () => {
     const registered: string[] = [];
     const descriptions: string[] = [];
+    const sent: string[] = [];
     let active: string[] = ['bash', 'read', 'write', 'edit'];
     const handlers = new Map<string, Handler>();
 
@@ -33,13 +34,23 @@ const harness = () => {
         on: (event: string, handler: Handler) => {
             handlers.set(event, handler);
         },
-        sendMessage: () => {},
+        sendMessage: (message: { content?: string }) => {
+            sent.push(typeof message.content === 'string' ? message.content : '');
+        },
     };
 
     return {
         pi,
         registered,
         descriptions,
+        sent,
+        /** A resume, with no UI, as a headless session has. */
+        resume: async (cwd: string, sessionId: string) =>
+            handlers.get('session_start')?.({ text: '' } as never, {
+                cwd,
+                hasUI: false,
+                sessionManager: { getSessionId: () => sessionId },
+            }),
         get active() {
             return active;
         },
@@ -100,6 +111,41 @@ describe('the routed file tools', () => {
         const described = h.descriptions.filter((text) => text.includes('user@host:/abs/path'));
         expect(described.length).toBeGreaterThanOrEqual(3);
         expect(described.every((text) => text.includes('local:/abs/path'))).toBe(true);
+    });
+});
+
+describe('resuming a session that was working elsewhere', () => {
+    test('says so, rather than carrying on as though nothing moved', async () => {
+        const { writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+        const { join } = await import('node:path');
+        const envPaths = (await import('env-paths')).default;
+
+        // Written where the store actually looks, because the store resolves
+        // that path once at load and an environment variable set here is too
+        // late to change it.
+        const dir = join(envPaths('rho', { suffix: '' }).data, 'state', 'session');
+        const id = '01a09999-0000-0000-0000-000000000000';
+        const file = join(dir, `${id}.environment.json`);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(
+            file,
+            JSON.stringify({ version: 1, host: 'samuel@dev-box-1', name: 'dev-box-1', cwd: '/home/samuel' }),
+        );
+
+        try {
+            const h = harness();
+            environment(h.pi as never);
+            await h.resume(process.cwd(), id);
+
+            // Without a UI it cannot ask, so it states the change: a session
+            // whose history is full of another machine must not read as though
+            // it is still there.
+            const said = h.sent.join('\n');
+            expect(said).toContain('samuel@dev-box-1');
+            expect(said).toContain('working locally');
+        } finally {
+            rmSync(file, { force: true });
+        }
     });
 });
 

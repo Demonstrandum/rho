@@ -1,6 +1,7 @@
 import { platform, release } from 'node:os';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { config } from './lib/config';
+import { currentEnvironment } from './environment';
 
 // states the facts about the machine and the session that the agent otherwise
 // spends a tool call to learn: where it is, what it is running on, what day it
@@ -39,6 +40,10 @@ interface Facts {
     readonly platform: string;
     readonly date: string;
     readonly model: string;
+    /** which shell bash tool commands are handed to. */
+    readonly shell: string;
+    /** the machine the tools act on: absent when that is this one. */
+    readonly host?: string;
 }
 
 export const probeRepo = async (cwd: string): Promise<RepoState> => {
@@ -72,18 +77,43 @@ const modelLine = (ctx: ExtensionContext): string => {
     return thinking === undefined || thinking === 'off' ? id : `${id}, thinking ${thinking}`;
 };
 
-const gather = async (ctx: ExtensionContext): Promise<Facts> => ({
-    cwd: ctx.cwd,
-    repo: await probeRepo(ctx.cwd),
-    platform: `${platform()} ${release()}`,
-    // ISO 8601, per the orthography rules; frozen for the session.
-    date: new Date().toISOString().slice(0, 10),
-    model: modelLine(ctx),
-});
+const gather = async (ctx: ExtensionContext): Promise<Facts> => {
+    // An attached environment is where the tools act, so it is what the block
+    // describes: the laptop's directory and shell are not what a command will
+    // see. Local details stay for date and model, which belong to the session
+    // rather than to a machine.
+    const remote = currentEnvironment();
+    if (remote !== undefined && remote.alive) {
+        return {
+            cwd: remote.cwd,
+            repo: 'unknown',
+            platform: `remote via ${remote.host}`,
+            date: new Date().toISOString().slice(0, 10),
+            model: modelLine(ctx),
+            shell: remote.shell,
+            host: remote.host,
+        };
+    }
+    return {
+        cwd: ctx.cwd,
+        repo: await probeRepo(ctx.cwd),
+        platform: `${platform()} ${release()}`,
+        // ISO 8601, per the orthography rules; frozen for the session.
+        date: new Date().toISOString().slice(0, 10),
+        model: modelLine(ctx),
+        shell: process.env.SHELL ?? 'unknown',
+    };
+};
 
 export const render = (facts: Facts, fields: RenderFields): string => {
-    const lines = [`cwd: ${facts.cwd}`];
+    // The host first, and only when the tools are acting elsewhere: a session
+    // that says nothing about the machine is describing this one, and a model
+    // reading a local cwd while its commands run in another country will
+    // reason about files that are not there.
+    const lines = facts.host === undefined ? [] : [`host: ${facts.host}`];
+    lines.push(`cwd: ${facts.cwd}`);
     if (fields.git) lines.push(`git repo: ${REPO_LINE[facts.repo]}`);
+    if (fields.shell) lines.push(`shell: ${facts.shell}`);
     if (fields.platform) lines.push(`platform: ${facts.platform}`);
     if (fields.date) lines.push(`date: ${facts.date}`);
     if (fields.model) lines.push(`model: ${facts.model}`);
@@ -95,6 +125,7 @@ export interface RenderFields {
     readonly platform: boolean;
     readonly date: boolean;
     readonly model: boolean;
+    readonly shell: boolean;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -105,6 +136,7 @@ export default function (pi: ExtensionAPI) {
         platform: config.env.platform,
         date: config.env.date,
         model: config.env.model,
+        shell: config.env.shell,
     };
 
     let block: string | null = null;
@@ -113,7 +145,10 @@ export default function (pi: ExtensionAPI) {
     pi.on('before_agent_start', async (event, ctx) => {
         // the identity of the facts that may change within a session; a change
         // rebuilds the block and costs one cache miss.
-        const key = `${ctx.cwd}\u0000${modelLine(ctx)}`;
+        // The environment is part of the identity: switching machine has to
+        // rebuild the block, or the model keeps reading the old one.
+        const remote = currentEnvironment();
+        const key = `${ctx.cwd}\u0000${modelLine(ctx)}\u0000${remote?.host ?? 'local'}\u0000${remote?.cwd ?? ''}`;
         if (block === null || key !== builtFor) {
             block = render(await gather(ctx), fields);
             builtFor = key;

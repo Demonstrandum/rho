@@ -30,6 +30,7 @@ import {
 import type { TSchema } from '@earendil-works/pi-ai';
 import { PersistedState } from './lib/state-store';
 import { config } from './lib/config';
+import { currentEnvironment } from './environment';
 import { collapseHome } from './lib/text';
 
 const TARGET_VERSION = 1;
@@ -174,6 +175,25 @@ export default function (pi: ExtensionAPI) {
         },
         handler: async (args, ctx) => {
             const arg = args.trim();
+
+            // With an environment attached, the directory that matters is the
+            // one on that machine: changing this one would move the laptop's
+            // cwd while every command still ran somewhere else.
+            const remote = currentEnvironment();
+            if (remote !== undefined && remote.alive) {
+                if (!arg) {
+                    ctx.ui.notify(`cwd: ${remote.cwd} on ${remote.host}`, 'info');
+                    return;
+                }
+                try {
+                    const moved = await remote.chdir(arg);
+                    ctx.ui.notify(`cwd -> ${moved} on ${remote.host}`, 'info');
+                } catch (error) {
+                    ctx.ui.notify(`${(error as Error).message} (on ${remote.host})`, 'error');
+                }
+                return;
+            }
+
             if (!arg) {
                 ctx.ui.notify(`cwd: ${currentCwd}`, 'info');
                 return;

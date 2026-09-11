@@ -26,7 +26,7 @@ import {
     createReadTool,
     createWriteTool,
 } from '@earendil-works/pi-coding-agent';
-import { operationsFor } from './lib/remote/client';
+import { operationsFor, waitFor } from './lib/remote/client';
 import type { Connection } from './lib/remote/client';
 import { deploy, parseTarget } from './lib/remote/deploy';
 
@@ -36,24 +36,120 @@ interface Environment {
     readonly host: string;
 }
 
+/**
+ * Where the tools are acting, published for anything that describes the
+ * session to the model.
+ *
+ * On globalThis because the extensions are separate modules with no import
+ * between them, and a model told it is in one place while its tools act in
+ * another will reason about the wrong machine: the environment block reads
+ * this, and /cwd changes directory here rather than on the laptop.
+ */
+export interface Where {
+    readonly name: string;
+    readonly host: string;
+    cwd: string;
+    readonly shell: string;
+    readonly alive: boolean;
+    chdir(path: string): Promise<string>;
+}
+
+const PUBLISHED = '__rho_environment';
+const published = globalThis as typeof globalThis & { [PUBLISHED]?: Where | undefined };
+
+export const currentEnvironment = (): Where | undefined => published[PUBLISHED];
+
 export default function (pi: ExtensionAPI) {
     const environments = new Map<string, Environment>();
     let current: string | null = null;
 
     const active = (): Environment | null => (current === null ? null : (environments.get(current) ?? null));
 
-    /** A connection that has died stops being current, rather than being addressed. */
+    /**
+     * A dead connection is refused, not replaced by the laptop.
+     *
+     * Falling back to local was worse than failing: the command ran, the
+     * output looked plausible, and it came from the wrong machine. The name
+     * stays until somebody chooses where to go next.
+     */
     const forget = (name: string, why: string): void => {
         environments.delete(name);
-        if (current === name) current = null;
+        if (current === name) {
+            dead = { name, why };
+            published[PUBLISHED] = undefined;
+        }
         pi.sendMessage(
             {
                 customType: 'environment',
-                content: `The environment ${name} is gone: ${why}. Commands run locally again; anything it was holding is lost.`,
+                content:
+                    `The environment ${name} is gone: ${why}.\n` +
+                    'Tools will refuse rather than run here by mistake. ' +
+                    `Reconnect with environment connect, or environment default local to work on this machine.`,
                 display: true,
             },
             { deliverAs: 'followUp' },
         );
+    };
+
+    /** The last environment that died, so a tool can say so rather than acting locally. */
+    let dead: { name: string; why: string } | null = null;
+
+    /** What the far side is: directory, shell, and whether it is a repository. */
+    const describe = async (environment: Environment): Promise<string> => {
+        const facts: string[] = [`host: ${environment.host}`];
+        const where = await environment.connection.request({ kind: 'cwd' });
+        const cwd = where.kind === 'cwd' ? where.path : 'unknown';
+        facts.push(`cwd: ${cwd}`);
+        const probe = await environment.connection.request({
+            kind: 'spawn',
+            command: 'echo "$SHELL"; uname -sr; git rev-parse --is-inside-work-tree 2>/dev/null || echo no',
+        });
+        if (probe.kind === 'spawned') {
+            await waitFor(environment.connection, probe.process);
+            const out = await environment.connection.request({
+                kind: 'read-range',
+                process: probe.process,
+                stream: 'stdout',
+                offset: 0,
+                length: 512,
+            });
+            void environment.connection.request({ kind: 'release', process: probe.process });
+            if (out.kind === 'bytes') {
+                const [shell = '', platform = '', repo = ''] = new TextDecoder()
+                    .decode(out.data)
+                    .trim()
+                    .split('\n');
+                facts.push(`shell: ${shell || 'unknown'}`);
+                facts.push(`platform: ${platform || 'unknown'}`);
+                facts.push(`git repo: ${repo.trim() === 'true' ? 'yes' : 'no'}`);
+                published[PUBLISHED] = {
+                    name: environment.name,
+                    host: environment.host,
+                    cwd,
+                    shell: shell || 'unknown',
+                    alive: true,
+                    chdir: async (path: string) => {
+                        const moved = await environment.connection.request({ kind: 'chdir', path });
+                        if (moved.kind !== 'cwd') {
+                            throw new Error(moved.kind === 'error' ? moved.message : 'could not change directory');
+                        }
+                        const state = published[PUBLISHED];
+                        if (state !== undefined) state.cwd = moved.path;
+                        return moved.path;
+                    },
+                };
+            }
+        }
+        return facts.join('\n');
+    };
+
+    /** Said out loud, because a change of machine the model cannot see is a trap. */
+    const announce = async (environment: Environment | null): Promise<void> => {
+        const content =
+            environment === null
+                ? `<environment>\nworking locally on this machine\n</environment>`
+                : `<environment>\n${await describe(environment)}\n</environment>`;
+        pi.sendMessage({ customType: 'environment', content, display: true }, { deliverAs: 'followUp' });
     };
 
     const attach = async (name: string, address: string, note: (text: string) => void): Promise<Environment> => {
@@ -65,6 +161,8 @@ export default function (pi: ExtensionAPI) {
         });
         environments.set(name, environment);
         current = name;
+        dead = null;
+        await announce(environment);
         return environment;
     };
 
@@ -84,8 +182,20 @@ export default function (pi: ExtensionAPI) {
         ({
             ...local,
             async execute(...args: never[]) {
+                // An environment that died is not the same as no environment.
+                // Running locally here is how a command silently answered from
+                // the wrong machine, so it refuses until somebody chooses.
+                if (dead !== null) {
+                    throw new Error(
+                        `the environment ${dead.name} is gone (${dead.why}), so this did not run. ` +
+                            'Reconnect it, or switch to local deliberately with environment default local.',
+                    );
+                }
                 const environment = active();
                 if (environment === null) return (local.execute as (...a: never[]) => unknown)(...args);
+                if (!environment.connection.alive) {
+                    throw new Error(`the connection to ${environment.name} is closed, so this did not run`);
+                }
                 const remote = make(operationsFor(environment.connection));
                 return (remote.execute as (...a: never[]) => unknown)(...args);
             },
@@ -129,10 +239,16 @@ export default function (pi: ExtensionAPI) {
                 const target = params.target ?? 'local';
                 if (target === 'local') {
                     current = null;
+                    dead = null;
+                    published[PUBLISHED] = undefined;
+                    await announce(null);
                     return said('Working locally.');
                 }
-                if (!environments.has(target)) return said(`No environment called ${target}. Connect it first.`);
+                const chosen = environments.get(target);
+                if (chosen === undefined) return said(`No environment called ${target}. Connect it first.`);
                 current = target;
+                dead = null;
+                await announce(chosen);
                 return said(`Working on ${target}.`);
             }
 
@@ -171,14 +287,20 @@ export default function (pi: ExtensionAPI) {
                 const target = rest ?? 'local';
                 if (target === 'local') {
                     current = null;
+                    dead = null;
+                    published[PUBLISHED] = undefined;
+                    await announce(null);
                     ctx.ui.notify('Working locally.', 'info');
                     return;
                 }
-                if (!environments.has(target)) {
+                const chosen = environments.get(target);
+                if (chosen === undefined) {
                     ctx.ui.notify(`No environment called ${target}.`, 'error');
                     return;
                 }
                 current = target;
+                dead = null;
+                await announce(chosen);
                 ctx.ui.notify(`Working on ${target}.`, 'info');
                 return;
             }

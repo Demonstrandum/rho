@@ -14,12 +14,14 @@ interface Handler {
 
 const harness = () => {
     const registered: string[] = [];
+    const descriptions: string[] = [];
     let active: string[] = ['bash', 'read', 'write', 'edit'];
     const handlers = new Map<string, Handler>();
 
     const pi = {
-        registerTool: (tool: { name: string }) => {
+        registerTool: (tool: { name: string; description?: string }) => {
             registered.push(tool.name);
+            if (typeof tool.description === 'string') descriptions.push(tool.description);
             if (!active.includes(tool.name)) active.push(tool.name);
         },
         registerCommand: () => {},
@@ -37,6 +39,7 @@ const harness = () => {
     return {
         pi,
         registered,
+        descriptions,
         get active() {
             return active;
         },
@@ -84,6 +87,19 @@ describe('the environment tool', () => {
         await h.turn();
         await h.input('fix the failing test in tests/env-block.test.ts');
         expect(h.active).not.toContain('environment');
+    });
+});
+
+describe('the routed file tools', () => {
+    test('say in their description how to address another machine', async () => {
+        // The only place the model looks before choosing an argument: a syntax
+        // documented nowhere it reads is a syntax nobody uses.
+        const h = harness();
+        environment(h.pi as never);
+        await h.turn();
+        const described = h.descriptions.filter((text) => text.includes('user@host:/abs/path'));
+        expect(described.length).toBeGreaterThanOrEqual(3);
+        expect(described.every((text) => text.includes('local:/abs/path'))).toBe(true);
     });
 });
 

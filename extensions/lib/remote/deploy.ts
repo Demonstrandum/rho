@@ -10,8 +10,9 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { connectOverProcess } from './client';
 import type { Connection } from './client';
 
@@ -19,7 +20,42 @@ import type { Connection } from './client';
 const CACHE = join(process.env.HOME ?? '/tmp', '.cache', 'rho', 'remote');
 const REMOTE_DIR = '.cache/rho/remote';
 
-const ENTRY = join(import.meta.dir, 'executor-main.ts');
+/**
+ * Where this file's siblings are on disk.
+ *
+ * `import.meta.dir` is only a directory when the module was loaded from one.
+ * pi can load an extension from a bundle, and then it is a data URL holding
+ * the whole encoded source, so joining a filename onto it produces a "path"
+ * of tens of thousands of characters and every read fails with ENAMETOOLONG
+ * -- an error that names neither the file nor the cause.
+ *
+ * So it is resolved, checked, and falls back to the installed package.
+ */
+const sourceDir = (): string => {
+    const candidates: string[] = [];
+    const fromEnv = process.env.RHO_REMOTE_DIR;
+    if (fromEnv !== undefined && fromEnv !== '') candidates.push(fromEnv);
+    try {
+        const url = import.meta.url;
+        if (url.startsWith('file:')) candidates.push(dirname(fileURLToPath(url)));
+    } catch {
+        // not a file URL
+    }
+    const dir = import.meta.dir;
+    if (typeof dir === 'string' && dir.length < 4096 && dir.startsWith('/')) candidates.push(dir);
+    const home = process.env.HOME;
+    if (home !== undefined) candidates.push(join(home, 'Code', 'rho', 'extensions', 'lib', 'remote'));
+
+    for (const candidate of candidates) {
+        if (existsSync(join(candidate, 'executor-main.ts'))) return candidate;
+    }
+    throw new Error(
+        `cannot find the executor source. Looked in: ${candidates.map((c) => c.slice(0, 80)).join(', ')}. ` +
+            'Set RHO_REMOTE_DIR to the directory holding executor-main.ts.',
+    );
+};
+
+const ENTRY = (): string => join(sourceDir(), 'executor-main.ts');
 
 export interface Target {
     /** user@host, as ssh understands it. */
@@ -75,11 +111,9 @@ export async function build(platform: Platform): Promise<{
     path: string;
     hash: string;
 }> {
-    const source = readFileSync(ENTRY);
-    const shared = [
-        readFileSync(join(import.meta.dir, 'executor.ts')),
-        readFileSync(join(import.meta.dir, 'protocol.ts')),
-    ];
+    const here = sourceDir();
+    const source = readFileSync(join(here, 'executor-main.ts'));
+    const shared = [readFileSync(join(here, 'executor.ts')), readFileSync(join(here, 'protocol.ts'))];
     const hash = createHash('sha256')
         .update(source)
         .update(shared[0] ?? '')
@@ -99,7 +133,7 @@ export async function build(platform: Platform): Promise<{
 
     const built = await run('bun', [
         'build',
-        ENTRY,
+        ENTRY(),
         '--compile',
         `--target=bun-${platform}`,
         '--outfile',
@@ -122,10 +156,11 @@ export async function build(platform: Platform): Promise<{
  * node. 200 KB instead of 82 MB, and no loader to be refused by.
  */
 export async function bundle(): Promise<{ path: string; hash: string }> {
+    const here = sourceDir();
     const hash = createHash('sha256')
-        .update(readFileSync(ENTRY))
-        .update(readFileSync(join(import.meta.dir, 'executor.ts')))
-        .update(readFileSync(join(import.meta.dir, 'protocol.ts')))
+        .update(readFileSync(join(here, 'executor-main.ts')))
+        .update(readFileSync(join(here, 'executor.ts')))
+        .update(readFileSync(join(here, 'protocol.ts')))
         .digest('hex')
         .slice(0, 16);
 
@@ -136,7 +171,7 @@ export async function bundle(): Promise<{ path: string; hash: string }> {
     } catch {
         // not bundled yet
     }
-    const built = await run('bun', ['build', ENTRY, '--target=node', '--outfile', out]);
+    const built = await run('bun', ['build', ENTRY(), '--target=node', '--outfile', out]);
     if (built.code !== 0) throw new Error(`could not bundle the executor: ${built.err || built.out}`);
     return { path: out, hash };
 }

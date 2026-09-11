@@ -18,15 +18,39 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { parseTarget } from './lib/remote/deploy';
 
 const CACHE = join(process.env.HOME ?? '/tmp', '.cache', 'rho', 'remote');
 const REMOTE_DIR = '.cache/rho/remote';
-const ENTRY = join(import.meta.dir, 'lib', 'remote', 'session-main.ts');
+// Same reason as deploy.ts: import.meta.dir is a data URL when pi loads this
+// from a bundle, and every read then fails with ENAMETOOLONG.
+const remoteDir = (): string => {
+    const candidates: string[] = [];
+    const fromEnv = process.env.RHO_REMOTE_DIR;
+    if (fromEnv !== undefined && fromEnv !== '') candidates.push(fromEnv);
+    try {
+        const url = import.meta.url;
+        if (url.startsWith('file:')) candidates.push(join(dirname(fileURLToPath(url)), 'lib', 'remote'));
+    } catch {
+        // not a file URL
+    }
+    const dir = import.meta.dir;
+    if (typeof dir === 'string' && dir.length < 4096 && dir.startsWith('/')) {
+        candidates.push(join(dir, 'lib', 'remote'));
+    }
+    const home = process.env.HOME;
+    if (home !== undefined) candidates.push(join(home, 'Code', 'rho', 'extensions', 'lib', 'remote'));
+
+    for (const candidate of candidates) {
+        if (existsSync(join(candidate, 'session-main.ts'))) return candidate;
+    }
+    throw new Error('cannot find session-main.ts; set RHO_REMOTE_DIR to the directory holding it');
+};
 
 const run = (
     command: string,
@@ -51,10 +75,11 @@ const run = (
 
 /** The session runner as one file, cached by a hash of its source. */
 async function bundle(): Promise<{ path: string; hash: string }> {
+    const here = remoteDir();
     const hash = createHash('sha256')
-        .update(readFileSync(ENTRY))
-        .update(readFileSync(join(import.meta.dir, 'lib', 'remote', 'broker.ts')))
-        .update(readFileSync(join(import.meta.dir, 'lib', 'remote', 'protocol.ts')))
+        .update(readFileSync(join(here, 'session-main.ts')))
+        .update(readFileSync(join(here, 'broker.ts')))
+        .update(readFileSync(join(here, 'protocol.ts')))
         .digest('hex')
         .slice(0, 16);
     mkdirSync(CACHE, { recursive: true });
@@ -64,7 +89,7 @@ async function bundle(): Promise<{ path: string; hash: string }> {
     } catch {
         // not bundled yet
     }
-    const built = await run('bun', ['build', ENTRY, '--target=node', '--outfile', out]);
+    const built = await run('bun', ['build', join(remoteDir(), 'session-main.ts'), '--target=node', '--outfile', out]);
     if (built.code !== 0) throw new Error(`could not bundle the session runner: ${built.err || built.out}`);
     return { path: out, hash };
 }

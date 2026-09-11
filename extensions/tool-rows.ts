@@ -85,6 +85,44 @@ if (titles || detail || execPreview) {
         invalidate(): void {}
     }
 
+    /**
+     * a tool's own call component, with the machine it acted on on the right.
+     *
+     * a class rather than an object literal because pi hands a renderer the
+     * component it returned last time, for that component's own incremental
+     * state: returning a fresh wrapper each render left pi's row with no
+     * history of itself, and it drew only its title -- the bare "bash" that
+     * appeared for every remote call.
+     */
+    class Marked implements Component {
+        constructor(
+            readonly inner: Component,
+            private readonly where: string,
+            private readonly rowTheme: RowTheme,
+        ) {}
+        render(width: number): string[] {
+            const lines = this.inner.render(width);
+            const first = lines[0];
+            if (first === undefined) return lines;
+            const tag = this.rowTheme.fg('dim', truncate(`(${this.where})`, Math.max(4, width - 10)));
+            const tagWidth = visibleWidth(tag);
+            // the row a tool draws is padded to the full width, so the
+            // trailing space is measured as content: trimming it first is what
+            // stops a line that fits being truncated to make room.
+            const head = first.trimEnd();
+            const room = Math.max(4, width - tagWidth - 1);
+            const shown = visibleWidth(head) > room ? truncate(head, room) : head;
+            const pad = Math.max(1, width - visibleWidth(shown) - tagWidth);
+            return [`${shown}${' '.repeat(pad)}${tag}`, ...lines.slice(1)];
+        }
+        invalidate(): void {
+            this.inner.invalidate();
+        }
+        handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+            return this.inner.handleMouse?.(event);
+        }
+    }
+
     /** a tool's own call component, with the tool name in it replaced. */
     class Retitled implements Component {
         constructor(
@@ -210,62 +248,14 @@ if (titles || detail || execPreview) {
         // so the callPreview path above never sees it, and without this the
         // only sign of where a command ran was a marker line pushed into the
         // output, which is noise in the model's context and ugly on screen.
-        /**
-         * the command, while it is still running.
-         *
-         * pi's bash row prints the command from its own execution updates,
-         * which only its local backend emits: a command on another machine
-         * therefore showed the bare tool name for as long as it took to run,
-         * which on a remote is long enough to see. this draws the call from
-         * the arguments, which are complete the moment the call is made, and
-         * gets out of the way as soon as the real row has more than a title.
-         */
-        const pending = (title: string, command: string, width: number, rowTheme: RowTheme): string =>
-            `${rowTheme.fg('toolTitle', rowTheme.bold(title))} ${rowTheme.fg('dim', '$')} ${rowTheme.fg(
-                'accent',
-                truncate(oneLine(command), Math.max(8, width - visibleWidth(title) - 4)),
-            )}`;
-
-        const marked = (component: Component, where: string, rowTheme: RowTheme, args: unknown): Component => ({
-            render(width: number): string[] {
-                const lines = component.render(width);
-                // whether the row shows the command, and nothing about how many
-                // lines it has: pi's row gains and loses a spinner line while
-                // the command runs, so a rule that counted lines made the row
-                // alternate between two renderings once a second.
-                const command = (args as { command?: unknown } | null)?.command;
-                if (typeof command === 'string' && command !== '') {
-                    const head = plain(oneLine(command)).trim().slice(0, 12);
-                    const drawn = plain(lines[0] ?? '');
-                    if (head !== '' && !drawn.includes(head)) {
-                        lines[0] = pending(name, command, width, rowTheme);
-                    }
-                }
-                const first = lines[0];
-                if (first === undefined) return lines;
-                const tag = rowTheme.fg('dim', truncate(`(${where})`, Math.max(4, width - 10)));
-                const tagWidth = visibleWidth(tag);
-                // the row a tool draws is padded to the full width, so the
-                // trailing space is measured as content: trimming it first is
-                // what stops a line that fits being truncated to make room.
-                const head = first.trimEnd();
-                const room = Math.max(4, width - tagWidth - 1);
-                const shown = visibleWidth(head) > room ? truncate(head, room) : head;
-                const pad = Math.max(1, width - visibleWidth(shown) - tagWidth);
-                return [`${shown}${' '.repeat(pad)}${tag}`, ...lines.slice(1)];
-            },
-            invalidate: () => component.invalidate(),
-            handleMouse: (event: TuiMouseEvent) => component.handleMouse?.(event),
-        });
-
         const title = titles ? titleOf(name) : name;
         if (title === name) {
             return (args, theme, context) => {
                 const where = whereOf(context.args ?? args);
-                const component = inner(args, theme, context);
-                return where === undefined
-                    ? component
-                    : marked(component, where, adapt(theme), context.args ?? args);
+                const last = context.lastComponent;
+                const unwrapped = last instanceof Marked ? last.inner : last;
+                const component = inner(args, theme, { ...context, lastComponent: unwrapped });
+                return where === undefined ? component : new Marked(component, where, adapt(theme));
             };
         }
         return (args, theme, context) => {
@@ -273,12 +263,15 @@ if (titles || detail || execPreview) {
             // for its own incremental state, so it gets its own one rather than
             // the wrapper around it.
             const last = context.lastComponent;
-            const unwrapped = last instanceof Retitled ? last.inner : last;
+            // two layers, so each unwraps to the component pi's own renderer
+            // made: a wrapper handed back as history is a component that never
+            // sees its own past, and a row that cannot see its past draws only
+            // its title.
+            const outer = last instanceof Marked ? last.inner : last;
+            const unwrapped = outer instanceof Retitled ? outer.inner : outer;
             const retitled = new Retitled(inner(args, theme, { ...context, lastComponent: unwrapped }), name, title);
             const where = whereOf(context.args ?? args);
-            return where === undefined
-                ? retitled
-                : marked(retitled, where, adapt(theme), context.args ?? args);
+            return where === undefined ? retitled : new Marked(retitled, where, adapt(theme));
         };
     };
 

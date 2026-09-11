@@ -52,6 +52,33 @@ const remoteDir = (): string => {
     throw new Error('cannot find session-main.ts; set RHO_REMOTE_DIR to the directory holding it');
 };
 
+/**
+ * The same flags the executor's connections use.
+ *
+ * Without ConnectTimeout an unreachable host blocks the command handler, and
+ * pi has no input while a handler runs: the person sees the field clear and
+ * nothing else. Without ClearAllForwardings a port forward in the person's ssh
+ * config prints its complaint into the output being parsed.
+ */
+const SSH_FLAGS = [
+    '-o',
+    'ClearAllForwardings=yes',
+    '-o',
+    'LogLevel=ERROR',
+    '-o',
+    'ConnectTimeout=10',
+    '-o',
+    'BatchMode=yes',
+    // A handshake to this fleet costs seconds, so it is paid once and shared:
+    // the second call down the same connection is a tenth of the first.
+    '-o',
+    'ControlMaster=auto',
+    '-o',
+    `ControlPath=${join(CACHE, 'cm-%C')}`,
+    '-o',
+    'ControlPersist=10m',
+];
+
 const run = (
     command: string,
     args: readonly string[],
@@ -138,7 +165,7 @@ async function bundle(): Promise<{ path: string; hash: string }> {
  * to install a runtime first, which is the thing this is supposed to avoid.
  */
 async function place(host: string, say: (note: string) => void): Promise<string> {
-    const probe = await run('ssh', [host, 'command -v bun || command -v node || true; echo ---; uname -m']);
+    const probe = await run('ssh', [...SSH_FLAGS, host, 'command -v bun || command -v node || true; echo ---; uname -m']);
     if (probe.code !== 0) throw new Error(`cannot reach ${host}: ${probe.err.trim() || 'ssh failed'}`);
     const [runtimeLine = '', machineLine = ''] = probe.out.split('---');
     const runtime = runtimeLine.trim().split('\n')[0]?.trim();
@@ -148,7 +175,7 @@ async function place(host: string, say: (note: string) => void): Promise<string>
         say(`compiling the session runner for ${host}, which has no runtime`);
         const { path, hash } = await compile(arm ? 'linux-arm64' : 'linux-x64');
         const remote = `${REMOTE_DIR}/session-${hash}`;
-        const present = await run('ssh', [host, `test -x ${remote} && echo yes || echo no`]);
+        const present = await run('ssh', [...SSH_FLAGS, host, `test -x ${remote} && echo yes || echo no`]);
         if (present.out.trim() !== 'yes') {
             say(`copying the session runner to ${host}`);
             const sent = await run(
@@ -163,7 +190,7 @@ async function place(host: string, say: (note: string) => void): Promise<string>
 
     const { path, hash } = await bundle();
     const remote = `${REMOTE_DIR}/session-${hash}.js`;
-    const present = await run('ssh', [host, `test -s ${remote} && echo yes || echo no`]);
+    const present = await run('ssh', [...SSH_FLAGS, host, `test -s ${remote} && echo yes || echo no`]);
     if (present.out.trim() !== 'yes') {
         say(`copying the session runner to ${host}`);
         const sent = await run(
@@ -189,6 +216,43 @@ const PROJECTS = 'projects';
 const repoName = (repo: string): string =>
     (repo.split('/').pop() ?? repo).replace(/\.git$/, '').replace(/[^A-Za-z0-9._-]/g, '-');
 
+/**
+ * A turning status line for work that takes a while.
+ *
+ * pi takes the input field away while a command handler runs, so a slow step
+ * with nothing on screen is indistinguishable from a session that has hung.
+ * Starting a session on a small machine is slow for a reason that is not ours:
+ * pi's own startup there is twenty seconds, so the person is told what is
+ * happening and how long it has been happening for.
+ */
+const FRAMES = ['\u280b', '\u2819', '\u2839', '\u2838', '\u283c', '\u2834', '\u2826', '\u2827', '\u2807', '\u280f'];
+
+interface Progress {
+    say(step: string): void;
+    done(): void;
+}
+
+const progress = (ctx: { ui: { setStatus: (key: string, text?: string) => void } }): Progress => {
+    const started = Date.now();
+    let step = 'working';
+    let frame = 0;
+    const tick = setInterval(() => {
+        frame = (frame + 1) % FRAMES.length;
+        const seconds = Math.round((Date.now() - started) / 1000);
+        ctx.ui.setStatus('rho-remote', `${FRAMES[frame]} ${step}\u2026 ${seconds}s`);
+    }, 120);
+    tick.unref?.();
+    return {
+        say(next: string) {
+            step = next;
+        },
+        done() {
+            clearInterval(tick);
+            ctx.ui.setStatus('rho-remote', undefined);
+        },
+    };
+};
+
 export default function (pi: ExtensionAPI) {
     /** Where each named session lives, so connect and stop need only the name. */
     const hosts = new Map<string, string>();
@@ -196,123 +260,30 @@ export default function (pi: ExtensionAPI) {
     const worktrees = new Map<string, { host: string; path: string }>();
 
     /**
-     * The session this terminal is looking at, if it is looking at one.
-     *
-     * While it is set, typing here goes there and its events are drawn here.
-     * The agent on this machine runs nothing: it is a viewer, which is the
-     * point -- the work is on a host that stays up, and this laptop can close.
+     * What this laptop is logged in with: the api keys in the environment, and
+     * auth.json for an oauth login, which no environment variable can carry.
      */
-    let viewing: { name: string; host: string; child: ReturnType<typeof spawn> } | null = null;
-    /** A viewer that closed by itself, so input refuses rather than running here. */
-    let lost: { name: string; host: string } | null = null;
-
-    const show = (text: string): void => {
-        pi.sendMessage({ customType: 'remote', content: text, display: true }, {});
-    };
-
-    /**
-     * pi's own event stream, rendered.
-     *
-     * Only what a person watching needs: the assistant's words, which tools
-     * ran, and when a turn finished. The full stream carries deltas for every
-     * token, and redrawing those here would be streaming a UI rather than
-     * building one from data.
-     */
-    const draw = (line: string): void => {
-        let event: { type?: string; message?: { content?: unknown }; toolName?: string; error?: string };
+    const lend = (): Uint8Array => {
+        const carried: Record<string, string> = {};
+        for (const key of [
+            'ANTHROPIC_API_KEY',
+            'OPENAI_API_KEY',
+            'GEMINI_API_KEY',
+            'GOOGLE_API_KEY',
+            'OPENROUTER_API_KEY',
+        ]) {
+            const value = process.env[key];
+            if (value !== undefined && value !== '') carried[key] = value;
+        }
+        let auth: string | null = null;
         try {
-            event = JSON.parse(line) as typeof event;
+            auth = readFileSync(join(process.env.HOME ?? '', '.pi', 'agent', 'auth.json'), 'utf8');
         } catch {
-            return;
+            // nothing stored here; the variables above may still carry a key
         }
-        if (event.type === 'message_end') {
-            const content = event.message?.content;
-            const text = Array.isArray(content)
-                ? content
-                      .filter(
-                          (part): part is { type: string; text: string } =>
-                              typeof part === 'object' && part !== null && (part as { type?: string }).type === 'text',
-                      )
-                      .map((part) => part.text)
-                      .join('')
-                      .trim()
-                : '';
-            if (text !== '') show(text);
-            return;
-        }
-        if (event.type === 'tool_execution_start' && event.toolName !== undefined) {
-            show(`· ${event.toolName}`);
-            return;
-        }
-        if (event.type === 'extension_error' && event.error !== undefined) {
-            show(`remote extension error: ${event.error}`);
-        }
+        return new TextEncoder().encode(JSON.stringify({ env: carried, auth }));
     };
 
-    const view = async (name: string, host: string, runner: string): Promise<void> => {
-        const child = spawn('ssh', [host, `${runner} attach ${name}`], { stdio: ['pipe', 'pipe', 'pipe'] });
-        viewing = { name, host, child };
-        let held = '';
-        child.stdout?.on('data', (chunk: Buffer) => {
-            held += chunk.toString();
-            const lines = held.split('\n');
-            held = lines.pop() ?? '';
-            for (const line of lines) if (line.trim() !== '') draw(line);
-        });
-        child.on('close', () => {
-            if (viewing?.name === name) {
-                viewing = null;
-                // Not the same as leaving on purpose. Until somebody says what
-                // to do, typing here must not quietly become a local turn: the
-                // person believes they are talking to the session on the host,
-                // and a local agent answering in its place is the same silent
-                // wrong-machine failure the environment used to have.
-                lost = { name, host };
-                show(
-                    `The viewer for ${name} closed. It is still running on ${host}.\n` +
-                        `Typing here will not reach it: /remote connect ${name} to attach again, ` +
-                        'or /remote disconnect to work locally.',
-                );
-            }
-        });
-    };
-
-    // Typing goes to the session being viewed, not to a local agent.
-    pi.on('input', async (event, ctx) => {
-        if (event.source === 'extension') return { action: 'continue' as const };
-        // Commands always work: they are how the person gets out of this.
-        if (event.text.startsWith('/')) return { action: 'continue' as const };
-
-        if (viewing === null) {
-            if (lost === null) return { action: 'continue' as const };
-            ctx.ui.notify(
-                `Not connected to ${lost.name} any more, so that went nowhere. ` +
-                    `/remote connect ${lost.name} attaches again; /remote disconnect works here instead.`,
-                'error',
-            );
-            return { action: 'handled' as const };
-        }
-
-        const stdin = viewing.child.stdin;
-        if (stdin === null || stdin === undefined || stdin.destroyed) {
-            const { name, host } = viewing;
-            viewing = null;
-            lost = { name, host };
-            ctx.ui.notify(`The connection to ${name} is closed, so that was not sent.`, 'error');
-            return { action: 'handled' as const };
-        }
-        stdin.write(`${JSON.stringify({ type: 'prompt', message: event.text })}\n`);
-        return { action: 'handled' as const };
-    });
-
-    /**
-     * Clone on the host using the laptop's credentials.
-     *
-     * `ssh -A` forwards the agent, so the host authenticates to GitHub as the
-     * person sitting here and no deploy key has to exist on it. The key never
-     * lands on the host: only the ability to use it, for as long as the
-     * connection is open.
-     */
     const project = async (
         host: string,
         repo: string,
@@ -366,6 +337,31 @@ export default function (pi: ExtensionAPI) {
         const address_ = parseAddress(address);
         if (address_ === null) throw new Error(`not a machine address: ${address}`);
         const host = sshTarget(address_);
+
+        // One call, not four.
+        //
+        // Probing for a runtime, testing for the runner and starting it were
+        // three round trips before the one that mattered, and a handshake to
+        // this fleet is seconds rather than milliseconds. This asks the far
+        // side to start the session if it already has what it needs, and to
+        // say so plainly if it does not; only then is anything copied.
+        const { hash } = await bundle();
+        const file = `${REMOTE_DIR}/session-${hash}.js`;
+        const quick = [
+            `R=$(command -v bun || command -v node || true)`,
+            `[ -n "$R" ] || exit 42`,
+            `[ -s ${file} ] || exit 43`,
+            `exec "$R" ${file} serve ${name} ${address_.path ?? '$HOME'}`,
+        ].join('; ');
+        const attempt = await run('ssh', [...SSH_FLAGS, host, quick], lend());
+        if (attempt.code === 0) {
+            hosts.set(name, host);
+            return attempt.out.trim();
+        }
+        if (attempt.code !== 42 && attempt.code !== 43) {
+            throw new Error(attempt.err.trim() || attempt.out.trim() || `could not start ${name}`);
+        }
+
         const runner = await place(host, say);
         say(`starting ${name} on ${host}`);
         // The agent on the host needs a model key, and the host should not own
@@ -397,8 +393,8 @@ export default function (pi: ExtensionAPI) {
 
         const started = await run(
             'ssh',
-            [host, `${runner} serve ${name} ${address_.path ?? '$HOME'}`],
-            new TextEncoder().encode(JSON.stringify({ env: carried, auth })),
+            [...SSH_FLAGS, host, `${runner} serve ${name} ${address_.path ?? '$HOME'}`],
+            lend(),
         );
         if (started.code !== 0) {
             throw new Error(started.err.trim() || started.out.trim() || `could not start ${name}`);
@@ -409,7 +405,7 @@ export default function (pi: ExtensionAPI) {
 
     const list = async (host: string): Promise<string> => {
         const runner = await place(host, () => {});
-        const listed = await run('ssh', [host, `${runner} list`]);
+        const listed = await run('ssh', [...SSH_FLAGS, host, `${runner} list`]);
         return listed.out.trim() || 'no sessions';
     };
 
@@ -417,7 +413,7 @@ export default function (pi: ExtensionAPI) {
         description:
             'run the session on another machine: /remote create <name> user@host, /remote connect <name>, /remote list <user@host>',
         getArgumentCompletions: (prefix) => {
-            const words = ['create', 'connect', 'project', 'list', 'stop', 'disconnect', ...hosts.keys(), ...worktrees.keys()];
+            const words = ['create', 'connect', 'project', 'list', 'stop', ...hosts.keys(), ...worktrees.keys()];
             const found = words.filter((word) => word.startsWith(prefix));
             return found.length > 0 ? found.map((word) => ({ value: word, label: word })) : null;
         },
@@ -430,11 +426,18 @@ export default function (pi: ExtensionAPI) {
                     ctx.ui.notify('Usage: /remote create <name> user@host[:/path]', 'error');
                     return;
                 }
+                // Said before the work, because pi takes the input field away
+                // while a handler runs: ten seconds of ssh with nothing on
+                // screen is indistinguishable from a session that has hung.
+                const bar = progress(ctx);
+                bar.say(`starting ${first} on ${second}`);
                 try {
-                    const note = await create(first, second, (text) => ctx.ui.notify(text, 'info'));
+                    const note = await create(first, second, (text) => bar.say(text));
                     ctx.ui.notify(`${note}. /remote connect ${first} attaches to it.`, 'info');
                 } catch (error) {
                     ctx.ui.notify(`Could not create ${first}: ${(error as Error).message}`, 'error');
+                } finally {
+                    bar.done();
                 }
                 return;
             }
@@ -456,10 +459,10 @@ export default function (pi: ExtensionAPI) {
                     ctx.ui.notify('Give a project name: <project>/<branch>', 'error');
                     return;
                 }
+                const bar = progress(ctx);
+                bar.say(`setting up ${projectName} on ${host}`);
                 try {
-                    const worktree = await project(host, first, projectName, branch, (note) =>
-                        ctx.ui.notify(note, 'info'),
-                    );
+                    const worktree = await project(host, first, projectName, branch, (note) => bar.say(note));
                     worktrees.set(projectName, { host, path: worktree });
                     hosts.set(projectName, host);
                     ctx.ui.notify(
@@ -468,6 +471,8 @@ export default function (pi: ExtensionAPI) {
                     );
                 } catch (error) {
                     ctx.ui.notify(`Could not set up ${projectName}: ${(error as Error).message}`, 'error');
+                } finally {
+                    bar.done();
                 }
                 return;
             }
@@ -487,53 +492,32 @@ export default function (pi: ExtensionAPI) {
                     ctx.ui.notify('Usage: /remote connect <name>', 'error');
                     return;
                 }
-                // A project that has no session yet gets one, in its worktree,
-                // so /remote project then /remote connect is the whole of it.
-                const known = worktrees.get(first);
-                if (known !== undefined && !hosts.has(`${first}:session`)) {
-                    try {
-                        await create(first, `${known.host}:${known.path}`, (note) => ctx.ui.notify(note, 'info'));
-                        hosts.set(`${first}:session`, known.host);
-                    } catch (error) {
-                        ctx.ui.notify(`Could not start a session for ${first}: ${(error as Error).message}`, 'error');
-                        return;
-                    }
-                }
-                const host = second ?? hosts.get(first);
+                const host = second ?? hosts.get(first) ?? worktrees.get(first)?.host;
                 if (host === undefined) {
                     ctx.ui.notify(`I do not know which host ${first} is on. /remote connect ${first} user@host`, 'error');
                     return;
                 }
-                const runner = await place(host, () => {});
-                await view(first, host, runner);
+                // pi's own terminal, over ssh, rather than a copy of its UI.
+                //
+                // The first version of this drew the remote session by
+                // injecting its events into the local one as messages: no
+                // streaming, every event in its own block, and a running
+                // commentary of stale information. A session's interface is
+                // pi's, and the way to see it today is to run it.
+                //
+                // The version worth having renders locally from the remote
+                // event stream, with pi's own InteractiveMode driven by a
+                // runtime that proxies to the far side. That is in
+                // docs/remote-viewer-TODO.md; this is what works now.
                 ctx.ui.notify(
-                    `Viewing ${first} on ${host}. What you type goes there; /remote disconnect comes back.`,
+                    [
+                        `${first} runs on ${host}. Attach with:`,
+                        `  ssh -t ${host} pi --resume ${first}`,
+                        `  mosh ${host} -- pi --resume ${first}    (better over a slow link)`,
+                        'It keeps running when you leave.',
+                    ].join('\n'),
                     'info',
                 );
-                return;
-            }
-
-            if (verb === 'disconnect') {
-                if (viewing === null) {
-                    // Clearing this is what makes typing work again after a
-                    // viewer died: it is the deliberate choice to work here.
-                    const was = lost;
-                    lost = null;
-                    ctx.ui.notify(
-                        was === null
-                            ? 'Not viewing anything.'
-                            : `Left ${was.name}; it is still running on ${was.host}. Working locally.`,
-                        'info',
-                    );
-                    return;
-                }
-                const { name, host } = viewing;
-                viewing.child.kill('SIGTERM');
-                viewing = null;
-                lost = null;
-                // Leaving is not stopping: the session stays up, which is the
-                // difference between this and an ssh that owns the agent.
-                ctx.ui.notify(`Left ${name}. It is still running on ${host}.`, 'info');
                 return;
             }
 
@@ -548,7 +532,7 @@ export default function (pi: ExtensionAPI) {
                     return;
                 }
                 const runner = await place(host, () => {});
-                await run('ssh', [host, `${runner} stop ${first}`]);
+                await run('ssh', [...SSH_FLAGS, host, `${runner} stop ${first}`]);
                 hosts.delete(first);
                 ctx.ui.notify(`Stopped ${first}.`, 'info');
                 return;

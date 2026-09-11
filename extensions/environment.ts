@@ -233,7 +233,8 @@ export default function (pi: ExtensionAPI) {
                 content: [
                     '<environment>',
                     facts,
-                    'bash, read, write and edit act on this machine.',
+                    'bash, read, write and edit act on this machine, with no argument needed:',
+                    'pass bash\u2019s on, or address a path, only to reach a different machine.',
                     'ctx_execute, ctx_execute_file and ctx_batch_execute do not: they run on the',
                     'laptop and are refused while this is attached, whatever the context-mode',
                     'guidance says. use bash for commands here.',
@@ -310,6 +311,26 @@ export default function (pi: ExtensionAPI) {
         'attached, "local:" is how to reach a file here.',
     ].join(' ');
 
+    /** Where the session currently points, as an address rather than a name. */
+    const here = (): string => active()?.host ?? 'local';
+
+    /**
+     * The machine, on the result, and only when it is not the obvious one.
+     *
+     * Marking every result would put a line on every read in a session that
+     * never leaves one machine, which is noise that teaches nothing. Marking
+     * the ones that went somewhere else is the whole signal: a result from a
+     * machine the session is not pointing at is otherwise indistinguishable
+     * from a local one.
+     */
+    const marked = (result: unknown, where: string): unknown => {
+        if (typeof result !== 'object' || result === null) return result;
+        if (where === here()) return result;
+        const content = (result as { content?: unknown }).content;
+        const mark = { type: 'text' as const, text: `[on ${where}]` };
+        return { ...result, content: Array.isArray(content) ? [mark, ...content] : [mark] };
+    };
+
     const route = <T extends { execute: (...args: never[]) => unknown; description?: string }>(
         local: T,
         make: (operations: ReturnType<typeof operationsFor>) => T,
@@ -332,7 +353,7 @@ export default function (pi: ExtensionAPI) {
                     }
                     const connection = await connectionFor(where);
                     const there = make(operationsFor(connection));
-                    return (there.execute as (...a: never[]) => unknown)(...args);
+                    return marked(await (there.execute as (...a: never[]) => unknown)(...args), where);
                 }
 
                 // An environment that died is not the same as no environment.
@@ -350,7 +371,10 @@ export default function (pi: ExtensionAPI) {
                     throw new Error(`the connection to ${environment.name} is closed, so this did not run`);
                 }
                 const remote = make(operationsFor(environment.connection));
-                return (remote.execute as (...a: never[]) => unknown)(...args);
+                return marked(
+                    await (remote.execute as (...a: never[]) => unknown)(...args),
+                    environment.host,
+                );
             },
         }) as T;
 
@@ -376,7 +400,7 @@ export default function (pi: ExtensionAPI) {
         on: Type.Optional(
             Type.String({
                 description:
-                    'Where to run it: an attached environment name, a user@host to attach on demand, or "local". Defaults to the current environment.',
+                    'Where to run it: an attached environment name, a user@host to attach on demand, or "local". Omit it to run where the session already points, which is the usual case: pass it only to run one command somewhere other than the current environment.',
             }),
         ),
     });
@@ -384,6 +408,9 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool({
         ...localBash,
         parameters: bashParameters,
+        promptGuidelines: [
+            'Omit bash\u2019s on argument unless the command must run somewhere other than the current environment: passing the machine the session already points at repeats what the environment block says and reads as though it changed something.',
+        ],
         description:
             `${localBash.description ?? ''} Pass "on" to run this one command somewhere else: an attached ` +
             'environment name, a user@host to attach on demand, or "local" for the machine this session ' +
@@ -392,12 +419,23 @@ export default function (pi: ExtensionAPI) {
             const { on, ...forwarded } = params;
             // The wrapped tool's own result type, which this returns unchanged.
             type Result = Awaited<ReturnType<typeof localBash.execute>>;
-            const run = (tool: typeof localBash): Promise<Result> =>
-                (tool.execute as (...a: never[]) => Promise<Result>)(
+            /**
+             * Runs it, and says where.
+             *
+             * A command that ran on another machine looks exactly like one
+             * that ran here: same row, same output, nothing naming the
+             * machine. That is the wrong-machine failure in its quietest
+             * form, so the host is marked on the result itself, which is the
+             * one thing both the person and the model read.
+             */
+            const run = async (tool: typeof localBash, where: string): Promise<Result> => {
+                const result = await (tool.execute as (...a: never[]) => Promise<Result>)(
                     id as never,
                     forwarded as never,
                     ...rest,
                 );
+                return marked(result, where) as Result;
+            };
 
             const chosen = async (): Promise<Connection | null> => {
                 if (on === undefined) return null;
@@ -417,9 +455,12 @@ export default function (pi: ExtensionAPI) {
             };
 
             const connection = await chosen();
-            if (on === 'local') return run(localBash);
+            if (on === 'local') return run(localBash, 'local');
             if (connection !== null) {
-                return run(createBashTool(process.cwd(), { operations: operationsFor(connection).bash }));
+                return run(
+                    createBashTool(process.cwd(), { operations: operationsFor(connection).bash }),
+                    connection.name,
+                );
             }
 
             // No `on`: the current environment decides, with the same refusals
@@ -431,11 +472,14 @@ export default function (pi: ExtensionAPI) {
                 );
             }
             const environment = active();
-            if (environment === null) return run(localBash);
+            if (environment === null) return run(localBash, 'local');
             if (!environment.connection.alive) {
                 throw new Error(`the connection to ${environment.name} is closed, so this did not run`);
             }
-            return run(createBashTool(process.cwd(), { operations: operationsFor(environment.connection).bash }));
+            return run(
+                createBashTool(process.cwd(), { operations: operationsFor(environment.connection).bash }),
+                environment.host,
+            );
         },
     });
 

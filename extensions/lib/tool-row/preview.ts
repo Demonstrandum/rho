@@ -13,7 +13,7 @@
 // of falls through to its arguments spelled out, which is still shorter than
 // the JSON block pi would print.
 
-import { oneLine, truncate } from '../text';
+import { ELLIPSIS, oneLine, truncate } from '../text';
 import { PLAIN_THEME, type RowTheme } from './theme';
 
 export interface ArgEntry {
@@ -93,6 +93,8 @@ export function summariseArgs(args: unknown): ArgSummary {
 }
 
 const QUOTE = '> ';
+/** the mark that the body goes on past the line shown. */
+const MORE = ` ${ELLIPSIS}`;
 
 /**
  * a word that only joins a confirmation to the thing already named on the call
@@ -191,11 +193,13 @@ export function callPreview(options: CallPreviewOptions): string[] {
     const lines = [head];
     if (summary.body !== undefined) {
         const body = expanded ? summary.body.split('\n') : [summary.body.split('\n')[0] ?? ''];
-        const budget = Math.max(8, width - QUOTE.length);
-        const shown = expanded ? body : body.map((line) => truncate(line, budget));
         const clipped = !expanded && summary.body.includes('\n');
+        // the mark prints on the same line, so its columns come out of the text's
+        // budget. a line one column over the terminal width crashes pi outright.
+        const budget = Math.max(1, width - QUOTE.length - (clipped ? MORE.length : 0));
+        const shown = expanded ? body : body.map((line) => truncate(line, budget));
         for (const line of shown) lines.push(theme.fg('dim', QUOTE) + theme.fg('toolOutput', line));
-        if (clipped) lines[lines.length - 1] += theme.fg('dim', ' \u2026');
+        if (clipped) lines[lines.length - 1] += theme.fg('dim', MORE);
     }
 
     if (expanded) {

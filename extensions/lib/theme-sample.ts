@@ -23,6 +23,7 @@ import {
     UserMessageComponent,
 } from '@earendil-works/pi-coding-agent';
 import { Container, type Component, type TUI } from '@earendil-works/pi-tui';
+import { setNote } from './tool-row/notes';
 
 /**
  * the renderer pair ToolExecutionComponent accepts in place of a definition.
@@ -50,6 +51,10 @@ const REPLY = [
 ].join('\n');
 
 const READ_PATH = 'extensions/footer.ts';
+
+/** the sample's Slack conversation, and who the picker should call it. */
+const CHANNEL = 'D0C0PG7LZCJ';
+const CHANNEL_NAME = 'Adam';
 
 const READ_RESULT = [
     '   143 function formatCwd(cwd: string, home: string | undefined): string {',
@@ -112,6 +117,9 @@ export interface Sample {
  */
 export function sampleSession(options: SampleOptions): Sample {
     const { tui, cwd } = options;
+    // the sample's own identifier, named so its row reads the way a real one
+    // does. the registry is display-only and this conversation does not exist.
+    setNote(CHANNEL, CHANNEL_NAME);
     const opening = new Container();
     opening.addChild(new UserMessageComponent(QUESTION, getMarkdownTheme()));
 
@@ -128,8 +136,8 @@ export function sampleSession(options: SampleOptions): Sample {
     // draws: the display name, the subject, and the message under it.
     container.addChild(toolRow(
         tui, cwd, 'slack_reply',
-        { channel: 'D0C0PG7LZCJ', text: 'found it: the footer measures against the width it had before the resize' },
-        'Sent to D0C0PG7LZCJ.',
+        { channel: CHANNEL, text: 'found it: the footer measures against the width it had before the resize' },
+        `Sent to ${CHANNEL}.`,
         {},
     ));
 

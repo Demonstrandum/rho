@@ -3,11 +3,12 @@
 start in a scratch repo, `~/Git/mock`, with `/reload` first so the session has the current extensions.
 paste what breaks rather than working around it: the interesting failures so far have all been things that unit tests cannot reach.
 
-## Before anything
+## before anything
 
-`echo ${ANTHROPIC_API_KEY:+set}` on the laptop.
-`/remote create` forwards that variable into the remote session's environment, and a session with no key will accept a prompt and answer that it has none.
-OAuth login on the laptop leaves nothing to forward.
+nothing.
+`/remote create` lends the session whatever this laptop is logged in with: the api keys in the environment, and the contents of auth.json for an oauth login, which no environment variable can carry.
+the far side gets a config directory of its own, mode 0700, with the rest of the config symlinked in, and pi is pointed at it with PI_CODING_AGENT_DIR.
+nothing is written into the host's own home, so the credentials die with the session.
 
 ## /environment: the agent works elsewhere
 

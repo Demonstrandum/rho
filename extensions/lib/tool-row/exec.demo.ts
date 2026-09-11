@@ -1,4 +1,4 @@
-// bun run extensions/lib/exec-preview.demo.ts [width] [theme]
+// bun run extensions/lib/tool-row/exec.demo.ts [width] [theme]
 //
 // draws the collapsed and expanded previews the way a tool row would draw
 // them: pi's theme colours, pi's syntax highlighter, the tool bubble
@@ -7,7 +7,8 @@
 // pi's theme singleton is not on the package's exports map, so the theme
 // module is imported by resolved path. that is a demo-only move; inside pi the
 // theme arrives as a renderer argument.
-import { collapse, expandCall, expandResult, parseExecCall, parseExecResult, type ExecCall, type PreviewTheme } from './exec-preview';
+import { collapse, expandCall, expandResult, parseExecCall, parseExecResult, type ExecCall } from './exec';
+import type { RowTheme } from './theme';
 
 const WIDTH = Number(process.argv[2] ?? 80);
 const THEME_FILE = process.argv[3] ?? 'themes/plan9.json';
@@ -28,7 +29,7 @@ interface PiTheme {
 const piTheme = themeModule.loadThemeFromPath(THEME_FILE);
 themeModule.setThemeInstance(piTheme);
 
-const theme: PreviewTheme = {
+const theme: RowTheme = {
     fg: (color, text) => piTheme.fg(color, text),
     bold: (text) => piTheme.bold(text),
     highlight: (code, language) => themeModule.highlightCode(code, language),

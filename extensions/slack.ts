@@ -31,8 +31,10 @@ import { basename, isAbsolute, join, resolve } from 'node:path';
 import { Type } from 'typebox';
 import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 import { PersistedState } from './lib/state-store';
+import { setNote } from './lib/tool-row/notes';
 import { loadMaxims } from './spinner';
 import { config } from './lib/config';
+import { quantity } from './lib/text';
 import {
     type Acknowledgement,
     addressed,
@@ -136,6 +138,15 @@ const TYPING_REFRESH_MS = 90_000;
 const scratchDir = (): string => process.env.RHO_SCRATCH ?? tmpdir();
 
 /**
+ * A tool row shows the channel it wrote to, which is an ID. In a DM the sender
+ * is the conversation, so their name is what that ID means, and tool-notes.ts
+ * is where a renderer looks it up.
+ */
+const remember = (message: Incoming): void => {
+    if (message.kind === 'im') setNote(message.channel, message.name);
+};
+
+/**
  * What the status line says while a turn runs.
  *
  * Configured messages win; otherwise the maxims the spinner already draws on,
@@ -235,6 +246,7 @@ export default function (pi: ExtensionAPI) {
 
     const deliver = async (message: Incoming): Promise<void> => {
         if (attached === null) return;
+        remember(message);
         mark(message.channel, message.ts);
         // The read mark first: it is the one signal that costs the sender
         // nothing to see and does not depend on the app having an assistant
@@ -297,6 +309,7 @@ export default function (pi: ExtensionAPI) {
             if (!recent.ok || recent.value.length === 0) continue;
             const last = recent.value[recent.value.length - 1];
             if (last === undefined) continue;
+            remember(last);
             // Marked as read: an inbox summary is not an exchange, and the
             // next attach should not show it again.
             mark(channel, last.ts);
@@ -307,7 +320,7 @@ export default function (pi: ExtensionAPI) {
         }
         if (lines.length === 0) return null;
         return [
-            `Slack inbox, ${lines.length} conversation${lines.length === 1 ? '' : 's'} this session had not seen:`,
+            `Slack inbox, ${quantity(lines.length, 'conversation')} this session had not seen:`,
             ...lines,
             'Nothing here is addressed to you now. Use slack_read to open one, and answer only if it asks for something.',
         ].join('\n');
@@ -426,6 +439,7 @@ export default function (pi: ExtensionAPI) {
                 if (read.value.length === 0) return said(`${target} is empty.`);
                 const last = read.value[read.value.length - 1];
                 if (last !== undefined) mark(target, last.ts);
+                for (const message of read.value) remember(message);
                 const lines = read.value.map((m) => {
                     const at = new Date(Number.parseFloat(m.ts) * 1000).toISOString().slice(11, 16);
                     return `[${at} UTC] ${m.name}: ${m.text}`;

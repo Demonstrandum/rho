@@ -715,13 +715,6 @@ const SCHEMA = {
             "skip pi's IdleStatus, which parks two blank rows in the dock while idle.",
             'needs terminal.clearOnShrink, which clear-on-shrink.ts sets',
         ),
-        execPreview: field(
-            'exec-preview',
-            isBool,
-            true,
-            'shorten ctx_execute / ctx_execute_file / ctx_batch_execute tool rows to',
-            'one highlighted line each, expanding to the full command and output',
-        ),
     },
     tools: {
         titles: field(
@@ -738,6 +731,13 @@ const SCHEMA = {
             true,
             'give a tool that renders nothing but its name a subject and a quoted',
             'first line of whatever text it sends, with the rest on expand',
+        ),
+        execPreview: field(
+            'exec-preview',
+            isBool,
+            true,
+            'shorten ctx_execute / ctx_execute_file / ctx_batch_execute tool rows to',
+            'one highlighted line each, expanding to the full command and output',
         ),
         names: field(
             'names',
@@ -904,8 +904,19 @@ function annotate(toml: string): string {
     for (const line of toml.split('\n')) {
         const header = line.match(/^\[([^\]]+)\]$/);
         if (header) {
-            const identifier = SECTION_IDS.get(header[1]);
-            fields = identifier === undefined ? undefined : SECTIONS[identifier];
+            // a table-valued field is emitted as its own `[section.key]`
+            // header rather than an assignment, so its doc goes above the
+            // header; the keys under it are the reader's, and carry no doc.
+            const [name, child] = header[1]!.split('.');
+            const identifier = SECTION_IDS.get(name!);
+            const section = identifier === undefined ? undefined : SECTIONS[identifier];
+            if (child !== undefined) {
+                const f = section && Object.values(section).find((candidate) => candidate.key === child);
+                if (f) for (const doc of f.doc) out.push(`# ${doc}`);
+                fields = undefined;
+            } else {
+                fields = section;
+            }
             out.push(line);
             continue;
         }

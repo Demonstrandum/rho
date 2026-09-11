@@ -145,10 +145,22 @@ export default function (pi: ExtensionAPI) {
 
     /** Said out loud, because a change of machine the model cannot see is a trap. */
     const announce = async (environment: Environment | null): Promise<void> => {
+        // The context-mode prompt tells the model to prefer ctx_batch_execute
+        // over bash, and that advice is wrong here: those tools run on this
+        // machine whatever is attached. Saying so where the switch is
+        // announced is the only place the model reads both facts together.
         const content =
             environment === null
-                ? `<environment>\nworking locally on this machine\n</environment>`
-                : `<environment>\n${await describe(environment)}\n</environment>`;
+                ? '<environment>\nworking locally on this machine\nevery tool acts here, including ctx_execute and ctx_batch_execute\n</environment>'
+                : [
+                      '<environment>',
+                      await describe(environment),
+                      'bash, read, write and edit act on this machine.',
+                      'ctx_execute, ctx_execute_file and ctx_batch_execute do not: they run on the',
+                      'laptop and are refused while this is attached, whatever the context-mode',
+                      'guidance says. use bash for commands here.',
+                      '</environment>',
+                  ].join('\n');
         pi.sendMessage({ customType: 'environment', content, display: true }, { deliverAs: 'followUp' });
     };
 

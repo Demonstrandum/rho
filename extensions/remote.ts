@@ -113,6 +113,84 @@ export default function (pi: ExtensionAPI) {
     const worktrees = new Map<string, { host: string; path: string }>();
 
     /**
+     * The session this terminal is looking at, if it is looking at one.
+     *
+     * While it is set, typing here goes there and its events are drawn here.
+     * The agent on this machine runs nothing: it is a viewer, which is the
+     * point -- the work is on a host that stays up, and this laptop can close.
+     */
+    let viewing: { name: string; host: string; child: ReturnType<typeof spawn> } | null = null;
+
+    const show = (text: string): void => {
+        pi.sendMessage({ customType: 'remote', content: text, display: true }, {});
+    };
+
+    /**
+     * pi's own event stream, rendered.
+     *
+     * Only what a person watching needs: the assistant's words, which tools
+     * ran, and when a turn finished. The full stream carries deltas for every
+     * token, and redrawing those here would be streaming a UI rather than
+     * building one from data.
+     */
+    const draw = (line: string): void => {
+        let event: { type?: string; message?: { content?: unknown }; toolName?: string; error?: string };
+        try {
+            event = JSON.parse(line) as typeof event;
+        } catch {
+            return;
+        }
+        if (event.type === 'message_end') {
+            const content = event.message?.content;
+            const text = Array.isArray(content)
+                ? content
+                      .filter(
+                          (part): part is { type: string; text: string } =>
+                              typeof part === 'object' && part !== null && (part as { type?: string }).type === 'text',
+                      )
+                      .map((part) => part.text)
+                      .join('')
+                      .trim()
+                : '';
+            if (text !== '') show(text);
+            return;
+        }
+        if (event.type === 'tool_execution_start' && event.toolName !== undefined) {
+            show(`· ${event.toolName}`);
+            return;
+        }
+        if (event.type === 'extension_error' && event.error !== undefined) {
+            show(`remote extension error: ${event.error}`);
+        }
+    };
+
+    const view = async (name: string, host: string, runner: string): Promise<void> => {
+        const child = spawn('ssh', [host, `${runner} attach ${name}`], { stdio: ['pipe', 'pipe', 'pipe'] });
+        viewing = { name, host, child };
+        let held = '';
+        child.stdout?.on('data', (chunk: Buffer) => {
+            held += chunk.toString();
+            const lines = held.split('\n');
+            held = lines.pop() ?? '';
+            for (const line of lines) if (line.trim() !== '') draw(line);
+        });
+        child.on('close', () => {
+            if (viewing?.name === name) {
+                viewing = null;
+                show(`Disconnected from ${name}. It is still running on ${host}.`);
+            }
+        });
+    };
+
+    // Typing goes to the session being viewed, not to a local agent.
+    pi.on('input', async (event) => {
+        if (viewing === null || event.source === 'extension') return { action: 'continue' as const };
+        if (event.text.startsWith('/')) return { action: 'continue' as const };
+        viewing.child.stdin?.write(`${JSON.stringify({ type: 'prompt', message: event.text })}\n`);
+        return { action: 'handled' as const };
+    });
+
+    /**
      * Clone on the host using the laptop's credentials.
      *
      * `ssh -A` forwards the agent, so the host authenticates to GitHub as the
@@ -173,10 +251,26 @@ export default function (pi: ExtensionAPI) {
         const target = parseTarget(address);
         const runner = await place(target.host, say);
         say(`starting ${name} on ${target.host}`);
-        const started = await run('ssh', [
-            target.host,
-            `${runner} serve ${name} ${target.path ?? '$HOME'}`,
-        ]);
+        // The agent on the host needs a model key, and the host should not own
+        // one: a key in a file there outlives the session and ends up in
+        // backups. These go down the ssh channel into the session's
+        // environment and die with it.
+        const carried: Record<string, string> = {};
+        for (const key of [
+            'ANTHROPIC_API_KEY',
+            'OPENAI_API_KEY',
+            'GEMINI_API_KEY',
+            'GOOGLE_API_KEY',
+            'OPENROUTER_API_KEY',
+        ]) {
+            const value = process.env[key];
+            if (value !== undefined && value !== '') carried[key] = value;
+        }
+        const started = await run(
+            'ssh',
+            [target.host, `${runner} serve ${name} ${target.path ?? '$HOME'}`],
+            new TextEncoder().encode(JSON.stringify(carried)),
+        );
         if (started.code !== 0) {
             throw new Error(started.err.trim() || started.out.trim() || `could not start ${name}`);
         }
@@ -194,7 +288,7 @@ export default function (pi: ExtensionAPI) {
         description:
             'run the session on another machine: /remote create <name> user@host, /remote connect <name>, /remote list <user@host>',
         getArgumentCompletions: (prefix) => {
-            const words = ['create', 'connect', 'project', 'list', 'stop', ...hosts.keys(), ...worktrees.keys()];
+            const words = ['create', 'connect', 'project', 'list', 'stop', 'disconnect', ...hosts.keys(), ...worktrees.keys()];
             const found = words.filter((word) => word.startsWith(prefix));
             return found.length > 0 ? found.map((word) => ({ value: word, label: word })) : null;
         },
@@ -282,18 +376,25 @@ export default function (pi: ExtensionAPI) {
                     return;
                 }
                 const runner = await place(host, () => {});
-                // The viewer replaces this terminal's session: pi's own RPC
-                // client, pointed at the socket on the host through ssh. What
-                // comes back is the same event stream a local session emits,
-                // so the TUI draws it without knowing where it came from.
+                await view(first, host, runner);
                 ctx.ui.notify(
-                    [
-                        `Attaching to ${first} on ${host}.`,
-                        `If this terminal is not a viewer yet, run:`,
-                        `  ssh -t ${host} ${runner} attach ${first}`,
-                    ].join('\n'),
+                    `Viewing ${first} on ${host}. What you type goes there; /remote disconnect comes back.`,
                     'info',
                 );
+                return;
+            }
+
+            if (verb === 'disconnect') {
+                if (viewing === null) {
+                    ctx.ui.notify('Not viewing anything.', 'info');
+                    return;
+                }
+                const { name, host } = viewing;
+                viewing.child.kill('SIGTERM');
+                viewing = null;
+                // Leaving is not stopping: the session stays up, which is the
+                // difference between this and an ssh that owns the agent.
+                ctx.ui.notify(`Left ${name}. It is still running on ${host}.`, 'info');
                 return;
             }
 

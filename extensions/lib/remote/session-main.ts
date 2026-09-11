@@ -47,6 +47,33 @@ if (verb === 'stop') {
     process.exit(0);
 }
 
+/**
+ * Credentials for the agent, read from stdin rather than taken from argv.
+ *
+ * The host has no API key of its own, and it should not acquire one: a key in
+ * a file on a machine is a key that outlives the session and gets backed up.
+ * The laptop sends it down the ssh channel at start, it lands in the session
+ * process's environment, and it dies with the session. argv is not an option
+ * because `ps` shows it to every user on the box.
+ */
+const readEnvFromStdin = async (): Promise<Record<string, string>> => {
+    if (process.stdin.isTTY) return {};
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+    const text = Buffer.concat(chunks).toString().trim();
+    if (text === '') return {};
+    try {
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        const out: Record<string, string> = {};
+        for (const [key, value] of Object.entries(parsed)) {
+            if (typeof value === 'string') out[key] = value;
+        }
+        return out;
+    } catch {
+        return {};
+    }
+};
+
 if (verb === 'serve') {
     if (await existing(name)) die(`${name} is already running`);
 
@@ -56,11 +83,12 @@ if (verb === 'serve') {
     // Detach unless asked not to: `ssh host rho-session serve` returns as soon
     // as the session is up, and the session stays.
     if (process.env.RHO_SESSION_FOREGROUND !== '1') {
+        const forwarded = await readEnvFromStdin();
         const child = spawn(process.execPath, [import.meta.filename, 'serve', name, ...rest], {
             cwd,
             detached: true,
             stdio: 'ignore',
-            env: { ...process.env, RHO_SESSION_FOREGROUND: '1' },
+            env: { ...process.env, ...forwarded, RHO_SESSION_FOREGROUND: '1' },
         });
         child.unref();
         // Wait for the socket rather than claiming success: a session that

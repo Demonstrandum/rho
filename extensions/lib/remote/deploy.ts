@@ -73,6 +73,30 @@ export function parseTarget(text: string): Address {
     return address;
 }
 
+/**
+ * ssh with a shared connection.
+ *
+ * A fresh ssh to this fleet costs between one and three seconds of handshake,
+ * paid on the probe, the copy and the attach; reusing a control socket costs
+ * about a third of a second. ControlPersist keeps the master alive between
+ * calls, so reconnecting a session is one cheap round trip rather than a new
+ * handshake.
+ */
+const sshOptions = (role: 'command' | 'attach' = 'command'): string[] => {
+    mkdirSync(CACHE, { recursive: true });
+    const path = join(CACHE, 'cm-%C');
+    // `no` for the attach, `auto` for everything else.
+    //
+    // A session that becomes the master keeps the shared connection alive, and
+    // with it the pipe: when the far side's command exits, the client never
+    // sees stdout close and waits out its whole timeout instead of failing in
+    // milliseconds. That turned a cold connect into seventeen seconds, almost
+    // all of it waiting for a process that had already gone.
+    return role === 'attach'
+        ? ['-o', 'ControlMaster=no', '-o', `ControlPath=${path}`]
+        : ['-o', 'ControlMaster=auto', '-o', `ControlPath=${path}`, '-o', 'ControlPersist=10m'];
+};
+
 const run = (
     command: string,
     args: readonly string[],
@@ -180,12 +204,58 @@ export async function bundle(): Promise<{ path: string; hash: string }> {
 
 export async function deploy(
     target: Address,
-    options: { readonly platform?: Platform; readonly onProgress?: (note: string) => void } = {},
+    options: {
+        readonly platform?: Platform;
+        readonly onProgress?: (note: string) => void;
+        /**
+         * How long the executor keeps the session's state after the last
+         * client leaves. Long enough to survive a break, short enough not to
+         * hold a rented node overnight.
+         */
+        readonly idleMs?: number;
+    } = {},
 ): Promise<Connection> {
     const say = options.onProgress ?? (() => {});
     // One formatting of the address, used everywhere ssh is called.
     const ssh_to = sshTarget(target);
     const platform = options.platform;
+    const idle = options.idleMs ?? 3 * 60 * 60 * 1000;
+
+    /**
+     * The warm path: one ssh call, no questions asked.
+     *
+     * Probing for a runtime and checking for the bundle costs two round trips
+     * before the one that matters, and the answers cannot have changed since
+     * the executor was installed. So this asks the far side to attach if it
+     * can, and to say so plainly if the bundle is not there; only then does
+     * the slow path run.
+     */
+    const { hash: warmHash } = await bundle();
+    const warmFile = `${REMOTE_DIR}/executor-${warmHash}.js`;
+    const warmSocket = `${REMOTE_DIR}/exec-${warmHash}.sock`;
+    const warmScript = [
+        `R=$(command -v bun || command -v node || true)`,
+        `[ -n "$R" ] || exit 42`,
+        `[ -s ${warmFile} ] || exit 42`,
+        `exec "$R" ${warmFile} --attach ${warmSocket} --idle ${idle}`,
+    ].join('; ');
+
+    const warm = connectOverProcess(ssh_to, 'ssh', [...sshOptions('attach'), ssh_to, warmScript]);
+    // Bounded, because this is the handshake: a far side that is unreachable,
+    // busy or wedged answers nothing, and waiting on it forever is worse than
+    // falling through to the slow path that reports why.
+    const hello = await warm.request({ kind: 'ping' }, undefined, 8_000);
+    if (hello.kind === 'pong') {
+        if (target.path !== null) {
+            const moved = await warm.request({ kind: 'chdir', path: target.path });
+            if (moved.kind === 'error') {
+                warm.close();
+                throw new Error(`no such directory on ${ssh_to}: ${target.path}`);
+            }
+        }
+        return warm;
+    }
+    warm.close();
 
     // What the far side can run, asked rather than assumed. A compiled binary
     // is 82 MB and needs a loader the machine may not have: NixOS refuses a
@@ -194,6 +264,7 @@ export async function deploy(
     // the fallback for a machine with nothing rather than the default.
     say(`checking ${ssh_to}`);
     const probe = await run('ssh', [
+        ...sshOptions(),
         ssh_to,
         'command -v bun || command -v node || true; echo ---; uname -m',
     ]);
@@ -216,7 +287,7 @@ export async function deploy(
     }
     const remote = runtime === '' ? `${REMOTE_DIR}/executor-${hash}` : `${REMOTE_DIR}/executor-${hash}.js`;
 
-    const present = await run('ssh', [ssh_to, `test -s ${remote} && echo yes || echo no`]);
+    const present = await run('ssh', [...sshOptions(), ssh_to, `test -s ${remote} && echo yes || echo no`]);
     if (present.out.trim() !== 'yes') {
         const bytes = readFileSync(path);
         say(`copying ${(bytes.byteLength / 1e6).toFixed(1)} MB to ${ssh_to}`);
@@ -225,6 +296,7 @@ export async function deploy(
         const sent = await run(
             'ssh',
             [
+                ...sshOptions(),
                 ssh_to,
                 `mkdir -p ${REMOTE_DIR} && cat > ${remote}.part && chmod +x ${remote}.part && mv ${remote}.part ${remote}`,
             ],
@@ -233,13 +305,22 @@ export async function deploy(
         if (sent.code !== 0) throw new Error(`could not copy the executor: ${sent.err.trim()}`);
     }
 
-    say(`starting the executor on ${ssh_to}`);
-    const connection = connectOverProcess(ssh_to, 'ssh', [ssh_to, start]);
+    // Attached rather than started: the executor holds the working directory,
+    // the environment and the process table behind a socket, and outlives the
+    // ssh channel. A reconnect is then one round trip instead of a copy and a
+    // cold start, which was taking fourteen seconds.
+    const socket = `${REMOTE_DIR}/exec-${hash}.sock`;
+    say(`attaching to the executor on ${ssh_to}`);
+    const connection = connectOverProcess(ssh_to, 'ssh', [
+        ...sshOptions('attach'),
+        ssh_to,
+        `${start} --attach ${socket} --idle ${idle}`,
+    ]);
 
-    const hello = await connection.request({ kind: 'ping' });
-    if (hello.kind !== 'pong') {
+    const answered = await connection.request({ kind: 'ping' }, undefined, 15_000);
+    if (answered.kind !== 'pong') {
         connection.close();
-        throw new Error(`the executor did not answer on ${ssh_to}: ${JSON.stringify(hello)}`);
+        throw new Error(`the executor did not answer on ${ssh_to}: ${JSON.stringify(answered)}`);
     }
     if (target.path !== null) {
         const moved = await connection.request({ kind: 'chdir', path: target.path });

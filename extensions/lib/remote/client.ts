@@ -17,7 +17,8 @@ import type { Event, Frame, ProcessId, Reply, Request } from './protocol';
 export interface Connection {
     readonly name: string;
     readonly describe: string;
-    request(body: Request, signal?: AbortSignal): Promise<Reply>;
+    /** `timeoutMs` of 0 waits indefinitely; omitted means the default deadline. */
+    request(body: Request, signal?: AbortSignal, timeoutMs?: number): Promise<Reply>;
     /** Output as it is produced, for a tool that wants to stream. */
     onEvent(handler: (event: Event) => void): () => void;
     /** An exit that has already been seen, so waiting for it cannot hang. */
@@ -25,6 +26,9 @@ export interface Connection {
     close(): void;
     readonly alive: boolean;
 }
+
+/** Long enough for a slow link and a busy machine, short enough to notice. */
+const DEFAULT_TIMEOUT_MS = 20_000;
 
 class Failed extends Error {
     constructor(
@@ -115,13 +119,36 @@ export function connectOverProcess(name: string, command: string, args: readonly
         get alive() {
             return alive;
         },
-        request(body, signal) {
+        request(body, signal, timeoutMs) {
             if (!alive) return Promise.resolve<Reply>({ kind: 'error', message: `${name} is gone`, code: 'GONE' });
             const id = next++;
             return new Promise<Reply>((settle) => {
-                waiting.set(id, settle);
+                // Every request has a deadline, and the default is not "none".
+                // The far side may be unreachable, attached to somebody else,
+                // or wedged, and none of those send a reply: a request that
+                // waits for ever turns any of them into a session that hangs
+                // with nothing on screen. A long-running command is not an
+                // exception, because the request that starts it returns as
+                // soon as it has started.
+                const limit = timeoutMs ?? DEFAULT_TIMEOUT_MS;
+                const timer =
+                    limit <= 0
+                        ? null
+                        : setTimeout(() => {
+                              waiting.delete(id);
+                              settle({
+                                  kind: 'error',
+                                  message: `${name} did not answer in ${Math.round(limit / 1000)}s`,
+                                  code: 'TIMEOUT',
+                              });
+                          }, limit);
+                waiting.set(id, (reply) => {
+                    if (timer !== null) clearTimeout(timer);
+                    settle(reply);
+                });
                 const abort = () => {
                     waiting.delete(id);
+                    if (timer !== null) clearTimeout(timer);
                     settle({ kind: 'error', message: 'cancelled', code: 'ABORT' });
                 };
                 signal?.addEventListener('abort', abort, { once: true });

@@ -53,6 +53,14 @@ export const isStringOrStringArray = guard<string | string[]>(
     'string or array of string',
     (v) => typeof v === 'string' || (Array.isArray(v) && v.every((element) => typeof element === 'string')),
 );
+// a table of overrides: every value a string, every key a name the reader
+// chooses, so the schema cannot enumerate them.
+export const isStringRecord = guard<Record<string, string>>(
+    'table of string',
+    (v) =>
+        typeof v === 'object' && v !== null && !Array.isArray(v)
+        && Object.values(v as Record<string, unknown>).every((e) => typeof e === 'string'),
+);
 export const isNumberArray = guard<number[]>(
     'array of number',
     (v) => Array.isArray(v) && v.every((element) => typeof element === 'number'),
@@ -533,9 +541,11 @@ const SCHEMA = {
         loadingMessages: field(
             'loading-messages',
             isStringArray,
-            ['is reading it', 'is working on it', 'is still on it'],
+            [],
             'what the status line rotates through while a turn runs. slack prefixes',
-            'each with the app name. up to ten',
+            'each with the app name. up to ten. the empty array (the default)',
+            'draws from extensions/assets/maxims.txt, the same pool the spinner',
+            'uses, so one place decides what the agent says while it works',
         ),
         ackMessage: field(
             'ack-message',
@@ -688,6 +698,30 @@ const SCHEMA = {
             true,
             'shorten ctx_execute / ctx_execute_file / ctx_batch_execute tool rows to',
             'one highlighted line each, expanding to the full command and output',
+        ),
+    },
+    tools: {
+        titles: field(
+            'titles',
+            isBool,
+            true,
+            'name a tool row by its derived display name rather than the name the',
+            'model calls: slack_reply reads "slack reply", ctx_batch_execute reads',
+            '"batch". a namespace prefix (ctx, mcp) is dropped',
+        ),
+        detail: field(
+            'detail',
+            isBool,
+            true,
+            'give a tool that renders nothing but its name a subject and a quoted',
+            'first line of whatever text it sends, with the rest on expand',
+        ),
+        names: field(
+            'names',
+            isStringRecord,
+            {} as Record<string, string>,
+            'display names for particular tools, as tool-name = "shown name".',
+            'overrides the derivation, e.g. ctx_execute = "run"',
         ),
     },
 } satisfies Schema;

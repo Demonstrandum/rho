@@ -12,7 +12,7 @@ interface Spec {
     handler: (args: string, ctx: unknown) => Promise<void>;
 }
 
-const command = (): { spec: Spec; said: () => string[] } => {
+const command = (): { spec: Spec } => {
     const commands = new Map<string, Spec>();
     const pi = {
         registerTool: () => {},
@@ -24,10 +24,9 @@ const command = (): { spec: Spec; said: () => string[] } => {
         sendMessage: () => {},
     };
     environment(pi as never);
-    const notes: string[] = [];
     const spec = commands.get('environment');
     if (spec === undefined) throw new Error('no environment command registered');
-    return { spec, said: () => notes, ...({ notes } as never) };
+    return { spec };
 };
 
 const run = async (args: string): Promise<{ text: string; level: string }> => {

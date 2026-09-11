@@ -23,6 +23,7 @@ const harness = () => {
             if (!active.includes(tool.name)) active.push(tool.name);
         },
         registerCommand: () => {},
+        registerMessageRenderer: () => {},
         getActiveTools: () => [...active],
         setActiveTools: (names: string[]) => {
             active = [...names];

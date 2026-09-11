@@ -72,3 +72,9 @@ a path may name its machine.
 `local:/abs/path` always means the machine the session runs on.
 a plain path means whichever machine is current, so `local:` is how to reach a file here while an environment is attached.
 this is for one file: `environment connect` is still how the session moves, and a command is not a path, so bash always runs on the current machine.
+
+## one command on another machine
+
+`bash` takes an optional `on`: an attached environment name, a `user@host` to attach on demand, or `local`.
+without it the command runs wherever the environment currently points.
+this is the command equivalent of an addressed path, and it exists so that running one command elsewhere does not mean moving the session there and back, which would change where every later command goes.

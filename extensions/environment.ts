@@ -321,7 +321,87 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool(route(localRead, (ops) => createReadTool(process.cwd(), { operations: ops.read })));
     pi.registerTool(route(localWrite, (ops) => createWriteTool(process.cwd(), { operations: ops.write })));
     pi.registerTool(route(localEdit, (ops) => createEditTool(process.cwd(), { operations: ops.edit })));
-    pi.registerTool(route(localBash, (ops) => createBashTool(process.cwd(), { operations: ops.bash })));
+    /**
+     * bash, with the machine as an optional argument.
+     *
+     * A path can carry its machine; a command cannot, so without this the only
+     * way to run one command elsewhere is to move the session and move it
+     * back, which changes where every later command goes as a side effect of
+     * wanting one. `on` says where this one runs and nothing else changes.
+     *
+     * It takes a name that is already attached, a user@host to attach on
+     * demand, or "local". An unattached host is connected to, because refusing
+     * to do the obvious thing and asking the caller to attach first is a worse
+     * answer than doing it.
+     */
+    const bashParameters = Type.Object({
+        command: Type.String({ description: 'Shell command to execute' }),
+        timeout: Type.Optional(Type.Number({ description: 'Timeout in seconds (optional, no default timeout)' })),
+        on: Type.Optional(
+            Type.String({
+                description:
+                    'Where to run it: an attached environment name, a user@host to attach on demand, or "local". Defaults to the current environment.',
+            }),
+        ),
+    });
+
+    pi.registerTool({
+        ...localBash,
+        parameters: bashParameters,
+        description:
+            `${localBash.description ?? ''} Pass "on" to run this one command somewhere else: an attached ` +
+            'environment name, a user@host to attach on demand, or "local" for the machine this session ' +
+            'runs on. Without it, the command runs wherever the environment tool currently points.',
+        async execute(id: string, params: { command: string; timeout?: number; on?: string }, ...rest: never[]) {
+            const { on, ...forwarded } = params;
+            // The wrapped tool's own result type, which this returns unchanged.
+            type Result = Awaited<ReturnType<typeof localBash.execute>>;
+            const run = (tool: typeof localBash): Promise<Result> =>
+                (tool.execute as (...a: never[]) => Promise<Result>)(
+                    id as never,
+                    forwarded as never,
+                    ...rest,
+                );
+
+            const chosen = async (): Promise<Connection | null> => {
+                if (on === undefined) return null;
+                if (on === 'local') return null;
+                const attached = environments.get(on);
+                if (attached !== undefined) {
+                    if (!attached.connection.alive) throw new Error(`the connection to ${on} is closed`);
+                    return attached.connection;
+                }
+                if (!on.includes('@')) {
+                    throw new Error(
+                        `no environment called ${on}. Give a user@host to attach to, or "local", or one of: ` +
+                            `${[...environments.keys()].join(', ') || 'nothing attached'}`,
+                    );
+                }
+                return connectionFor(on);
+            };
+
+            const connection = await chosen();
+            if (on === 'local') return run(localBash);
+            if (connection !== null) {
+                return run(createBashTool(process.cwd(), { operations: operationsFor(connection).bash }));
+            }
+
+            // No `on`: the current environment decides, with the same refusals
+            // as every other tool.
+            if (dead !== null) {
+                throw new Error(
+                    `the environment ${dead.name} is gone (${dead.why}), so this did not run. ` +
+                        'Reconnect it, pass on to choose a machine, or environment default local.',
+                );
+            }
+            const environment = active();
+            if (environment === null) return run(localBash);
+            if (!environment.connection.alive) {
+                throw new Error(`the connection to ${environment.name} is closed, so this did not run`);
+            }
+            return run(createBashTool(process.cwd(), { operations: operationsFor(environment.connection).bash }));
+        },
+    });
 
     /**
      * Loaded rather than always present.

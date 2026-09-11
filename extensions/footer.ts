@@ -9,6 +9,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import { abbreviate, capitalise, collapseHome, oneLine, words } from './lib/text';
 import { publishFooter } from './lib/footer-mirror';
+import { currentEnvironment } from './environment';
 
 const ARROW_IN = '▲  ';
 const ARROW_OUT = '▽  ';
@@ -85,9 +86,20 @@ export default function (pi: ExtensionAPI) {
                     const percentValue = contextUsage?.percent ?? 0;
                     const percent = contextUsage?.percent !== null ? percentValue.toFixed(1) : '?';
 
-                    let pwd = formatCwd(process.cwd(), process.env.HOME || process.env.USERPROFILE);
+                    // where the work happens, when it is not this machine.
+                    //
+                    // the directory on the footer is the laptop's, and while an
+                    // environment is attached that is not where anything runs:
+                    // the machine is stated first, in bold, because reading the
+                    // path as local is how a command goes to the wrong host.
+                    const elsewhere = currentEnvironment();
+                    const remote = elsewhere !== undefined && elsewhere.alive ? elsewhere : null;
+
+                    let pwd = remote === null
+                        ? formatCwd(process.cwd(), process.env.HOME || process.env.USERPROFILE)
+                        : remote.cwd;
                     const branch = footerData.getGitBranch();
-                    if (branch) pwd = `${pwd} (${branch})`;
+                    if (branch && remote === null) pwd = `${pwd} (${branch})`;
                     const sessionName = ctx.sessionManager.getSessionName();
                     if (sessionName) pwd = `${pwd} • ${sessionName}`;
 
@@ -161,7 +173,12 @@ export default function (pi: ExtensionAPI) {
 
                     const dimStatsLeft = theme.fg('dim', statsLeft);
                     const dimRemainder = theme.fg('dim', statsLine.slice(statsLeft.length));
-                    const pwdLine = truncateToWidth(theme.fg('dim', pwd), width, theme.fg('dim', '...'));
+                    const marker = remote === null ? '' : theme.bold(theme.fg('accent', `${remote.host} `));
+                    const pwdLine = truncateToWidth(
+                        marker + theme.fg('dim', pwd),
+                        width,
+                        theme.fg('dim', '...'),
+                    );
                     const lines = [pwdLine, dimStatsLeft + dimRemainder];
                     // the theme picker shows a session, and this is that
                     // session's footer; it cannot build one of its own.

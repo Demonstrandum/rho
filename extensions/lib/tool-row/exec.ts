@@ -17,6 +17,7 @@
 // down to a bare head is the result of that, not a special case.
 
 import { BRACKET, elidePath, ELLIPSIS, oneLine, quantity, truncate } from '../text';
+import { visibleWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 import { PLAIN_THEME, type RowColor, type RowTheme } from './theme';
 import { toolTitle } from './title';
 
@@ -586,8 +587,30 @@ function pickStream(outcome: ExecOutcome): { label: 'stdout' | 'stderr'; text: s
     }
 }
 
+/**
+ * Expanded lines, wrapped to the terminal.
+ *
+ * pi throws when a rendered line is wider than the terminal, which takes the
+ * whole session down, so a long command used to crash rather than spill. The
+ * expanded view exists to show the whole command, so it wraps rather than
+ * truncating: nothing is hidden behind an ellipsis in the one view whose job
+ * is to show everything.
+ */
+function wrapped(lines: readonly string[], width: number | undefined): string[] {
+    if (width === undefined || width <= 0) return [...lines];
+    const out: string[] = [];
+    for (const line of lines) {
+        if (visibleWidth(line) <= width) {
+            out.push(line);
+            continue;
+        }
+        out.push(...wrapTextWithAnsi(line, width));
+    }
+    return out;
+}
+
 /** the call slot's expanded lines: verb, path (execute_file), full command(s)/code. */
-export function expandCall(call: ExecCall, theme: RowTheme = PLAIN_THEME): string[] {
+export function expandCall(call: ExecCall, theme: RowTheme = PLAIN_THEME, width?: number): string[] {
     const language = callLanguage(call);
     const prompt = theme.fg('dim', '$ ');
     const lines: string[] = [theme.fg('toolTitle', theme.bold(VERB[call.tool]))];
@@ -608,7 +631,7 @@ export function expandCall(call: ExecCall, theme: RowTheme = PLAIN_THEME): strin
     } else {
         lines.push(...theme.highlight(call.code, HIGHLIGHT_LANGUAGE[language]));
     }
-    return lines;
+    return wrapped(lines, width);
 }
 
 /**
@@ -617,6 +640,15 @@ export function expandCall(call: ExecCall, theme: RowTheme = PLAIN_THEME): strin
  * either; `updateDisplay()` only calls the result renderer `if (this.result)`).
  */
 export function expandResult(
+    call: ExecCall,
+    outcome: ExecOutcome | undefined,
+    theme: RowTheme = PLAIN_THEME,
+    width?: number,
+): string[] {
+    return wrapped(expandedResult(call, outcome, theme), width);
+}
+
+function expandedResult(
     call: ExecCall,
     outcome: ExecOutcome | undefined,
     theme: RowTheme = PLAIN_THEME,

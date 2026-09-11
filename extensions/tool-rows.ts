@@ -154,8 +154,9 @@ if (titles || detail || execPreview) {
                 if (!call) return new Lines(() => [theme.fg('toolTitle', theme.bold(titleOf(name)))]);
                 const rowTheme = adapt(theme);
                 if (context.expanded) {
-                    const lines = expandCall(call, rowTheme);
-                    return new Lines(() => lines);
+                    // Width per render, not once: a resize has to rewrap, and a
+                    // line wider than the terminal crashes pi outright.
+                    return new Lines((width) => expandCall(call, rowTheme, width));
                 }
                 return new Lines((width) => [collapseCall(call, width, rowTheme)]);
             };
@@ -217,8 +218,7 @@ if (titles || detail || execPreview) {
                 const rowTheme = adapt(theme);
 
                 if (options.expanded) {
-                    const lines = expandResult(call, outcome, rowTheme);
-                    return new Lines(() => lines);
+                    return new Lines((width) => expandResult(call, outcome, rowTheme, width));
                 }
                 return new Lines((width) => {
                     const line = collapseResult(call, outcome, width, rowTheme);

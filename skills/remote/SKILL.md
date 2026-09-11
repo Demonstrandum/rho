@@ -5,32 +5,26 @@ description: work on another machine, or run the session on one. use when asked 
 
 # working somewhere else
 
-three machines with different lifetimes, and the point is to keep each thing on
-the one that suits it.
+three machines with different lifetimes, and the point is to keep each thing on the one that suits it.
 
 the laptop can be switched off, so it holds nothing.
 dev-box is always up and cheap, so it holds the session and its history.
-a rented GPU node is expensive and pre-empted, so it holds no state that must
-survive it: it runs commands and nothing else.
+a rented GPU node is expensive and pre-empted, so it holds no state that must survive it: it runs commands and nothing else.
 
 two independent mechanisms, and they compose.
 
 ## the execution environment: `environment`
 
 `environment connect user@host` attaches a machine and makes it current.
-after that, bash, read, write and edit act there, with a working directory that
-persists between commands.
-`environment default <name>` switches between attached machines, and
-`environment default local` comes back to this one.
+after that, bash, read, write and edit act there, with a working directory that persists between commands.
+`environment default <name>` switches between attached machines, and `environment default local` comes back to this one.
 `environment list` says what is attached and which is current.
 
-an executor is copied to the far side on first connect: a small bundle where
-the machine has bun or node, a static binary where it has neither.
+an executor is copied to the far side on first connect: a small bundle where the machine has bun or node, a static binary where it has neither.
 nothing is installed, nothing needs root, and it dies with the connection.
 
 a rented node is pre-empted without warning.
-when that happens the tools refuse rather than quietly running on the laptop,
-and the environment has to be reconnected or abandoned deliberately.
+when that happens the tools refuse rather than quietly running on the laptop, and the environment has to be reconnected or abandoned deliberately.
 
 ## the session: `remote_session`
 

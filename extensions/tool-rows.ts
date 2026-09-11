@@ -55,6 +55,7 @@ import {
     parseExecCall,
     parseExecResult,
 } from './lib/tool-row/exec';
+import { truncate, visibleWidth } from './lib/text';
 import { noteFor } from './lib/tool-row/notes';
 import { callPreview, resultPreview } from './lib/tool-row/preview';
 import type { RowColor, RowTheme } from './lib/tool-row/theme';
@@ -204,16 +205,43 @@ if (titles || detail || execPreview) {
                 );
         }
 
-        if (!titles) return inner;
-        const title = titleOf(name);
-        if (title === name) return inner;
+        // A tool that draws its own row, acting on another machine: the
+        // machine goes on the right of its first line. pi renders bash itself,
+        // so the callPreview path above never sees it, and without this the
+        // only sign of where a command ran was a marker line pushed into the
+        // output, which is noise in the model's context and ugly on screen.
+        const marked = (component: Component, where: string): Component => ({
+            render(width: number): string[] {
+                const lines = component.render(width);
+                const first = lines[0];
+                if (first === undefined) return lines;
+                const tag = truncate(`(${where})`, Math.max(4, width - 10));
+                const room = Math.max(4, width - visibleWidth(tag) - 1);
+                const head = truncate(first, room);
+                const pad = Math.max(1, width - visibleWidth(head) - visibleWidth(tag));
+                return [`${head}${' '.repeat(pad)}${tag}`, ...lines.slice(1)];
+            },
+            invalidate: () => component.invalidate(),
+            handleMouse: (event: TuiMouseEvent) => component.handleMouse?.(event),
+        });
+
+        const title = titles ? titleOf(name) : name;
+        if (title === name) {
+            return (args, theme, context) => {
+                const where = whereOf(context.args ?? args);
+                const component = inner(args, theme, context);
+                return where === undefined ? component : marked(component, where);
+            };
+        }
         return (args, theme, context) => {
             // the renderer is handed back the component it returned last time,
             // for its own incremental state, so it gets its own one rather than
             // the wrapper around it.
             const last = context.lastComponent;
             const unwrapped = last instanceof Retitled ? last.inner : last;
-            return new Retitled(inner(args, theme, { ...context, lastComponent: unwrapped }), name, title);
+            const retitled = new Retitled(inner(args, theme, { ...context, lastComponent: unwrapped }), name, title);
+            const where = whereOf(context.args ?? args);
+            return where === undefined ? retitled : marked(retitled, where);
         };
     };
 

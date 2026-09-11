@@ -16,6 +16,7 @@
 
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { accessSync, constants as fsConstants } from 'node:fs';
 import { constants } from 'node:fs';
 import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
@@ -31,6 +32,33 @@ interface Held {
     stderrBytes: number;
     exited: boolean;
 }
+
+/**
+ * A shell that exists on this machine.
+ *
+ * `bash` is not a path, and NixOS has no /bin/bash: a non-login connection can
+ * arrive with no PATH at all, and then spawning "bash" fails with ENOENT. The
+ * login shell is asked first because it is what the person would have got,
+ * then PATH, then /bin/sh, which the standard requires to exist.
+ */
+const shell = (): string => {
+    const candidates: string[] = [];
+    const login = process.env.SHELL;
+    if (login !== undefined && login !== '') candidates.push(login);
+    for (const dir of (process.env.PATH ?? '').split(':')) {
+        if (dir !== '') candidates.push(join(dir, 'bash'));
+    }
+    candidates.push('/run/current-system/sw/bin/bash', '/usr/bin/bash', '/bin/bash', '/bin/sh');
+    for (const candidate of candidates) {
+        try {
+            accessSync(candidate, fsConstants.X_OK);
+            return candidate;
+        } catch {
+            // not this one
+        }
+    }
+    return '/bin/sh';
+};
 
 const concat = (chunks: readonly Uint8Array[], total: number): Uint8Array => {
     const out = new Uint8Array(total);
@@ -172,11 +200,19 @@ export class Executor {
 
     private spawn(request: Extract<Request, { kind: 'spawn' }>): Reply {
         const id = `p${this.next++}`;
-        const child = spawn('bash', ['-lc', request.command], {
-            cwd: request.cwd === undefined ? this.cwd : this.at(request.cwd),
-            env: { ...process.env, ...request.env },
-            stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        let child: ChildProcess;
+        try {
+            child = spawn(shell(), ['-lc', request.command], {
+                cwd: request.cwd === undefined ? this.cwd : this.at(request.cwd),
+                env: { ...process.env, ...request.env },
+                stdio: ['pipe', 'pipe', 'pipe'],
+            });
+        } catch (error) {
+            // A command that cannot start is one failed command. Letting this
+            // throw took the whole executor down, so a typo destroyed the
+            // environment and everything it was holding.
+            return { kind: 'error', message: `could not start a shell: ${(error as Error).message}` };
+        }
         const held: Held = { child, stdout: [], stderr: [], stdoutBytes: 0, stderrBytes: 0, exited: false };
         this.processes.set(id, held);
 
@@ -196,6 +232,27 @@ export class Executor {
         };
         child.stdout?.on('data', collect('stdout'));
         child.stderr?.on('data', collect('stderr'));
+
+        // Same again for an asynchronous failure: reported as the command
+        // ending badly, never as the connection dying.
+        child.on('error', (error) => {
+            const message = `${error.message}\n`;
+            const bytes = new TextEncoder().encode(message);
+            held.stderr.push(bytes);
+            held.stderrBytes += bytes.byteLength;
+            this.emit({ kind: 'output', process: id, stream: 'stderr', data: bytes });
+            if (!held.exited) {
+                held.exited = true;
+                this.emit({
+                    kind: 'exited',
+                    process: id,
+                    code: 127,
+                    signal: null,
+                    stdoutBytes: held.stdoutBytes,
+                    stderrBytes: held.stderrBytes,
+                });
+            }
+        });
 
         const timer =
             request.timeout === undefined

@@ -206,6 +206,27 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool(route(localEdit, (ops) => createEditTool(process.cwd(), { operations: ops.edit })));
     pi.registerTool(route(localBash, (ops) => createBashTool(process.cwd(), { operations: ops.bash })));
 
+    /**
+     * Loaded rather than always present.
+     *
+     * A tool definition costs prompt on every request of every session,
+     * including the ones that never touch another machine. The skill describes
+     * these in a line the model can act on, and the definition arrives when
+     * something asks for it: the skill being read, the command being used, or
+     * a machine being attached.
+     */
+    const OWN = ['environment'];
+    const load = (): void => {
+        const active = pi.getActiveTools();
+        const missing = OWN.filter((name) => !active.includes(name));
+        if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
+    };
+
+    pi.on('input', async (event) => {
+        if (/\benvironment\b|skill:remote|\bsymba\b|\bgpu\b/i.test(event.text)) load();
+        return { action: 'continue' as const };
+    });
+
     // ── the same three verbs, for the agent ────────────────────────────────
     pi.registerTool({
         name: 'environment',
@@ -306,6 +327,9 @@ export default function (pi: ExtensionAPI) {
             }
 
             if (verb === 'connect') {
+                // Using the command means this session works elsewhere, so the
+                // agent should be able to move it too.
+                load();
                 if (rest === undefined) {
                     ctx.ui.notify('Give a target: /environment connect user@host', 'error');
                     return;
@@ -324,9 +348,16 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
+    // Out of the prompt until wanted; after the factory, so it is registered
+    // before it is taken out of the active set.
+    setTimeout(() => {
+        pi.setActiveTools(pi.getActiveTools().filter((name) => !OWN.includes(name)));
+    }, 0);
+
     pi.on('session_shutdown', async () => {
         for (const environment of environments.values()) environment.connection.close();
         environments.clear();
         current = null;
+        published[PUBLISHED] = undefined;
     });
 }

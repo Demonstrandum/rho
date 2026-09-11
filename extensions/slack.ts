@@ -326,6 +326,15 @@ export default function (pi: ExtensionAPI) {
         ].join('\n');
     };
 
+    /**
+     * The Slack tools exist only where Slack does.
+     *
+     * They are registered when a session attaches to an app, not at load, so a
+     * session that never touches Slack carries none of their definitions. An
+     * attached session needs them immediately: a message can arrive a second
+     * later, and an agent that cannot answer it is worse than one that costs
+     * four definitions.
+     */
     const registerTools = (): void => {
         if (toolsRegistered) return;
         toolsRegistered = true;

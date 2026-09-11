@@ -447,6 +447,24 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
+    // Same reason as the environment tool: described by the skill, loaded when
+    // something asks for it rather than carried by every session.
+    const OWN = ['remote_session'];
+    const load = (): void => {
+        const active = pi.getActiveTools();
+        const missing = OWN.filter((name) => !active.includes(name));
+        if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
+    };
+
+    pi.on('input', async (event) => {
+        if (/\bremote\b|skill:remote|\bsession on\b/i.test(event.text)) load();
+        return { action: 'continue' as const };
+    });
+
+    setTimeout(() => {
+        pi.setActiveTools(pi.getActiveTools().filter((name) => !OWN.includes(name)));
+    }, 0);
+
     pi.registerTool({
         name: 'remote_session',
         label: 'Remote session',

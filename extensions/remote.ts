@@ -29,6 +29,9 @@ const CACHE = join(process.env.HOME ?? '/tmp', '.cache', 'rho', 'remote');
 const REMOTE_DIR = '.cache/rho/remote';
 // Same reason as deploy.ts: import.meta.dir is a data URL when pi loads this
 // from a bundle, and every read then fails with ENAMETOOLONG.
+/** rho's own directory, for the client that lives beside this file. */
+const rhoRoot = (): string => join(remoteDir(), '..', '..', '..');
+
 const remoteDir = (): string => {
     const candidates: string[] = [];
     const fromEnv = process.env.RHO_REMOTE_DIR;
@@ -550,19 +553,23 @@ export default function (pi: ExtensionAPI) {
                     ctx.ui.notify(`I do not know which host ${first} is on. /remote connect ${first} user@host`, 'error');
                     return;
                 }
-                // The client that draws it: pi's own interface, here, reading
-                // the daemon's event stream. It is a separate process because
-                // the interface is the thing being replaced, and an extension
-                // can only add to the interface it is already inside.
-                const client = join(remoteDir(), '..', '..', '..', 'bin', 'rho-remote');
-                ctx.ui.notify(
-                    [
-                        `${first} runs on ${host}. Attach with:`,
-                        `  bun ${client} ${host} ${first}`,
-                        'It keeps running when you leave.',
-                    ].join('\n'),
-                    'info',
+                // The terminal is handed over, not described.
+                //
+                // The interface that draws a remote session is a different
+                // process: this one owns the terminal, so it stands down and
+                // the client takes it, and when the client exits the terminal
+                // is free again. The session is untouched either way -- it
+                // lives on the far side and neither process owns it.
+                const client = join(rhoRoot(), 'bin', 'rho-remote');
+                ctx.ui.notify(`handing this terminal to ${first} on ${host}`, 'info');
+                const viewer = spawn('bun', [client, host, first], {
+                    stdio: 'inherit',
+                    detached: false,
+                });
+                viewer.on('error', (error) =>
+                    ctx.ui.notify(`could not start the client: ${error.message}`, 'error'),
                 );
+                ctx.shutdown();
                 return;
             }
 

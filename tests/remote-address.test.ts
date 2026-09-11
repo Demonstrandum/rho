@@ -9,15 +9,15 @@ import {
 
 describe('parseAddress', () => {
     test('user and host', () => {
-        expect(parseAddress('samuel@robotics-vm-1')).toEqual({
+        expect(parseAddress('samuel@robotics-vm')).toEqual({
             user: 'samuel',
-            host: 'robotics-vm-1',
+            host: 'robotics-vm',
             path: null,
         });
     });
 
     test('a bare word is a host, not a user', () => {
-        expect(parseAddress('robotics-vm-1')).toEqual({ user: null, host: 'robotics-vm-1', path: null });
+        expect(parseAddress('robotics-vm')).toEqual({ user: null, host: 'robotics-vm', path: null });
     });
 
     test('a directory comes with it', () => {
@@ -55,10 +55,10 @@ describe('parseAddress', () => {
 
 describe('parseLocated', () => {
     test('an addressed path names its machine', () => {
-        const located = parseLocated('samuel@robotics-vm-1:/etc/os-release');
+        const located = parseLocated('samuel@robotics-vm:/etc/os-release');
         expect(located.path).toBe('/etc/os-release');
         expect(located.where.kind).toBe('remote');
-        if (located.where.kind === 'remote') expect(located.where.address.host).toBe('robotics-vm-1');
+        if (located.where.kind === 'remote') expect(located.where.address.host).toBe('robotics-vm');
     });
 
     test('local names this machine', () => {

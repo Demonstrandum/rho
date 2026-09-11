@@ -60,7 +60,7 @@ export function sshTarget(address: Address): string {
 /**
  * What a connection is filed under.
  *
- * The host alone, so `samuel@robotics-vm-1` and `ubuntu@robotics-vm-1` do not
+ * The host alone, so `samuel@robotics-vm` and `ubuntu@robotics-vm` do not
  * collide with each other in one session but do read as the same machine, and
  * so the name a person types is the name they saw.
  */

@@ -129,7 +129,7 @@ describe('resuming a session that was working elsewhere', () => {
         mkdirSync(dir, { recursive: true });
         writeFileSync(
             file,
-            JSON.stringify({ version: 1, host: 'samuel@robotics-vm-1', name: 'robotics-vm-1', cwd: '/home/samuel' }),
+            JSON.stringify({ version: 1, host: 'samuel@robotics-vm', name: 'robotics-vm', cwd: '/home/samuel' }),
         );
 
         try {
@@ -141,7 +141,7 @@ describe('resuming a session that was working elsewhere', () => {
             // whose history is full of another machine must not read as though
             // it is still there.
             const said = h.sent.join('\n');
-            expect(said).toContain('samuel@robotics-vm-1');
+            expect(said).toContain('samuel@robotics-vm');
             expect(said).toContain('working locally');
         } finally {
             rmSync(file, { force: true });

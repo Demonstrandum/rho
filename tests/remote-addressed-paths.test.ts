@@ -17,8 +17,8 @@ const parse = (text: string): { where: string; path: string } | null => {
 
 describe('an addressed path', () => {
     test('names the machine and the file', () => {
-        expect(parse('samuel@robotics-vm-1:/etc/os-release')).toEqual({
-            where: 'samuel@robotics-vm-1',
+        expect(parse('samuel@robotics-vm:/etc/os-release')).toEqual({
+            where: 'samuel@robotics-vm',
             path: '/etc/os-release',
         });
     });

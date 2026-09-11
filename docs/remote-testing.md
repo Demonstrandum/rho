@@ -12,7 +12,7 @@ OAuth login on the laptop leaves nothing to forward.
 ## /environment: the agent works elsewhere
 
 ```
-/environment connect samuel@robotics-vm-1
+/environment connect samuel@robotics-vm
 ```
 
 then ask for `hostname`, `pwd`, a file read, a file edit.
@@ -33,13 +33,13 @@ what is worth checking, in order of how likely it is to be wrong:
 ## /remote: the session runs elsewhere
 
 ```
-/remote create mock samuel@robotics-vm-1
+/remote create mock samuel@robotics-vm
 /remote connect mock
 ```
 
 after `connect` this terminal is a viewer: what you type goes to the session on robotics-vm, and its replies are drawn here.
 
-- `/remote disconnect`, then `/remote list samuel@robotics-vm-1`; the session.
+- `/remote disconnect`, then `/remote list samuel@robotics-vm`; the session.
   is still running.
 - `/remote connect mock` again; it should pick up where it was, including the.
   recent exchange.
@@ -52,7 +52,7 @@ A prompt has reached the remote pi and its response has come back, but never wit
 ## /remote project: a repo and a worktree, without ssh
 
 ```
-/remote project git@github.com:symbolica-ai/robotics-server.git demo/main samuel@robotics-vm-1
+/remote project git@github.com:symbolica-ai/robotics-server.git demo/main samuel@robotics-vm
 /remote connect demo
 ```
 
@@ -97,6 +97,6 @@ from elsewhere without switching the session.
 
 - with an environment attached, read `local:/Users/samuel/Git/mock/README.md`.
 it comes from the laptop.
-- with nothing attached, read `samuel@robotics-vm-1:/etc/os-release`.
+- with nothing attached, read `samuel@robotics-vm:/etc/os-release`.
 it attaches on demand and comes from there.
 - a plain path still follows the current environment.

@@ -92,9 +92,24 @@ const sshOptions = (role: 'command' | 'attach' = 'command'): string[] => {
     // sees stdout close and waits out its whole timeout instead of failing in
     // milliseconds. That turned a cold connect into seventeen seconds, almost
     // all of it waiting for a process that had already gone.
+    // The connection carries a binary protocol, so anything ssh says on its
+    // own account corrupts it. A port forward from the person's ssh config
+    // that cannot bind prints "Could not request local forwarding" into the
+    // stream, and the decoder sees that instead of a frame: the far side then
+    // never appears to answer. Forwards are cleared, agent forwarding stays
+    // because a clone on the far side needs it, and ssh is told to keep quiet
+    // about anything short of an error.
+    const quiet = [
+        '-o',
+        'ClearAllForwardings=yes',
+        '-o',
+        'LogLevel=ERROR',
+        '-o',
+        'ConnectTimeout=10',
+    ];
     return role === 'attach'
-        ? ['-o', 'ControlMaster=no', '-o', `ControlPath=${path}`]
-        : ['-o', 'ControlMaster=auto', '-o', `ControlPath=${path}`, '-o', 'ControlPersist=10m'];
+        ? [...quiet, '-o', 'ControlMaster=no', '-o', `ControlPath=${path}`]
+        : [...quiet, '-o', 'ControlMaster=auto', '-o', `ControlPath=${path}`, '-o', 'ControlPersist=10m'];
 };
 
 const run = (

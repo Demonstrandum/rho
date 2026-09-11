@@ -55,7 +55,7 @@ import {
     parseExecCall,
     parseExecResult,
 } from './lib/tool-row/exec';
-import { oneLine, plain, truncate, visibleWidth } from './lib/text';
+import { truncate, visibleWidth } from './lib/text';
 import { noteFor } from './lib/tool-row/notes';
 import { callPreview, resultPreview } from './lib/tool-row/preview';
 import type { RowColor, RowTheme } from './lib/tool-row/theme';

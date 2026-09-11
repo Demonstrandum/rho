@@ -11,6 +11,17 @@ import { serve } from './executor';
 
 const executor = serve(process.stdin, process.stdout);
 
+// A machine that takes the connection down whenever anything goes wrong is
+// worse than no machine: the session loses the environment, the working
+// directory and every process it was holding. Nothing gets to kill this but a
+// signal or the connection closing.
+process.on('uncaughtException', (error) => {
+    process.stderr.write(`executor: uncaught: ${(error as Error).message}\n`);
+});
+process.on('unhandledRejection', (reason) => {
+    process.stderr.write(`executor: unhandled: ${String(reason)}\n`);
+});
+
 // A node being taken away is the expected ending, not an error. Kill the
 // children rather than leaving them to be reaped by nothing.
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {

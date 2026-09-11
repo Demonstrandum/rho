@@ -227,6 +227,30 @@ export default function (pi: ExtensionAPI) {
         return { action: 'continue' as const };
     });
 
+    /**
+     * Tools that run commands on this machine and cannot be routed.
+     *
+     * pi's own read, write, edit and bash are re-registered above and follow
+     * the environment. An MCP tool cannot be: it is a separate process with no
+     * idea another machine exists, so it runs here while everything around it
+     * runs there. That is the wrong-machine failure again, with the added
+     * insult that its output looks authoritative.
+     */
+    const RUNS_LOCALLY = /^(ctx_execute|ctx_execute_file|ctx_batch_execute)$/;
+
+    pi.on('tool_call', async (event) => {
+        if (active() === null && dead === null) return;
+        if (!RUNS_LOCALLY.test(event.toolName)) return;
+        const where = dead !== null ? `${dead.name} (gone)` : (current ?? 'elsewhere');
+        return {
+            block: true,
+            reason:
+                `${event.toolName} runs on this machine, not on ${where}, so it was not run. ` +
+                'Use bash, read, write or edit, which act on the attached environment, ' +
+                'or environment default local first if this really should run here.',
+        };
+    });
+
     // ── the same three verbs, for the agent ────────────────────────────────
     pi.registerTool({
         name: 'environment',

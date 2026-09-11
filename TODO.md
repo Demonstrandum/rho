@@ -1,4 +1,4 @@
 # TODO
 
-- context-mode's runners run on the laptop, so they are refused while `/environment` has a machine attached; [docs/context-mode-remote-TODO.md](docs/context-mode-remote-TODO.md)
+- fork context-mode into rho, rewrite it in rho's style, and give it the remote executor as its runner; [docs/context-mode-fork.md](docs/context-mode-fork.md)
 - `/remote connect` has never rendered an answer from a real model, only the plumbing around it; [docs/remote-testing.md](docs/remote-testing.md)

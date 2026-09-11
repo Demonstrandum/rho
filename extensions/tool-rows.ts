@@ -144,6 +144,26 @@ if (titles || detail || execPreview) {
         return undefined;
     };
 
+    /**
+     * The machine a call acted on, when it is not the session's own.
+     *
+     * `on` is passed only to send one command somewhere other than the current
+     * environment, and an addressed path carries its machine in the path, so
+     * the presence of either is the signal. A call that went elsewhere is
+     * otherwise identical on screen to one that did not.
+     */
+    const whereOf = (args: unknown): string | undefined => {
+        if (typeof args !== 'object' || args === null) return undefined;
+        const on = (args as { on?: unknown }).on;
+        if (typeof on === 'string' && on.trim() !== '') return on.trim();
+        const path = (args as { path?: unknown }).path;
+        if (typeof path === 'string') {
+            const addressed = /^([A-Za-z0-9._-]+@[A-Za-z0-9._-]{2,}|local):\//.exec(path);
+            if (addressed !== null) return addressed[1];
+        }
+        return undefined;
+    };
+
     const origGetCallRenderer = proto.getCallRenderer;
     proto.getCallRenderer = function (this: ToolExecutionInternals): RenderCallFn | undefined {
         const name = this.toolName;
@@ -176,6 +196,7 @@ if (titles || detail || execPreview) {
                         title,
                         args: context.args ?? args,
                         note: noteOn(context.args ?? args),
+                        where: whereOf(context.args ?? args),
                         expanded: context.expanded,
                         width,
                         theme: adapt(theme),

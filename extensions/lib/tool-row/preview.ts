@@ -13,7 +13,7 @@
 // of falls through to its arguments spelled out, which is still shorter than
 // the JSON block pi would print.
 
-import { ELLIPSIS, oneLine, truncate } from '../text';
+import { ELLIPSIS, oneLine, truncate, visibleWidth } from '../text';
 import { PLAIN_THEME, type RowTheme } from './theme';
 
 export interface ArgEntry {
@@ -151,6 +151,8 @@ export interface CallPreviewOptions {
     args: unknown;
     /** what the subject is, in words: a person's name for a channel ID. */
     note?: string;
+    /** the machine the call acted on, shown when it is not the session's own. */
+    where?: string;
     expanded: boolean;
     width: number;
     theme?: RowTheme;
@@ -172,7 +174,7 @@ function subjectText(subject: ArgEntry, note: string | undefined, expanded: bool
  * the arguments neither of those showed under it.
  */
 export function callPreview(options: CallPreviewOptions): string[] {
-    const { title, args, note, expanded, width } = options;
+    const { title, args, note, expanded, width, where } = options;
     const theme = options.theme ?? PLAIN_THEME;
     const summary = summariseArgs(args);
 
@@ -210,6 +212,24 @@ export function callPreview(options: CallPreviewOptions): string[] {
         // nothing else identifies the call, so the arguments themselves do.
         const text = summary.rest.map((entry) => `${entry.key}=${entry.value}`).join(' ');
         lines[0] += ' ' + theme.fg('dim', truncate(text, Math.max(8, width - used - 1)));
+    }
+
+    // the machine the call acted on, on the right of the first line, and only
+    // when it is not the one the session points at. a command that ran
+    // elsewhere is otherwise identical on screen to one that did not, and its
+    // output is the only clue. right-aligned because the command is what the
+    // eye wants first and this is an aside.
+    if (where !== undefined && where !== '') {
+        // The tag's columns are reserved before the line is measured, because
+        // the subject may already fill the row: appending to a full line is
+        // how a rendered line exceeds the terminal, which crashes pi. On a
+        // narrow terminal the tag is shortened too, since a host name can be
+        // longer than the whole row.
+        const tag = truncate(`(${where})`, Math.max(4, width - 10));
+        const room = Math.max(4, width - visibleWidth(tag) - 1);
+        const first = truncate(lines[0] ?? '', room);
+        const pad = Math.max(1, width - visibleWidth(first) - visibleWidth(tag));
+        lines[0] = `${first}${' '.repeat(pad)}${theme.fg('dim', tag)}`;
     }
     return lines;
 }

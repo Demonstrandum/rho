@@ -327,25 +327,14 @@ export default function (pi: ExtensionAPI) {
         'attached, "local:" is how to reach a file here.',
     ].join(' ');
 
-    /** Where the session currently points, as an address rather than a name. */
-    const here = (): string => active()?.host ?? 'local';
-
     /**
-     * The machine, on the result, and only when it is not the obvious one.
+     * The machine is shown by the row, not added to the output.
      *
-     * Marking every result would put a line on every read in a session that
-     * never leaves one machine, which is noise that teaches nothing. Marking
-     * the ones that went somewhere else is the whole signal: a result from a
-     * machine the session is not pointing at is otherwise indistinguishable
-     * from a local one.
+     * A line prepended to a tool result is noise in the model's context and
+     * ugly on screen. tool-rows puts the machine on the right of the call row
+     * instead, taken from the call's own arguments, which carry it only when
+     * the target differs from the session's.
      */
-    const marked = (result: unknown, where: string): unknown => {
-        if (typeof result !== 'object' || result === null) return result;
-        if (where === here()) return result;
-        const content = (result as { content?: unknown }).content;
-        const mark = { type: 'text' as const, text: `[on ${where}]` };
-        return { ...result, content: Array.isArray(content) ? [mark, ...content] : [mark] };
-    };
 
     const route = <T extends { execute: (...args: never[]) => unknown; description?: string }>(
         local: T,
@@ -368,10 +357,7 @@ export default function (pi: ExtensionAPI) {
                     const address = located.where.address;
                     const connection = await connectionFor(address);
                     const there = make(operationsFor(connection));
-                    return marked(
-                        await (there.execute as (...a: never[]) => unknown)(...args),
-                        sshTarget(address),
-                    );
+                    return (there.execute as (...a: never[]) => unknown)(...args);
                 }
 
                 // An environment that died is not the same as no environment.
@@ -389,10 +375,7 @@ export default function (pi: ExtensionAPI) {
                     throw new Error(`the connection to ${environment.name} is closed, so this did not run`);
                 }
                 const remote = make(operationsFor(environment.connection));
-                return marked(
-                    await (remote.execute as (...a: never[]) => unknown)(...args),
-                    environment.host,
-                );
+                return (remote.execute as (...a: never[]) => unknown)(...args);
             },
         }) as T;
 
@@ -437,23 +420,11 @@ export default function (pi: ExtensionAPI) {
             const { on, ...forwarded } = params;
             // The wrapped tool's own result type, which this returns unchanged.
             type Result = Awaited<ReturnType<typeof localBash.execute>>;
-            /**
-             * Runs it, and says where.
-             *
-             * A command that ran on another machine looks exactly like one
-             * that ran here: same row, same output, nothing naming the
-             * machine. That is the wrong-machine failure in its quietest
-             * form, so the host is marked on the result itself, which is the
-             * one thing both the person and the model read.
-             */
-            const run = async (tool: typeof localBash, where: string): Promise<Result> => {
-                const result = await (tool.execute as (...a: never[]) => Promise<Result>)(
-                    id as never,
-                    forwarded as never,
-                    ...rest,
-                );
-                return marked(result, where) as Result;
-            };
+            // `on` is stripped before the wrapped tool sees it: pi's bash
+            // knows nothing about it, and the row renderer reads it from the
+            // call rather than from the output.
+            const run = (tool: typeof localBash): Promise<Result> =>
+                (tool.execute as (...a: never[]) => Promise<Result>)(id as never, forwarded as never, ...rest);
 
             const chosen = async (): Promise<Connection | null> => {
                 if (on === undefined) return null;
@@ -475,12 +446,9 @@ export default function (pi: ExtensionAPI) {
             };
 
             const connection = await chosen();
-            if (on === 'local') return run(localBash, 'local');
+            if (on === 'local') return run(localBash);
             if (connection !== null) {
-                return run(
-                    createBashTool(process.cwd(), { operations: operationsFor(connection).bash }),
-                    connection.name,
-                );
+                return run(createBashTool(process.cwd(), { operations: operationsFor(connection).bash }));
             }
 
             // No `on`: the current environment decides, with the same refusals
@@ -492,14 +460,11 @@ export default function (pi: ExtensionAPI) {
                 );
             }
             const environment = active();
-            if (environment === null) return run(localBash, 'local');
+            if (environment === null) return run(localBash);
             if (!environment.connection.alive) {
                 throw new Error(`the connection to ${environment.name} is closed, so this did not run`);
             }
-            return run(
-                createBashTool(process.cwd(), { operations: operationsFor(environment.connection).bash }),
-                environment.host,
-            );
+            return run(createBashTool(process.cwd(), { operations: operationsFor(environment.connection).bash }));
         },
     });
 

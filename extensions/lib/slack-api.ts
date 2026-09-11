@@ -367,7 +367,16 @@ export class SlackWeb {
             // this lands in the conversation body, which the sender's view
             // does not show. Where there is no thread, the message itself is
             // the root of one.
-            threadTs: raw.thread_ts ?? raw.ts ?? null,
+            // Only a real thread, never the message's own ts.
+            //
+            // Slack has two places a reply can go: the conversation itself,
+            // and a thread hanging off one message. Falling back to `ts` puts
+            // every answer in a thread rooted on the question, so a plain DM
+            // grows a thread per line and the conversation view stays empty.
+            // Answering in the thread a message came from, and in the channel
+            // otherwise, is the rule: it keeps an assistant thread threaded
+            // and a normal DM flat.
+            threadTs: raw.thread_ts ?? null,
             user,
             name: await this.displayName(user),
             text: raw.text ?? '',

@@ -41,11 +41,26 @@ const idleMs = Number.parseInt(flag('--idle') ?? '10800000', 10);
 if (attachPath !== undefined) {
     const relay = () => {
         const socket = connectSocket(attachPath);
+        // The relay dies with its connection, in every direction.
+        //
+        // Watching only the socket left one of these alive on the far side
+        // each time a session stopped: ssh went away, its end of the pipe
+        // closed, and the relay carried on holding the daemon. The next
+        // session then queued behind a client that no longer existed, which
+        // looked like a slow reconnect and eventually like a hang.
+        const done = () => {
+            socket.destroy();
+            process.exit(0);
+        };
         socket.on('connect', () => {
             process.stdin.pipe(socket);
             socket.pipe(process.stdout);
         });
-        socket.on('close', () => process.exit(0));
+        socket.on('close', done);
+        process.stdin.on('end', done);
+        process.stdin.on('close', done);
+        process.stdout.on('error', done);
+        for (const signal of ['SIGHUP', 'SIGTERM', 'SIGINT'] as const) process.on(signal, done);
         socket.on('error', (error) => {
             process.stderr.write(`executor: cannot reach the daemon: ${error.message}\n`);
             process.exit(1);

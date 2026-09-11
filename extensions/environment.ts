@@ -548,9 +548,13 @@ export default function (pi: ExtensionAPI) {
 
     // ── the command, for the person ────────────────────────────────────────
     pi.registerCommand('environment', {
-        description: 'work on another machine: /environment connect user@host, /environment default local',
+        description:
+            'work on another machine: /environment user@host to attach, /environment local to come back, /environment drop <name> to close one',
         getArgumentCompletions: (prefix) => {
-            const words = ['connect', 'default', ...environments.keys(), 'local'];
+            // Everything offered here is something the handler accepts. The
+            // list used to include `local` while only `default local` worked,
+            // which is a completion that teaches a command that does not exist.
+            const words = ['local', ...environments.keys(), 'connect', 'default', 'drop', 'list'];
             const found = words.filter((word) => word.startsWith(prefix));
             return found.length > 0 ? found.map((word) => ({ value: word, label: word })) : null;
         },
@@ -560,7 +564,78 @@ export default function (pi: ExtensionAPI) {
             if (verb === undefined || verb === '') {
                 const where = current === null ? 'local' : current;
                 const attached = [...environments.keys()].join(', ') || 'none';
-                ctx.ui.notify(`Working in ${where}. Attached: ${attached}.`, 'info');
+                ctx.ui.notify(
+                    `Working in ${where}. Attached: ${attached}. ` +
+                        '/environment local, /environment <name>, /environment user@host, /environment drop <name>',
+                    'info',
+                );
+                return;
+            }
+
+            // The short forms, because they are what a person types: a bare
+            // name switches to it, a bare address attaches it, and `local`
+            // comes back here. `connect` and `default` still work.
+            if (verb === 'local' || (verb === 'connect' && rest === 'local') || (verb === 'default' && rest === undefined)) {
+                current = null;
+                dead = null;
+                published[PUBLISHED] = undefined;
+                remember();
+                await announce(null);
+                ctx.ui.notify('Working locally.', 'info');
+                return;
+            }
+
+            if (verb === 'drop') {
+                const name = rest ?? current;
+                const held = name === null ? undefined : environments.get(name);
+                if (name === null || held === undefined) {
+                    ctx.ui.notify(`No environment called ${name ?? '(none given)'}.`, 'error');
+                    return;
+                }
+                held.connection.close();
+                environments.delete(name);
+                if (current === name) {
+                    current = null;
+                    dead = null;
+                    published[PUBLISHED] = undefined;
+                    remember();
+                    await announce(null);
+                }
+                ctx.ui.notify(`Closed ${name}. Working locally.`, 'info');
+                return;
+            }
+
+            if (verb === 'list') {
+                const lines = [...environments.values()].map(
+                    (e) => `${e.name === current ? '*' : ' '} ${e.name}  ${e.host}  ${e.connection.alive ? 'up' : 'gone'}`,
+                );
+                ctx.ui.notify(lines.join('\n') || 'Nothing attached.', 'info');
+                return;
+            }
+
+            if (verb !== 'connect' && verb !== 'default' && environments.has(verb)) {
+                const chosen = environments.get(verb);
+                if (chosen !== undefined) {
+                    current = verb;
+                    dead = null;
+                    await announce(chosen);
+                    remember();
+                    ctx.ui.notify(`Working on ${verb}.`, 'info');
+                    return;
+                }
+            }
+
+            // A bare address is an attach, so `/environment samuel@host` does
+            // what it looks like it does.
+            if (verb !== 'connect' && verb !== 'default' && verb.includes('@')) {
+                load();
+                const name = parseTarget(verb).host.split('@').pop() ?? verb;
+                try {
+                    await attach(name, verb, (note) => ctx.ui.notify(note, 'info'));
+                    ctx.ui.notify(`Attached ${name}. /environment local comes back.`, 'info');
+                } catch (error) {
+                    ctx.ui.notify(`Could not attach: ${(error as Error).message}`, 'error');
+                }
                 return;
             }
 
@@ -606,7 +681,14 @@ export default function (pi: ExtensionAPI) {
                 return;
             }
 
-            ctx.ui.notify('Usage: /environment connect user@host | /environment default <name|local>', 'error');
+            // Naming what was typed, since the usual reason to land here is a
+            // name that is not attached rather than a verb nobody knows.
+            const attached = [...environments.keys()].join(', ') || 'nothing attached';
+            ctx.ui.notify(
+                `"${verb}" is not an environment or a host. Attached: ${attached}.\n` +
+                    '/environment user@host attaches, /environment <name> switches, /environment local comes back, /environment drop <name> closes one.',
+                'error',
+            );
         },
     });
 

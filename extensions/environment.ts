@@ -236,6 +236,30 @@ export default function (pi: ExtensionAPI) {
     const localEdit = createEditTool(process.cwd());
     const localBash = createBashTool(process.cwd());
 
+    /**
+     * `user@host:/path`, addressing one file on one machine.
+     *
+     * A path is only meaningful with a machine attached to it, and until now
+     * that machine was always the current environment. This makes the pair
+     * writable in one argument, so a file can be read from a node nothing is
+     * attached to, or from the laptop while an environment is current, without
+     * switching the session back and forth around a single read.
+     *
+     * `local:` is the way to name this machine, since a bare path means the
+     * current environment.
+     */
+    const ADDRESSED = /^([A-Za-z0-9._-]+@[A-Za-z0-9._-]+|local):(\/.*)$/;
+
+    /** The connection for an address, reusing an attachment when there is one. */
+    const connectionFor = async (host: string): Promise<Connection> => {
+        for (const environment of environments.values()) {
+            if (environment.host === host && environment.connection.alive) return environment.connection;
+        }
+        const name = parseTarget(host).host.split('@').pop() ?? host;
+        const environment = await attach(name, host, () => {});
+        return environment.connection;
+    };
+
     const route = <T extends { execute: (...args: never[]) => unknown }>(
         local: T,
         make: (operations: ReturnType<typeof operationsFor>) => T,
@@ -243,6 +267,22 @@ export default function (pi: ExtensionAPI) {
         ({
             ...local,
             async execute(...args: never[]) {
+                // An addressed path decides the machine by itself, before any
+                // of the rules about the current environment apply.
+                const params = args[1] as { path?: unknown } | undefined;
+                const addressed =
+                    typeof params?.path === 'string' ? ADDRESSED.exec(params.path) : null;
+                if (addressed !== null) {
+                    const [, where = '', path = ''] = addressed;
+                    (params as { path: string }).path = path;
+                    if (where === 'local') {
+                        return (local.execute as (...a: never[]) => unknown)(...args);
+                    }
+                    const connection = await connectionFor(where);
+                    const there = make(operationsFor(connection));
+                    return (there.execute as (...a: never[]) => unknown)(...args);
+                }
+
                 // An environment that died is not the same as no environment.
                 // Running locally here is how a command silently answered from
                 // the wrong machine, so it refuses until somebody chooses.

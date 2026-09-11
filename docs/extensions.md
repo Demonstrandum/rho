@@ -51,6 +51,23 @@ a session id keeps two concurrent sessions in one project apart, and an in-memor
 directories untouched for `[scratch] keep-days` are removed when a session opens.
 a working tree that cannot be written to yields no scratch directory rather than a failed session.
 
+`personality.ts` + `lib/personality.ts` add `/personality [name | path | off]`, which sets how the agent speaks for this session.
+there is no default: with nothing picked, no `<personality>` block exists and the prompt says nothing about personalities at all.
+the mode is chosen by what the session already holds.
+before the first user or assistant message, the personality is appended to the system prompt on every turn (`prompt` mode); after one exists, it goes in as a single custom message and the prompt is left byte for byte as it was (`message` mode).
+that split is about the provider's prompt cache: the system prompt is the cached prefix of every request in the session, so editing it mid-session re-reads the whole conversation, while a message after the last cached turn costs the personality's own tokens and nothing else.
+switching or clearing a personality that is already in the prompt is the one case that cannot be had cheaply, since removing the block costs what replacing it costs; the block is rewritten and the notification says the prompt was rebuilt, rather than leaving a contradicted instruction in place.
+a bare name is looked up in `<rho config dir>/personalities/` then in the package's `personalities/`, a user file shadowing a bundled one; anything holding a separator, a leading `~` or `.`, or a `.md` suffix is taken as a path and never looked up by name.
+`PERSONALITY.md` at the root of the working tree is read at `session_start` under `[personality] auto`, which is what puts a project's own personality in the prompt rather than in the conversation; the file name is `[personality] project-file` and an empty string disables the lookup.
+the choice is stored per session under `[personality] remember`, with the text as it was sent, so a file edited or deleted later does not change what this session has already been told, and a restore keeps the mode it was applied in rather than re-sending a message the session already carries.
+the injected block states that the personality governs voice and manner only and yields to the rules above it, since a personality that could relax them would be a way to talk the agent out of them.
+a personality file carrying a `## sign-off` section suspends the writer rule against closing lines, and only that one: one line, at the end of finished work, never after a failure, a refusal, or a question back, and written fresh each time rather than drawn from the examples.
+every bundled file has one, since a character with no exit line stops mid-air.
+an `## emoji` section works the same way against the rule forbidding emoji: the characters listed are the whole permitted set, at most one per reply, at the end of a line, never inside a file, a commit message, a path, a command, or the sentence warning that something cannot be undone.
+the six informal files carry one and the five formal ones do not, and a file with no such section uses none.
+`RHO_PERSONALITY=<name|path>` applies one at `session_start` in prompt mode, which is how a headless run gets a personality at all: it never sees a command.
+`bun tools/prompt-full.ts --personality noir` sets that variable for the run it spawns, so the block can be read in the payload the provider would receive.
+
 `prompt-defingerprint.ts` rewrites the lines of pi's built-in system prompt that anthropic's server-side classifier signatures as third-party (the pi documentation section); requests carrying them are routed to extra-usage billing only, so the rewrite keeps subscription OAuth requests on plan billing.
 details in `../anthropic-detection-findings.md`.
 its patterns ignore case and its replacements are written in the house style, so it holds whichever side of `prompt-disenshittify.ts` it runs on.

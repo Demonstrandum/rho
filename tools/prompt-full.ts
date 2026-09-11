@@ -4,6 +4,10 @@
 //
 //   bun tools/prompt-full.ts            the provider payload's system text
 //   bun tools/prompt-full.ts --json     the full payload, for inspecting the rest
+//   bun tools/prompt-full.ts --personality <name|path>
+//                                       with that personality's block included,
+//                                       as a session that picked it before its
+//                                       first turn would send it
 //
 // it runs pi headlessly with one extra extension that dumps the payload from
 // before_provider_request and exits before the request leaves the machine, so
@@ -71,12 +75,24 @@ const extensionPath = join(dir, 'dump-payload.ts');
 const dumpPath = join(dir, 'payload.json');
 writeFileSync(extensionPath, dumper);
 
-const passthrough = process.argv.slice(2).filter((arg) => arg !== '--json');
-const wantsJson = process.argv.includes('--json');
+const argv = process.argv.slice(2);
+const personalityAt = argv.indexOf('--personality');
+const personality = personalityAt === -1 ? undefined : argv[personalityAt + 1];
+if (personalityAt !== -1 && (personality === undefined || personality.startsWith('-'))) {
+    process.stderr.write('--personality needs a name or a path.\n');
+    process.exit(1);
+}
+const passthrough = argv.filter((arg, index) =>
+    arg !== '--json' && index !== personalityAt && index !== personalityAt + 1);
+const wantsJson = argv.includes('--json');
 
 const child = Bun.spawnSync({
     cmd: ['pi', '-p', 'x', '--mode', 'text', '-e', extensionPath, ...passthrough],
-    env: { ...process.env, [DUMP_ENV]: dumpPath },
+    env: {
+        ...process.env,
+        [DUMP_ENV]: dumpPath,
+        ...(personality === undefined ? {} : { RHO_PERSONALITY: personality }),
+    },
     stdout: 'pipe',
     stderr: 'pipe',
 });

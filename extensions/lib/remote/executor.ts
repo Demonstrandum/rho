@@ -83,10 +83,30 @@ export class Executor {
     private cwd: string;
 
     constructor(
-        private readonly send: (frame: Frame) => void,
+        private send: (frame: Frame) => void,
         cwd: string = process.cwd(),
     ) {
         this.cwd = cwd;
+    }
+
+    /**
+     * Serve a new client with the state this already holds.
+     *
+     * The daemon outlives any one connection, so the directory, the
+     * environment and the process table belong to the executor rather than to
+     * the stream: building a fresh Executor per client threw all of it away,
+     * which showed up as a reconnected session back in the home directory.
+     */
+    attach(input: NodeJS.ReadableStream, output: NodeJS.WritableStream): void {
+        const decoder = new Decoder();
+        this.send = (frame) => {
+            if (output.writable) output.write(encode(frame));
+        };
+        input.on('data', (chunk: Buffer) => {
+            for (const frame of decoder.push(new Uint8Array(chunk))) {
+                if (frame.type === 'request') void this.handle(frame.id, frame.body);
+            }
+        });
     }
 
     /** Relative paths resolve against the connection's directory, not the process's. */

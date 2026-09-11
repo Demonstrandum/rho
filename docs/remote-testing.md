@@ -88,3 +88,15 @@ command, which is the case rented nodes will actually produce.
 - `project.toml` does not exist; nothing reads per-project settings yet.
 - the first connect as a new user copies the bundle again, because the cache is.
   per user under `~/.cache/rho`.
+
+## addressed paths
+
+`user@host:/path` names a file and the machine it is on, so one read can come
+from elsewhere without switching the session.
+`local:/path` is this machine, since a bare path means the current environment.
+
+- with an environment attached, read `local:/Users/samuel/Git/mock/README.md`.
+it comes from the laptop.
+- with nothing attached, read `samuel@robotics-vm-1:/etc/os-release`.
+it attaches on demand and comes from there.
+- a plain path still follows the current environment.

@@ -15,6 +15,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connectOverProcess } from './client';
 import type { Connection } from './client';
+import { parseAddress, sshTarget } from './address';
+import type { Address } from './address';
 
 /** Where the compiled executor is kept on this machine, and on the far side. */
 const CACHE = join(process.env.HOME ?? '/tmp', '.cache', 'rho', 'remote');
@@ -57,18 +59,18 @@ const sourceDir = (): string => {
 
 const ENTRY = (): string => join(sourceDir(), 'executor-main.ts');
 
-export interface Target {
-    /** user@host, as ssh understands it. */
-    readonly host: string;
-    /** Where to start. Absent means the login directory. */
-    readonly path?: string;
-}
+/**
+ * Kept as an alias so callers read as before, but it is the parsed record now:
+ * the old version took the text apart with indexOf(':') and called the left
+ * half a host, so `samuel@box:/srv` and `samuel@box` produced different shapes
+ * of the same thing.
+ */
+export type Target = Address;
 
-/** `user@host:/path`, the form that also addresses a single file. */
-export function parseTarget(text: string): Target {
-    const at = text.indexOf(':');
-    if (at === -1) return { host: text };
-    return { host: text.slice(0, at), path: text.slice(at + 1) };
+export function parseTarget(text: string): Address {
+    const address = parseAddress(text);
+    if (address === null) throw new Error(`not a machine address: ${text}`);
+    return address;
 }
 
 const run = (
@@ -177,10 +179,12 @@ export async function bundle(): Promise<{ path: string; hash: string }> {
 }
 
 export async function deploy(
-    target: Target,
+    target: Address,
     options: { readonly platform?: Platform; readonly onProgress?: (note: string) => void } = {},
 ): Promise<Connection> {
     const say = options.onProgress ?? (() => {});
+    // One formatting of the address, used everywhere ssh is called.
+    const ssh_to = sshTarget(target);
     const platform = options.platform;
 
     // What the far side can run, asked rather than assumed. A compiled binary
@@ -188,12 +192,12 @@ export async function deploy(
     // generic glibc build outright, and has no musl loader either. A runtime
     // that is already there takes a 200 KB bundle instead, so the binary is
     // the fallback for a machine with nothing rather than the default.
-    say(`checking ${target.host}`);
+    say(`checking ${ssh_to}`);
     const probe = await run('ssh', [
-        target.host,
+        ssh_to,
         'command -v bun || command -v node || true; echo ---; uname -m',
     ]);
-    if (probe.code !== 0) throw new Error(`cannot reach ${target.host}: ${probe.err.trim() || 'ssh failed'}`);
+    if (probe.code !== 0) throw new Error(`cannot reach ${ssh_to}: ${probe.err.trim() || 'ssh failed'}`);
     const [runtimeLine = '', machineLine = ''] = probe.out.split('---');
     const runtime = runtimeLine.trim().split('\n')[0]?.trim() ?? '';
     const arm = machineLine.trim().startsWith('aarch64') || machineLine.trim().startsWith('arm64');
@@ -202,7 +206,7 @@ export async function deploy(
     let hash: string;
     let start: string;
     if (runtime !== '') {
-        say(`using ${runtime.split('/').pop()} on ${target.host}`);
+        say(`using ${runtime.split('/').pop()} on ${ssh_to}`);
         ({ path, hash } = await bundle());
         start = `${runtime} ${REMOTE_DIR}/executor-${hash}.js`;
     } else {
@@ -212,16 +216,16 @@ export async function deploy(
     }
     const remote = runtime === '' ? `${REMOTE_DIR}/executor-${hash}` : `${REMOTE_DIR}/executor-${hash}.js`;
 
-    const present = await run('ssh', [target.host, `test -s ${remote} && echo yes || echo no`]);
+    const present = await run('ssh', [ssh_to, `test -s ${remote} && echo yes || echo no`]);
     if (present.out.trim() !== 'yes') {
         const bytes = readFileSync(path);
-        say(`copying ${(bytes.byteLength / 1e6).toFixed(1)} MB to ${target.host}`);
+        say(`copying ${(bytes.byteLength / 1e6).toFixed(1)} MB to ${ssh_to}`);
         // Written to a temporary name and moved, so a connection that drops
         // half way does not leave a truncated file that passes the test above.
         const sent = await run(
             'ssh',
             [
-                target.host,
+                ssh_to,
                 `mkdir -p ${REMOTE_DIR} && cat > ${remote}.part && chmod +x ${remote}.part && mv ${remote}.part ${remote}`,
             ],
             bytes,
@@ -229,19 +233,19 @@ export async function deploy(
         if (sent.code !== 0) throw new Error(`could not copy the executor: ${sent.err.trim()}`);
     }
 
-    say(`starting the executor on ${target.host}`);
-    const connection = connectOverProcess(target.host, 'ssh', [target.host, start]);
+    say(`starting the executor on ${ssh_to}`);
+    const connection = connectOverProcess(ssh_to, 'ssh', [ssh_to, start]);
 
     const hello = await connection.request({ kind: 'ping' });
     if (hello.kind !== 'pong') {
         connection.close();
-        throw new Error(`the executor did not answer on ${target.host}: ${JSON.stringify(hello)}`);
+        throw new Error(`the executor did not answer on ${ssh_to}: ${JSON.stringify(hello)}`);
     }
-    if (target.path !== undefined) {
+    if (target.path !== null) {
         const moved = await connection.request({ kind: 'chdir', path: target.path });
         if (moved.kind === 'error') {
             connection.close();
-            throw new Error(`no such directory on ${target.host}: ${target.path}`);
+            throw new Error(`no such directory on ${ssh_to}: ${target.path}`);
         }
     }
     return connection;

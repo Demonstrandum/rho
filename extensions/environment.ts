@@ -29,7 +29,9 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { operationsFor, waitFor } from './lib/remote/client';
 import type { Connection } from './lib/remote/client';
-import { deploy, parseTarget } from './lib/remote/deploy';
+import { deploy } from './lib/remote/deploy';
+import { addressName, parseAddress, parseLocated, sshTarget } from './lib/remote/address';
+import type { Address } from './lib/remote/address';
 import { PersistedState } from './lib/state-store';
 
 interface Environment {
@@ -249,10 +251,11 @@ export default function (pi: ExtensionAPI) {
         );
     };
 
-    const attach = async (name: string, address: string, note: (text: string) => void): Promise<Environment> => {
-        const target = parseTarget(address);
-        const connection = await deploy(target, { onProgress: note });
-        const environment: Environment = { name, connection, host: address };
+    const attach = async (name: string, text: string, note: (text: string) => void): Promise<Environment> => {
+        const address = parseAddress(text);
+        if (address === null) throw new Error(`not a machine address: ${text}`);
+        const connection = await deploy(address, { onProgress: note });
+        const environment: Environment = { name, connection, host: sshTarget(address) };
         connection.onEvent((event) => {
             if (event.kind === 'gone') forget(name, event.why);
         });
@@ -285,16 +288,29 @@ export default function (pi: ExtensionAPI) {
      * `local:` is the way to name this machine, since a bare path means the
      * current environment.
      */
-    const ADDRESSED = /^([A-Za-z0-9._-]+@[A-Za-z0-9._-]+|local):(\/.*)$/;
+    // parseLocated is the parser; this file no longer has one of its own.
 
     /** The connection for an address, reusing an attachment when there is one. */
-    const connectionFor = async (host: string): Promise<Connection> => {
+    const connectionFor = async (address: Address): Promise<Connection> => {
+        const host = sshTarget(address);
         for (const environment of environments.values()) {
             if (environment.host === host && environment.connection.alive) return environment.connection;
         }
-        const name = parseTarget(host).host.split('@').pop() ?? host;
-        const environment = await attach(name, host, () => {});
-        return environment.connection;
+        // Reachable without becoming current. One addressed path, or one
+        // command with `on`, must not move the session: doing that through
+        // attach() meant a single `uname -a` elsewhere switched everything
+        // after it to that machine, which is what /environment is for.
+        const name = addressName(address);
+        const connection = await deploy(address, {});
+        const environment: Environment = { name, connection, host };
+        connection.onEvent((event) => {
+            if (event.kind === 'gone') {
+                environments.delete(name);
+                if (current === name) forget(name, event.why);
+            }
+        });
+        environments.set(name, environment);
+        return connection;
     };
 
     /**
@@ -343,17 +359,19 @@ export default function (pi: ExtensionAPI) {
                 // An addressed path decides the machine by itself, before any
                 // of the rules about the current environment apply.
                 const params = args[1] as { path?: unknown } | undefined;
-                const addressed =
-                    typeof params?.path === 'string' ? ADDRESSED.exec(params.path) : null;
-                if (addressed !== null) {
-                    const [, where = '', path = ''] = addressed;
-                    (params as { path: string }).path = path;
-                    if (where === 'local') {
+                const located = typeof params?.path === 'string' ? parseLocated(params.path) : null;
+                if (located !== null && located.where.kind !== 'current') {
+                    (params as { path: string }).path = located.path;
+                    if (located.where.kind === 'local') {
                         return (local.execute as (...a: never[]) => unknown)(...args);
                     }
-                    const connection = await connectionFor(where);
+                    const address = located.where.address;
+                    const connection = await connectionFor(address);
                     const there = make(operationsFor(connection));
-                    return marked(await (there.execute as (...a: never[]) => unknown)(...args), where);
+                    return marked(
+                        await (there.execute as (...a: never[]) => unknown)(...args),
+                        sshTarget(address),
+                    );
                 }
 
                 // An environment that died is not the same as no environment.
@@ -451,7 +469,9 @@ export default function (pi: ExtensionAPI) {
                             `${[...environments.keys()].join(', ') || 'nothing attached'}`,
                     );
                 }
-                return connectionFor(on);
+                const address = parseAddress(on);
+                if (address === null) throw new Error(`not a machine address: ${on}`);
+                return connectionFor(address);
             };
 
             const connection = await chosen();
@@ -579,7 +599,9 @@ export default function (pi: ExtensionAPI) {
 
             if (params.target === undefined) return said('connect needs a target: user@host.');
             try {
-                const name = params.name ?? parseTarget(params.target).host.split('@').pop() ?? params.target;
+                const parsed = parseAddress(params.target);
+                if (parsed === null) return said(`not a machine address: ${params.target}`);
+                const name = params.name ?? addressName(parsed);
                 const environment = await attach(name, params.target, () => {});
                 const where = await environment.connection.request({ kind: 'cwd' });
                 const at = where.kind === 'cwd' ? where.path : 'unknown';
@@ -673,7 +695,12 @@ export default function (pi: ExtensionAPI) {
             // what it looks like it does.
             if (verb !== 'connect' && verb !== 'default' && verb.includes('@')) {
                 load();
-                const name = parseTarget(verb).host.split('@').pop() ?? verb;
+                const parsed = parseAddress(verb);
+                if (parsed === null) {
+                    ctx.ui.notify(`not a machine address: ${verb}`, 'error');
+                    return;
+                }
+                const name = addressName(parsed);
                 try {
                     await attach(name, verb, (note) => ctx.ui.notify(note, 'info'));
                     ctx.ui.notify(`Attached ${name}. /environment local comes back.`, 'info');
@@ -715,7 +742,12 @@ export default function (pi: ExtensionAPI) {
                     ctx.ui.notify('Give a target: /environment connect user@host', 'error');
                     return;
                 }
-                const name = parseTarget(rest).host.split('@').pop() ?? rest;
+                const parsedRest = parseAddress(rest);
+                if (parsedRest === null) {
+                    ctx.ui.notify(`not a machine address: ${rest}`, 'error');
+                    return;
+                }
+                const name = addressName(parsedRest);
                 try {
                     await attach(name, rest, (note) => ctx.ui.notify(note, 'info'));
                     ctx.ui.notify(`Attached ${name}. Tools now act there; /environment default local comes back.`, 'info');
@@ -813,9 +845,12 @@ export default function (pi: ExtensionAPI) {
             if (typeof target === 'string' && target.trim() !== '') {
                 const trimmed = target.trim();
                 try {
-                    await attach(parseTarget(trimmed).host.split('@').pop() ?? trimmed, trimmed, (note) =>
-                        ctx.ui.notify(note, 'info'),
-                    );
+                    const chosenAddress = parseAddress(trimmed);
+                    if (chosenAddress === null) {
+                        ctx.ui.notify(`not a machine address: ${trimmed}`, 'error');
+                        return;
+                    }
+                    await attach(addressName(chosenAddress), trimmed, (note) => ctx.ui.notify(note, 'info'));
                 } catch (error) {
                     ctx.ui.notify(`could not attach: ${(error as Error).message}`, 'error');
                     await announce(null);

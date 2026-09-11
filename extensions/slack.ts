@@ -651,6 +651,31 @@ export default function (pi: ExtensionAPI) {
         );
     };
 
+    /**
+     * Reattach on a bare /reload, not only on a session start.
+     *
+     * /reload builds a fresh copy of this file but does not fire session_start,
+     * so a repair that lives only there never runs: the socket stays owned by
+     * the copy that was replaced, and Slack goes quiet while the lock still
+     * looks healthy. Anything holding a lock under this very process is this
+     * session by definition, whatever id the lock remembers.
+     */
+    const reattachAfterReload = async (): Promise<void> => {
+        const id = process.env.PI_SESSION_ID ?? null;
+        if (id === null) return;
+        for (const name of listApps()) {
+            const lock = readLock(name);
+            if (lock.kind !== 'held' || lock.lock.pid !== process.pid) continue;
+            if (lock.lock.sessionId === id && attached !== null) return;
+            sessionId = id;
+            closePrevious();
+            await connect(name, true);
+            return;
+        }
+    };
+    // After the factory returns, so registerCommand and registerTool have run.
+    setTimeout(() => void reattachAfterReload(), 0);
+
     pi.on('session_start', async (_event, ctx) => {
         cwd = ctx.cwd;
         sessionId = ctx.sessionManager.getSessionId();

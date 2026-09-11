@@ -164,6 +164,15 @@ async function bundle(): Promise<{ path: string; hash: string }> {
  * same fallback the executor uses. Refusing a bare host was asking the person
  * to install a runtime first, which is the thing this is supposed to avoid.
  */
+/**
+ * The name the client uses to reach the runner.
+ *
+ * create() installs it by content hash, so two versions never collide; the
+ * client needs one name it can count on, so the installed file is also linked
+ * here. A link rather than a copy: the same bytes, one place to look.
+ */
+export const RUNNER_LINK = `${REMOTE_DIR}/session-runner.js`;
+
 async function place(host: string, say: (note: string) => void): Promise<string> {
     const probe = await run('ssh', [...SSH_FLAGS, host, 'command -v bun || command -v node || true; echo ---; uname -m']);
     if (probe.code !== 0) throw new Error(`cannot reach ${host}: ${probe.err.trim() || 'ssh failed'}`);
@@ -354,6 +363,10 @@ export default function (pi: ExtensionAPI) {
             `exec "$R" ${file} serve ${name} ${address_.path ?? '$HOME'}`,
         ].join('; ');
         const attempt = await run('ssh', [...SSH_FLAGS, host, quick], lend());
+        // The stable name, for the client that attaches later.
+        if (attempt.code === 0) {
+            void run('ssh', [...SSH_FLAGS, host, `ln -sf ${file.split('/').pop()} ${RUNNER_LINK}`]);
+        }
         if (attempt.code === 0) {
             hosts.set(name, host);
             return attempt.out.trim();
@@ -363,6 +376,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         const runner = await place(host, say);
+        void run('ssh', [...SSH_FLAGS, host, `ln -sf $(basename ${runner.split(' ').pop()}) ${RUNNER_LINK}`]);
         say(`starting ${name} on ${host}`);
         // The agent on the host needs a model key, and the host should not own
         // one: a key in a file there outlives the session and ends up in
@@ -497,23 +511,15 @@ export default function (pi: ExtensionAPI) {
                     ctx.ui.notify(`I do not know which host ${first} is on. /remote connect ${first} user@host`, 'error');
                     return;
                 }
-                // pi's own terminal, over ssh, rather than a copy of its UI.
-                //
-                // The first version of this drew the remote session by
-                // injecting its events into the local one as messages: no
-                // streaming, every event in its own block, and a running
-                // commentary of stale information. A session's interface is
-                // pi's, and the way to see it today is to run it.
-                //
-                // The version worth having renders locally from the remote
-                // event stream, with pi's own InteractiveMode driven by a
-                // runtime that proxies to the far side. That is in
-                // docs/remote-viewer-TODO.md; this is what works now.
+                // The client that draws it: pi's own interface, here, reading
+                // the daemon's event stream. It is a separate process because
+                // the interface is the thing being replaced, and an extension
+                // can only add to the interface it is already inside.
+                const client = join(remoteDir(), '..', '..', '..', 'bin', 'rho-remote');
                 ctx.ui.notify(
                     [
                         `${first} runs on ${host}. Attach with:`,
-                        `  ssh -t ${host} pi --resume ${first}`,
-                        `  mosh ${host} -- pi --resume ${first}    (better over a slow link)`,
+                        `  bun ${client} ${host} ${first}`,
                         'It keeps running when you leave.',
                     ].join('\n'),
                     'info',

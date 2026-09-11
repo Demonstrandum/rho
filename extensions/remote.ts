@@ -362,13 +362,27 @@ export default function (pi: ExtensionAPI) {
             `[ -s ${file} ] || exit 43`,
             `exec "$R" ${file} serve ${name} ${address_.path ?? '$HOME'}`,
         ].join('; ');
+        /**
+         * The name the client attaches by.
+         *
+         * The runner is installed by content hash so two versions never
+         * collide, and the client needs one name that does not change. The
+         * link is made beside whichever file was installed, in the same call
+         * that starts the session, so it can never point at a file that is not
+         * there.
+         */
+        const linkRunner = `ln -sf $(basename ${file}) ${RUNNER_LINK}`;
+
         const attempt = await run('ssh', [...SSH_FLAGS, host, quick], lend());
-        // The stable name, for the client that attaches later.
-        if (attempt.code === 0) {
-            void run('ssh', [...SSH_FLAGS, host, `ln -sf ${file.split('/').pop()} ${RUNNER_LINK}`]);
+        // A session that is already up is the outcome asked for, not an error:
+        // create is how you get one, and one exists.
+        if (/already running/.test(attempt.out) || /already running/.test(attempt.err)) {
+            hosts.set(name, host);
+            return `${name} is already running on ${host}`;
         }
         if (attempt.code === 0) {
             hosts.set(name, host);
+            await run('ssh', [...SSH_FLAGS, host, linkRunner]);
             return attempt.out.trim();
         }
         if (attempt.code !== 42 && attempt.code !== 43) {
@@ -376,7 +390,6 @@ export default function (pi: ExtensionAPI) {
         }
 
         const runner = await place(host, say);
-        void run('ssh', [...SSH_FLAGS, host, `ln -sf $(basename ${runner.split(' ').pop()}) ${RUNNER_LINK}`]);
         say(`starting ${name} on ${host}`);
         // The agent on the host needs a model key, and the host should not own
         // one: a key in a file there outlives the session and ends up in
@@ -410,6 +423,7 @@ export default function (pi: ExtensionAPI) {
             [...SSH_FLAGS, host, `${runner} serve ${name} ${address_.path ?? '$HOME'}`],
             lend(),
         );
+        await run('ssh', [...SSH_FLAGS, host, linkRunner]);
         if (started.code !== 0) {
             throw new Error(started.err.trim() || started.out.trim() || `could not start ${name}`);
         }
@@ -417,10 +431,35 @@ export default function (pi: ExtensionAPI) {
         return started.out.trim();
     };
 
+    /**
+     * Run a runner command in one ssh call.
+     *
+     * Asking place() first meant probing for a runtime and checking for the
+     * file before every list or stop: three round trips to this fleet is
+     * seconds, and the answers cannot have changed since the runner was
+     * installed. This uses the stable link, and installs only when the far
+     * side says it is not there.
+     */
+    const ask = async (host: string, verb: string, say: (note: string) => void): Promise<string> => {
+        const quick = [
+            `R=$(command -v bun || command -v node || true)`,
+            `[ -n "$R" ] || exit 42`,
+            `[ -s ${RUNNER_LINK} ] || exit 43`,
+            `exec "$R" ${RUNNER_LINK} ${verb}`,
+        ].join('; ');
+        const attempt = await run('ssh', [...SSH_FLAGS, host, quick]);
+        if (attempt.code === 0) return attempt.out.trim();
+        if (attempt.code !== 42 && attempt.code !== 43) {
+            throw new Error(attempt.err.trim() || attempt.out.trim() || `${verb} failed on ${host}`);
+        }
+        const runner = await place(host, say);
+        const again = await run('ssh', [...SSH_FLAGS, host, `${runner} ${verb}`]);
+        return again.out.trim();
+    };
+
     const list = async (host: string): Promise<string> => {
-        const runner = await place(host, () => {});
-        const listed = await run('ssh', [...SSH_FLAGS, host, `${runner} list`]);
-        return listed.out.trim() || 'no sessions';
+        const listed = await ask(host, 'list', () => {});
+        return listed || 'no sessions';
     };
 
     pi.registerCommand('remote', {
@@ -537,8 +576,7 @@ export default function (pi: ExtensionAPI) {
                     ctx.ui.notify(`I do not know which host ${first} is on.`, 'error');
                     return;
                 }
-                const runner = await place(host, () => {});
-                await run('ssh', [...SSH_FLAGS, host, `${runner} stop ${first}`]);
+                await ask(host, `stop ${first}`, () => {});
                 hosts.delete(first);
                 ctx.ui.notify(`Stopped ${first}.`, 'info');
                 return;

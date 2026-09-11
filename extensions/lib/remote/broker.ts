@@ -113,7 +113,14 @@ export class Broker {
         rmSync(path, { force: true });
         this.server = createServer((client) => {
             this.clients.add(client);
-            for (const line of this.recent) client.write(line);
+            // The buffer is history, and a client that cannot tell it from
+            // live events answers the last question again: it is bracketed so
+            // a viewer can draw it as what already happened.
+            if (this.recent.length > 0) {
+                client.write(`${JSON.stringify({ type: 'rho_replay_start' })}\n`);
+                for (const line of this.recent) client.write(line);
+                client.write(`${JSON.stringify({ type: 'rho_replay_end' })}\n`);
+            }
             client.on('data', (chunk: Buffer) => this.agent.stdin?.write(chunk));
             const drop = () => this.clients.delete(client);
             client.on('close', drop);

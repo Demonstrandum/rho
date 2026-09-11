@@ -1,0 +1,97 @@
+#!/usr/bin/env bun
+/**
+ * rho-remote <user@host> <session> — pi's interface, here, for a session there.
+ *
+ * The session runs as a daemon on the far side, reached over ssh. This draws it
+ * with pi's own interface: the same renderer, the same rows, the same
+ * streaming, because it is the same code reading the same events. The wire is
+ * the only thing added.
+ *
+ * Not an extension, because the interface is the thing being replaced: an
+ * extension can only add to a session that already exists, and drawing another
+ * session's events inside one produces a log rather than an interface.
+ */
+
+import {
+    AgentSessionRuntime,
+    InteractiveMode,
+    SessionManager,
+    createAgentSessionFromServices,
+    createAgentSessionServices,
+} from '@earendil-works/pi-coding-agent';
+import { RpcLink } from '../extensions/lib/remote/rpc-link';
+import { RemoteActions, RemoteState } from '../extensions/lib/remote/proxy-session';
+import { remoteSession } from '../extensions/lib/remote/remote-session';
+
+const [target, name, ...rest] = process.argv.slice(2);
+// A message given on the command line is submitted on attach, which is how a
+// session is driven without a person at the keyboard.
+const opening = rest.join(' ').trim();
+if (target === undefined || name === undefined) {
+    process.stderr.write('usage: rho-remote <user@host> <session>\n');
+    process.exit(1);
+}
+
+const SSH_FLAGS = [
+    '-o',
+    'ClearAllForwardings=yes',
+    '-o',
+    'LogLevel=ERROR',
+    '-o',
+    'ConnectTimeout=10',
+    '-o',
+    'BatchMode=yes',
+];
+const RUNNER = process.env.RHO_REMOTE_RUNNER ?? 'bun .cache/rho/remote/session-runner.js';
+
+const link = new RpcLink('ssh', [...SSH_FLAGS, target, `${RUNNER} attach ${name}`], {
+    // No deadline on the link: a model call takes as long as it takes, and the
+    // interface shows that it is working. A link that has died says so by
+    // closing, which is a different thing from an answer that is slow.
+    timeoutMs: 0,
+    onClosed: (why) => {
+        process.stderr.write(`\n${name} on ${target}: ${why}\n`);
+        process.exit(1);
+    },
+});
+
+// RHO_REMOTE_LOG names a file to write every event type to, which is the only
+// way to see what a terminal interface received without being the terminal.
+const trace = process.env.RHO_REMOTE_LOG;
+if (trace !== undefined) {
+    const { appendFileSync } = await import('node:fs');
+    link.onEvent((event) => appendFileSync(trace, `${event.type}\n`));
+}
+
+const state = new RemoteState(link);
+const actions = new RemoteActions(link);
+if (trace !== undefined) {
+    const { appendFileSync } = await import('node:fs');
+    // what the session hands the interface, as opposed to what the wire carried
+    state.subscribe((event) => appendFileSync(trace, `session:${(event as { type: string }).type}\n`));
+}
+await state.refresh();
+
+// The local half: settings, the editor, the renderer, and a session file of
+// this machine's own. None of it is the agent; all of it is the interface.
+const services = await createAgentSessionServices({ cwd: process.cwd() });
+const sessionManager = SessionManager.inMemory(process.cwd());
+const made = await createAgentSessionFromServices({ services, sessionManager });
+
+const proxied = remoteSession(made.session as unknown as Record<string, unknown>, link, state, actions);
+
+const runtime = new AgentSessionRuntime(
+    proxied as never,
+    services,
+    // A replacement session would be a different remote session; until
+    // /remote can switch between them, the factory hands back this one.
+    async () => ({ session: proxied as never, services, diagnostics: [] }),
+    [],
+);
+
+const interactive = new InteractiveMode(runtime, {
+    initialMessage: opening === '' ? undefined : opening,
+    verbose: false,
+});
+
+await interactive.run();

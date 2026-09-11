@@ -32,7 +32,18 @@ if (target === undefined || name === undefined) {
     process.exit(1);
 }
 
+const CACHE = `${process.env.HOME ?? '/tmp'}/.cache/rho/remote`;
+
 const SSH_FLAGS = [
+    // The handshake to a machine like this costs seconds; the connection is
+    // shared with everything else rho opens, so attaching a second time pays
+    // for the socket and not the handshake.
+    '-o',
+    'ControlMaster=auto',
+    '-o',
+    `ControlPath=${CACHE}/cm-%C`,
+    '-o',
+    'ControlPersist=10m',
     '-o',
     'ClearAllForwardings=yes',
     '-o',

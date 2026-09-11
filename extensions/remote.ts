@@ -503,9 +503,14 @@ export default function (pi: ExtensionAPI) {
         return { action: 'continue' as const };
     });
 
-    setTimeout(() => {
+    // Same as environment.ts: a timer fires during extension loading, where
+    // action methods throw and take the session with them.
+    let hidden = false;
+    pi.on('before_agent_start', async () => {
+        if (hidden) return;
+        hidden = true;
         pi.setActiveTools(pi.getActiveTools().filter((name) => !OWN.includes(name)));
-    }, 0);
+    });
 
     pi.registerTool({
         name: 'remote_session',

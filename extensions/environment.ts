@@ -348,11 +348,19 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
-    // Out of the prompt until wanted; after the factory, so it is registered
-    // before it is taken out of the active set.
-    setTimeout(() => {
+    // Out of the prompt until wanted.
+    //
+    // Not on a timer: a timer fires while pi is still loading extensions, and
+    // action methods throw there ("Extension runtime not initialized"), taking
+    // the whole session down. before_agent_start is the first moment the
+    // runtime is up, and the flag means a tool loaded on purpose is not taken
+    // away again on the next turn.
+    let hidden = false;
+    pi.on('before_agent_start', async () => {
+        if (hidden) return;
+        hidden = true;
         pi.setActiveTools(pi.getActiveTools().filter((name) => !OWN.includes(name)));
-    }, 0);
+    });
 
     pi.on('session_shutdown', async () => {
         for (const environment of environments.values()) environment.connection.close();

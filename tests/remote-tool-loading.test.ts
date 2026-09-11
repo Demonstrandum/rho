@@ -40,17 +40,20 @@ const harness = () => {
             return active;
         },
         input: async (text: string) => handlers.get('input')?.({ text, source: 'interactive' }),
+        /**
+         * The first turn, which is when the tools are taken out of the active
+         * set. It cannot happen at load: pi refuses action methods while
+         * extensions are loading, and a timer there kills the session.
+         */
+        turn: async () => handlers.get('before_agent_start')?.({ text: '' }),
     };
 };
-
-/** The deactivation runs after the factory returns, as it must. */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 describe('the environment tool', () => {
     test('is registered but not active at startup', async () => {
         const h = harness();
         environment(h.pi as never);
-        await settle();
+        await h.turn();
         expect(h.registered).toContain('environment');
         expect(h.active).not.toContain('environment');
         // The tools it routes are untouched: those are pi's own, and removing
@@ -61,7 +64,7 @@ describe('the environment tool', () => {
     test('arrives when the conversation is about another machine', async () => {
         const h = harness();
         environment(h.pi as never);
-        await settle();
+        await h.turn();
         await h.input('connect your environment to that gpu node please');
         expect(h.active).toContain('environment');
     });
@@ -69,7 +72,7 @@ describe('the environment tool', () => {
     test('arrives when the skill is invoked', async () => {
         const h = harness();
         environment(h.pi as never);
-        await settle();
+        await h.turn();
         await h.input('/skill:remote');
         expect(h.active).toContain('environment');
     });
@@ -77,7 +80,7 @@ describe('the environment tool', () => {
     test('stays away for an unrelated conversation', async () => {
         const h = harness();
         environment(h.pi as never);
-        await settle();
+        await h.turn();
         await h.input('fix the failing test in tests/env-block.test.ts');
         expect(h.active).not.toContain('environment');
     });
@@ -87,7 +90,7 @@ describe('the remote_session tool', () => {
     test('is registered but not active at startup', async () => {
         const h = harness();
         remote(h.pi as never);
-        await settle();
+        await h.turn();
         expect(h.registered).toContain('remote_session');
         expect(h.active).not.toContain('remote_session');
     });
@@ -95,7 +98,7 @@ describe('the remote_session tool', () => {
     test('arrives when a long-lived session is asked for', async () => {
         const h = harness();
         remote(h.pi as never);
-        await settle();
+        await h.turn();
         await h.input('start a remote session on dev-box');
         expect(h.active).toContain('remote_session');
     });

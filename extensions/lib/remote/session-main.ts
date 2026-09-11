@@ -27,10 +27,19 @@ const die = (message: string): never => {
 
 if (verb === 'list') {
     const sessions = named();
+    let alive = 0;
     for (const session of sessions) {
-        process.stdout.write(`${session}\t${(await existing(session)) ? 'running' : 'stale'}\n`);
+        if (await existing(session)) {
+            alive += 1;
+            process.stdout.write(`${session}\trunning\n`);
+            continue;
+        }
+        // A socket with nothing behind it is litter from a broker that was
+        // killed: reporting it as a session means the next person tries to
+        // attach to something that cannot answer.
+        stop(session);
     }
-    if (sessions.length === 0) process.stdout.write('no sessions\n');
+    if (alive === 0) process.stdout.write('no sessions\n');
     process.exit(0);
 }
 

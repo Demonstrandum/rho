@@ -18,9 +18,9 @@ describe('the machine on a call row', () => {
     });
 
     test('is on the right when it ran elsewhere', () => {
-        const line = row({ command: 'uname -a' }, 'samuel@dev-box-1');
+        const line = row({ command: 'uname -a' }, 'samuel@dev-box');
         expect(line).toContain('uname -a');
-        expect(line.trimEnd().endsWith('(samuel@dev-box-1)')).toBe(true);
+        expect(line.trimEnd().endsWith('(samuel@dev-box)')).toBe(true);
     });
 
     test('names the laptop when a command was sent back to it', () => {
@@ -29,7 +29,7 @@ describe('the machine on a call row', () => {
 
     test('never exceeds the width, which crashes pi', () => {
         for (const width of [20, 30, 40, 74, 200]) {
-            const line = row({ command: 'x'.repeat(120) }, 'samuel@dev-box-1', width);
+            const line = row({ command: 'x'.repeat(120) }, 'samuel@dev-box', width);
             expect(visibleWidth(line)).toBeLessThanOrEqual(width);
         }
     });

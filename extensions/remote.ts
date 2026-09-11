@@ -73,6 +73,41 @@ const run = (
         child.stdin.end();
     });
 
+/**
+ * The session runner as one executable, for a machine with no runtime at all.
+ *
+ * Cached by a hash of the source rather than of the binary: two compilations
+ * of the same source are not byte-identical, and a key that changes every time
+ * is not a cache.
+ */
+async function compile(platform: 'linux-x64' | 'linux-arm64'): Promise<{ path: string; hash: string }> {
+    const here = remoteDir();
+    const hash = createHash('sha256')
+        .update(readFileSync(join(here, 'session-main.ts')))
+        .update(readFileSync(join(here, 'broker.ts')))
+        .update(readFileSync(join(here, 'protocol.ts')))
+        .update(platform)
+        .digest('hex')
+        .slice(0, 16);
+    mkdirSync(CACHE, { recursive: true });
+    const out = join(CACHE, `session-${platform}-${hash}`);
+    try {
+        if (statSync(out).size > 0) return { path: out, hash };
+    } catch {
+        // not compiled yet
+    }
+    const built = await run('bun', [
+        'build',
+        join(here, 'session-main.ts'),
+        '--compile',
+        `--target=bun-${platform}`,
+        '--outfile',
+        out,
+    ]);
+    if (built.code !== 0) throw new Error(`could not compile the session runner: ${built.err || built.out}`);
+    return { path: out, hash };
+}
+
 /** The session runner as one file, cached by a hash of its source. */
 async function bundle(): Promise<{ path: string; hash: string }> {
     const here = remoteDir();
@@ -94,13 +129,36 @@ async function bundle(): Promise<{ path: string; hash: string }> {
     return { path: out, hash };
 }
 
-/** Put the runner on the host if it is not there, and say how to start it. */
+/**
+ * Put the runner on the host if it is not there, and say how to start it.
+ *
+ * No setup on the far side, on any account: a machine with bun or node takes a
+ * small bundle, and a machine with neither takes a compiled executable, the
+ * same fallback the executor uses. Refusing a bare host was asking the person
+ * to install a runtime first, which is the thing this is supposed to avoid.
+ */
 async function place(host: string, say: (note: string) => void): Promise<string> {
-    const probe = await run('ssh', [host, 'command -v bun || command -v node || true']);
+    const probe = await run('ssh', [host, 'command -v bun || command -v node || true; echo ---; uname -m']);
     if (probe.code !== 0) throw new Error(`cannot reach ${host}: ${probe.err.trim() || 'ssh failed'}`);
-    const runtime = probe.out.trim().split('\n')[0]?.trim();
+    const [runtimeLine = '', machineLine = ''] = probe.out.split('---');
+    const runtime = runtimeLine.trim().split('\n')[0]?.trim();
+    const arm = machineLine.trim().startsWith('aarch64') || machineLine.trim().startsWith('arm64');
+
     if (runtime === undefined || runtime === '') {
-        throw new Error(`${host} has neither bun nor node, and the session runner needs one`);
+        say(`compiling the session runner for ${host}, which has no runtime`);
+        const { path, hash } = await compile(arm ? 'linux-arm64' : 'linux-x64');
+        const remote = `${REMOTE_DIR}/session-${hash}`;
+        const present = await run('ssh', [host, `test -x ${remote} && echo yes || echo no`]);
+        if (present.out.trim() !== 'yes') {
+            say(`copying the session runner to ${host}`);
+            const sent = await run(
+                'ssh',
+                [host, `mkdir -p ${REMOTE_DIR} && cat > ${remote}.part && chmod +x ${remote}.part && mv ${remote}.part ${remote}`],
+                readFileSync(path),
+            );
+            if (sent.code !== 0) throw new Error(`could not copy the session runner: ${sent.err.trim()}`);
+        }
+        return `./${remote}`;
     }
 
     const { path, hash } = await bundle();

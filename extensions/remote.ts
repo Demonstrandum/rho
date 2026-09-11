@@ -325,10 +325,22 @@ export default function (pi: ExtensionAPI) {
             const value = process.env[key];
             if (value !== undefined && value !== '') carried[key] = value;
         }
+
+        // Whatever this laptop is logged in with, including OAuth, which no
+        // environment variable can carry: pi keeps it in auth.json, and the
+        // session on the far side gets a config directory of its own holding
+        // a copy for as long as it runs.
+        let auth: string | null = null;
+        try {
+            auth = readFileSync(join(process.env.HOME ?? '', '.pi', 'agent', 'auth.json'), 'utf8');
+        } catch {
+            // nothing stored here; the environment variables above may still carry a key
+        }
+
         const started = await run(
             'ssh',
             [host, `${runner} serve ${name} ${address_.path ?? '$HOME'}`],
-            new TextEncoder().encode(JSON.stringify(carried)),
+            new TextEncoder().encode(JSON.stringify({ env: carried, auth })),
         );
         if (started.code !== 0) {
             throw new Error(started.err.trim() || started.out.trim() || `could not start ${name}`);

@@ -13,6 +13,9 @@
  */
 
 import { spawn } from 'node:child_process';
+import { mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { attach, Broker, existing, named, stop } from './broker';
 
 const [verb, name, ...rest] = process.argv.slice(2);
@@ -56,22 +59,64 @@ if (verb === 'stop') {
  * process's environment, and it dies with the session. argv is not an option
  * because `ps` shows it to every user on the box.
  */
-const readEnvFromStdin = async (): Promise<Record<string, string>> => {
-    if (process.stdin.isTTY) return {};
+interface Lent {
+    readonly env: Record<string, string>;
+    /** the contents of the laptop's auth.json, for OAuth logins and stored keys. */
+    readonly auth: string | null;
+}
+
+const readFromStdin = async (): Promise<Lent> => {
+    if (process.stdin.isTTY) return { env: {}, auth: null };
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
     const text = Buffer.concat(chunks).toString().trim();
-    if (text === '') return {};
+    if (text === '') return { env: {}, auth: null };
     try {
-        const parsed = JSON.parse(text) as Record<string, unknown>;
-        const out: Record<string, string> = {};
-        for (const [key, value] of Object.entries(parsed)) {
-            if (typeof value === 'string') out[key] = value;
+        const parsed = JSON.parse(text) as { env?: unknown; auth?: unknown };
+        const env: Record<string, string> = {};
+        for (const [key, value] of Object.entries((parsed.env ?? {}) as Record<string, unknown>)) {
+            if (typeof value === 'string') env[key] = value;
         }
-        return out;
+        return { env, auth: typeof parsed.auth === 'string' ? parsed.auth : null };
     } catch {
-        return {};
+        return { env: {}, auth: null };
     }
+};
+
+/**
+ * A config directory of this session's own, holding the laptop's credentials.
+ *
+ * An API key can travel as an environment variable; an OAuth login cannot,
+ * because pi reads it from auth.json. Writing that into the host's own
+ * ~/.pi/agent would leave the person's tokens on a machine they did not put
+ * them on, and they would outlive the session and end up in backups.
+ *
+ * So the session gets its own directory, mode 0700, with everything else in
+ * the real config directory symlinked in so settings, packages and extensions
+ * still resolve. PI_CODING_AGENT_DIR points pi at it. It is removed when the
+ * session ends.
+ */
+const lendCredentials = (auth: string, name: string): string => {
+    const real = join(process.env.HOME ?? '/tmp', '.pi', 'agent');
+    const dir = join(process.env.XDG_RUNTIME_DIR ?? tmpdir(), `rho-session-${name}`);
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+
+    try {
+        for (const entry of readdirSync(real)) {
+            if (entry === 'auth.json') continue;
+            try {
+                symlinkSync(join(real, entry), join(dir, entry));
+            } catch {
+                // an entry that cannot be linked is one pi will do without
+            }
+        }
+    } catch {
+        // no config directory on the far side: the credentials alone will do
+    }
+
+    writeFileSync(join(dir, 'auth.json'), auth, { mode: 0o600 });
+    return dir;
 };
 
 if (verb === 'serve') {
@@ -83,12 +128,13 @@ if (verb === 'serve') {
     // Detach unless asked not to: `ssh host rho-session serve` returns as soon
     // as the session is up, and the session stays.
     if (process.env.RHO_SESSION_FOREGROUND !== '1') {
-        const forwarded = await readEnvFromStdin();
+        const lent = await readFromStdin();
+        const credentials = lent.auth === null ? {} : { PI_CODING_AGENT_DIR: lendCredentials(lent.auth, name) };
         const child = spawn(process.execPath, [import.meta.filename, 'serve', name, ...rest], {
             cwd,
             detached: true,
             stdio: 'ignore',
-            env: { ...process.env, ...forwarded, RHO_SESSION_FOREGROUND: '1' },
+            env: { ...process.env, ...lent.env, ...credentials, RHO_SESSION_FOREGROUND: '1' },
         });
         child.unref();
         // Wait for the socket rather than claiming success: a session that

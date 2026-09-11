@@ -20,6 +20,8 @@ export interface Connection {
     request(body: Request, signal?: AbortSignal): Promise<Reply>;
     /** Output as it is produced, for a tool that wants to stream. */
     onEvent(handler: (event: Event) => void): () => void;
+    /** An exit that has already been seen, so waiting for it cannot hang. */
+    exited(id: ProcessId): Extract<Event, { kind: 'exited' }> | undefined;
     close(): void;
     readonly alive: boolean;
 }
@@ -50,6 +52,8 @@ export function connectOverProcess(name: string, command: string, args: readonly
     const decoder = new Decoder();
     const waiting = new Map<number, (reply: Reply) => void>();
     const listeners = new Set<(event: Event) => void>();
+    /** Recent exits, so a process that finished before anyone waited is not waited for forever. */
+    const exits = new Map<ProcessId, Extract<Event, { kind: 'exited' }>>();
     let next = 1;
     let alive = true;
     // Distinct from `alive`, because closing deliberately still has to fail
@@ -79,6 +83,11 @@ export function connectOverProcess(name: string, command: string, args: readonly
                 waiting.delete(frame.id);
                 settle?.(frame.body);
             } else if (frame.type === 'event') {
+                if (frame.body.kind === 'exited') {
+                    exits.set(frame.body.process, frame.body);
+                    // Bounded: this is a race guard, not a history.
+                    if (exits.size > 256) exits.delete(exits.keys().next().value as ProcessId);
+                }
                 for (const listener of listeners) listener(frame.body);
             }
         }
@@ -122,6 +131,9 @@ export function connectOverProcess(name: string, command: string, args: readonly
         onEvent(handler) {
             listeners.add(handler);
             return () => listeners.delete(handler);
+        },
+        exited(id) {
+            return exits.get(id);
         },
         close() {
             alive = false;
@@ -195,21 +207,53 @@ export function operationsFor(connection: Connection) {
                 cwd: string,
                 options: { onData?: (chunk: Buffer) => void; signal?: AbortSignal; timeout?: number },
             ): Promise<{ exitCode: number | null }> => {
+                // The tool hands us the directory the session was started in,
+                // which is a path on the laptop and means nothing here. Passing
+                // it on makes the spawn fail with ENOENT naming the shell,
+                // because that is what posix_spawn reports for a missing
+                // working directory. The executor's own directory is the one
+                // the person set with /cwd, so it is left alone.
+                void cwd;
                 const started = await connection.request({
                     kind: 'spawn',
                     command,
-                    cwd,
                     ...(options.timeout === undefined ? {} : { timeout: options.timeout * 1000 }),
                 });
                 const { process: id } = expect(started, 'spawned');
 
+                // Counted, because the far side keeps everything and the
+                // stream is only for showing progress: bytes produced before
+                // this listener exists would otherwise be lost, which is how a
+                // fast command came back with an exit code and no output.
+                let streamed = { stdout: 0, stderr: 0 };
                 const stop = connection.onEvent((event) => {
-                    if (event.kind === 'output' && event.process === id) options.onData?.(Buffer.from(event.data));
+                    if (event.kind !== 'output' || event.process !== id) return;
+                    streamed[event.stream] += event.data.byteLength;
+                    options.onData?.(Buffer.from(event.data));
                 });
                 const abort = () => void connection.request({ kind: 'signal', process: id, signal: 'KILL' });
                 options.signal?.addEventListener('abort', abort, { once: true });
                 try {
                     const finished = await waitFor(connection, id);
+                    if (finished !== null) {
+                        // Whatever the stream missed, read back from the far
+                        // side, so the output is the process's, not the
+                        // network's timing.
+                        for (const stream of ['stdout', 'stderr'] as const) {
+                            const total = stream === 'stdout' ? finished.stdoutBytes : finished.stderrBytes;
+                            if (total <= streamed[stream]) continue;
+                            const rest = await connection.request({
+                                kind: 'read-range',
+                                process: id,
+                                stream,
+                                offset: streamed[stream],
+                                length: total - streamed[stream],
+                            });
+                            if (rest.kind === 'bytes' && rest.data.byteLength > 0) {
+                                options.onData?.(Buffer.from(rest.data));
+                            }
+                        }
+                    }
                     return { exitCode: finished?.code ?? null };
                 } finally {
                     stop();
@@ -226,6 +270,12 @@ export function waitFor(
     connection: Connection,
     id: ProcessId,
 ): Promise<Extract<Event, { kind: 'exited' }> | null> {
+    // A short command can finish before this is called, and an exit that has
+    // already happened is not sent again: waiting for it then never returns,
+    // which is a session that hangs rather than a command that failed. The
+    // connection remembers recent exits for exactly this.
+    const already = connection.exited(id);
+    if (already !== undefined) return Promise.resolve(already);
     return new Promise((settle) => {
         const stop = connection.onEvent((event) => {
             if (event.kind === 'exited' && event.process === id) {

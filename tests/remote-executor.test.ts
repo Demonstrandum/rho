@@ -200,6 +200,43 @@ describe('executor', () => {
         expect(chunks.join('').trim()).toBe('streamed');
     });
 
+    test('a command that finishes instantly still returns its output', async () => {
+        // Both races in one: the exit can land before anything waits for it,
+        // and the output before anything listens. Either one lost the result,
+        // and the first of them hung the session instead of failing.
+        const operations = operationsFor(connection);
+        for (let attempt = 0; attempt < 10; attempt++) {
+            const chunks: string[] = [];
+            const result = await operations.bash.exec('echo instant', work, {
+                onData: (chunk) => chunks.push(chunk.toString()),
+            });
+            expect(result.exitCode).toBe(0);
+            expect(chunks.join('').trim()).toBe('instant');
+        }
+    });
+
+    test('the laptop\u2019s working directory is not imposed on the far side', async () => {
+        // pi's bash tool passes the directory the session started in, which is
+        // a path on the other machine: passing it on made every command fail
+        // with ENOENT naming the shell, because that is what posix_spawn says
+        // about a missing cwd.
+        const operations = operationsFor(connection);
+        const chunks: string[] = [];
+        const result = await operations.bash.exec('pwd', '/Users/nobody/not/here', {
+            onData: (chunk) => chunks.push(chunk.toString()),
+        });
+        expect(result.exitCode).toBe(0);
+        expect(chunks.join('').trim()).not.toBe('');
+    });
+
+    test('commands run in the login shell of the account', async () => {
+        const operations = operationsFor(connection);
+        const chunks: string[] = [];
+        await operations.bash.exec('echo "$0"', work, { onData: (chunk) => chunks.push(chunk.toString()) });
+        // Whatever the shell is, it is the account's own, not a hardcoded one.
+        expect(chunks.join('').trim()).toBe(process.env.SHELL ?? '/bin/sh');
+    });
+
     test("pi's read and write operations run through the connection", async () => {
         const operations = operationsFor(connection);
         const path = join(work, 'ops.txt');

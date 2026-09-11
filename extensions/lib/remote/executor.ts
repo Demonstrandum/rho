@@ -19,7 +19,7 @@ import type { ChildProcess } from 'node:child_process';
 import { accessSync, constants as fsConstants } from 'node:fs';
 import { constants } from 'node:fs';
 import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { hostname } from 'node:os';
+import { hostname, userInfo } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { Decoder, encode, PROTOCOL_VERSION } from './protocol';
 import type { Event, Frame, ProcessId, Reply, Request } from './protocol';
@@ -34,28 +34,35 @@ interface Held {
 }
 
 /**
- * A shell that exists on this machine.
+ * The shell of the account this is running as.
  *
- * `bash` is not a path, and NixOS has no /bin/bash: a non-login connection can
- * arrive with no PATH at all, and then spawning "bash" fails with ENOENT. The
- * login shell is asked first because it is what the person would have got,
- * then PATH, then /bin/sh, which the standard requires to exist.
+ * A command here should behave as it would if the person typed it on this
+ * machine: their shell, their profile, their aliases and PATH. So it is their
+ * login shell, from SHELL or from the password database, run with -l so the
+ * profile is read.
+ *
+ * /bin/sh is the last resort rather than a preference. It exists because a
+ * shell that is named and missing has to fail as a command, not as a dead
+ * connection.
  */
 const shell = (): string => {
-    const candidates: string[] = [];
-    const login = process.env.SHELL;
-    if (login !== undefined && login !== '') candidates.push(login);
-    for (const dir of (process.env.PATH ?? '').split(':')) {
-        if (dir !== '') candidates.push(join(dir, 'bash'));
-    }
-    candidates.push('/run/current-system/sw/bin/bash', '/usr/bin/bash', '/bin/bash', '/bin/sh');
-    for (const candidate of candidates) {
+    const fromEnv = process.env.SHELL;
+    if (fromEnv !== undefined && fromEnv !== '') {
         try {
-            accessSync(candidate, fsConstants.X_OK);
-            return candidate;
+            accessSync(fromEnv, fsConstants.X_OK);
+            return fromEnv;
         } catch {
-            // not this one
+            // named but not there; fall through to the password database
         }
+    }
+    try {
+        const me = userInfo().shell;
+        if (me !== null && me !== '') {
+            accessSync(me, fsConstants.X_OK);
+            return me;
+        }
+    } catch {
+        // no usable entry
     }
     return '/bin/sh';
 };

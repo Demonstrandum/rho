@@ -13,7 +13,7 @@
 
 import { existsSync, statSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve, sep } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import type { AutocompleteItem } from '@earendil-works/pi-tui';
 import {
     createBashTool,
@@ -30,6 +30,7 @@ import {
 import type { TSchema } from '@earendil-works/pi-ai';
 import { PersistedState } from './lib/state-store';
 import { config } from './lib/config';
+import { collapseHome } from './lib/text';
 
 const TARGET_VERSION = 1;
 
@@ -96,14 +97,6 @@ function isDir(p: string): boolean {
     } catch {
         return false;
     }
-}
-
-// collapse an absolute path back to ~ notation for display and insertion.
-function collapseHome(abs: string): string {
-    const home = homedir();
-    if (abs === home) return '~';
-    if (abs.startsWith(home + sep)) return `~${abs.slice(home.length)}`;
-    return abs;
 }
 
 // primary column is the resolved full path (~-subbed); when the user's own

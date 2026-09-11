@@ -33,6 +33,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { Box, Container, type Component } from '@earendil-works/pi-tui';
 import { config } from './lib/config';
+import { isBlank as isBlankText, OSC } from './lib/text';
 
 // paddingY and bgFn are `private` in Box's declaration, so reaching them needs a
 // cast. naming exactly what is reached keeps it to those two members instead of
@@ -45,14 +46,7 @@ interface BoxInternals {
 const LOWER_HALF = '\u2584';
 const UPPER_HALF = '\u2580';
 
-// CSI colour runs and OSC sequences (shell-integration zone markers) both
-// occupy no columns, so a line is blank when only those remain.
-const CSI = /\x1b\[[0-9;]*m/g;
-const OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
-
-function isBlank(line: string): boolean {
-    return line.replace(CSI, '').replace(OSC, '').trim() === '';
-}
+const isBlank = isBlankText;
 
 /**
  * an inline image reserves its height as blank lines: after the escape sequence

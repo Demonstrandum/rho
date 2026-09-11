@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import type { Rgb } from '../extensions/lib/utils';
-import { toFrames, playFrames, parseVerb, formatDuration, formatVerb } from '../extensions/spinner';
+import { toFrames, playFrames, parseVerb, formatVerb } from '../extensions/spinner';
 
 const show = (s: string) => s.replaceAll('\x1b', '\\e');
 
@@ -81,17 +81,6 @@ test('parseVerb pulls sigil, preposition and trail', () => {
     });
     // the earlier comma case: trail keeps leading punctuation.
     expect(parseVerb('xyz <in>, really I did').trail).toBe(', really I did');
-});
-
-test('formatDuration renders seconds then minutes', () => {
-    const rows: [number, string][] = [
-        [0, '0s'], [999, '1s'], [12000, '12s'], [65000, '1m 5s'], [3600000, '60m 0s'],
-    ];
-    for (const [ms, want] of rows) {
-        const got = formatDuration(ms);
-        console.log(`formatDuration(${ms}) = ${got}`);
-        expect(got).toBe(want);
-    }
 });
 
 test('formatVerb colours sigil brighter than the rest, plain in palette mode', () => {

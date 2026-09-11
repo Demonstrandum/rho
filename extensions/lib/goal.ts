@@ -21,6 +21,7 @@ import type { Api, Model, Tool, ToolCall } from '@earendil-works/pi-ai';
 import type { ExtensionContext, SessionEntry } from '@earendil-works/pi-coding-agent';
 import { config } from './config';
 import { forcedToolChoice, resolveReviewer } from './audit';
+import { omitTail } from './text';
 
 const TOOL_NAME = 'report_verdict';
 
@@ -117,10 +118,7 @@ export function classifyFailure(message: string | undefined): FatalFailure | nul
 /** per-block cap, so one enormous tool result cannot crowd out every other turn. */
 const BLOCK_CHARS = 4000;
 
-function clip(text: string, limit = BLOCK_CHARS): string {
-    const trimmed = text.trim();
-    return trimmed.length <= limit ? trimmed : `${trimmed.slice(0, limit)}\n[...${trimmed.length - limit} characters omitted]`;
-}
+const clip = (text: string, limit = BLOCK_CHARS): string => omitTail(text, limit);
 
 /** one entry as the judge sees it, or null for an entry that carries no evidence. */
 function renderEntry(entry: SessionEntry): string | null {

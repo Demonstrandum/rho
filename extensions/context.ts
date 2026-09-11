@@ -29,6 +29,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import { abbreviate, percent } from './lib/text';
 
 const ENTRY_TYPE = 'rho-context-readout';
 
@@ -72,22 +73,9 @@ interface Readout {
 // pi estimates tokens at ~4 chars/token; match that for the category split.
 const est = (s: string): number => Math.ceil(s.length / 4);
 
-function fmtTok(n: number): string {
-    if (n < 1000) return String(n);
-    const k = n / 1000;
-    if (k < 1000) return `${round1(k)}k`;
-    return `${round1(k / 1000)}m`;
-}
-
-function fmtWindow(n: number): string {
-    if (n >= 1_000_000) return `${trimZero(n / 1_000_000)}M`;
-    if (n >= 1000) return `${trimZero(n / 1000)}K`;
-    return String(n);
-}
-
-const round1 = (x: number): number => Math.round(x * 10) / 10;
-const trimZero = (x: number): string => String(round1(x)).replace(/\.0$/, '');
-const pct1 = (part: number, whole: number): string => (whole > 0 ? ((part / whole) * 100).toFixed(1) : '0.0');
+const fmtTok = (n: number): string => abbreviate(n, 'fine');
+const fmtWindow = fmtTok;
+const pct1 = percent;
 
 // largest-remainder apportionment: split `total` cells across weights so the
 // parts are integers that sum to exactly `total`.

@@ -19,6 +19,7 @@ import {
     createAgentSessionFromServices,
     createAgentSessionServices,
 } from '@earendil-works/pi-coding-agent';
+import { spawnSync } from 'node:child_process';
 import { RpcLink } from '../extensions/lib/remote/rpc-link';
 import { RemoteActions, RemoteState } from '../extensions/lib/remote/proxy-session';
 import { remoteSession } from '../extensions/lib/remote/remote-session';
@@ -53,7 +54,18 @@ const SSH_FLAGS = [
     '-o',
     'BatchMode=yes',
 ];
-const RUNNER = process.env.RHO_REMOTE_RUNNER ?? 'bun .cache/rho/remote/session-runner.js';
+const RUNNER_FILE = '.cache/rho/remote/session-runner.js';
+const RUNNER = process.env.RHO_REMOTE_RUNNER ?? `bun ${RUNNER_FILE}`;
+
+// The runner is installed by /remote create; a client that arrives before it
+// exists says so rather than failing with ssh's exit code, which names nothing.
+const ready = spawnSync('ssh', [...SSH_FLAGS, target, `test -s ${RUNNER_FILE}`], { stdio: 'ignore' });
+if (ready.status !== 0) {
+    process.stderr.write(
+        `${target} has no session runner installed: /remote create ${name} ${target} puts one there\n`,
+    );
+    process.exit(1);
+}
 
 const link = new RpcLink('ssh', [...SSH_FLAGS, target, `${RUNNER} attach ${name}`], {
     // No deadline on the link: a model call takes as long as it takes, and the

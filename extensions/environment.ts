@@ -19,6 +19,7 @@
  */
 
 import { Type } from 'typebox';
+import { Text } from '@earendil-works/pi-tui';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
     createBashTool,
@@ -143,25 +144,73 @@ export default function (pi: ExtensionAPI) {
         return facts.join('\n');
     };
 
+    /**
+     * One line on screen, the facts underneath for the model.
+     *
+     * The default renderer prints the customType as a label and then the raw
+     * content, so an xml block meant for the model arrives on screen as
+     * "[environment] <environment> ..." with its own tags and a blank line
+     * either side. The person needs to know which machine they are on; the
+     * tags are for the reader that parses them.
+     */
+    pi.registerMessageRenderer('environment', (message, options, theme) => {
+        const details = message.details as { host?: string; cwd?: string; shell?: string } | undefined;
+        const line =
+            details?.host === undefined
+                ? `${theme.fg('accent', 'environment')}  ${theme.fg('dim', 'local')}`
+                : [
+                      theme.fg('accent', 'environment'),
+                      theme.fg('text', details.host),
+                      theme.fg('dim', details.cwd ?? ''),
+                      theme.fg('dim', (details.shell ?? '').split('/').pop() ?? ''),
+                  ].join('  ');
+        // Expanded shows what the model was told, which is the thing worth
+        // checking when it behaves as though it is on the wrong machine.
+        const content = typeof message.content === 'string' ? message.content : '';
+        const text = options.expanded ? `${line}\n${theme.fg('dim', content)}` : line;
+        return new Text(text, options.outputPad, 0);
+    });
+
     /** Said out loud, because a change of machine the model cannot see is a trap. */
     const announce = async (environment: Environment | null): Promise<void> => {
         // The context-mode prompt tells the model to prefer ctx_batch_execute
         // over bash, and that advice is wrong here: those tools run on this
         // machine whatever is attached. Saying so where the switch is
         // announced is the only place the model reads both facts together.
-        const content =
-            environment === null
-                ? '<environment>\nworking locally on this machine\nevery tool acts here, including ctx_execute and ctx_batch_execute\n</environment>'
-                : [
-                      '<environment>',
-                      await describe(environment),
-                      'bash, read, write and edit act on this machine.',
-                      'ctx_execute, ctx_execute_file and ctx_batch_execute do not: they run on the',
-                      'laptop and are refused while this is attached, whatever the context-mode',
-                      'guidance says. use bash for commands here.',
-                      '</environment>',
-                  ].join('\n');
-        pi.sendMessage({ customType: 'environment', content, display: true }, { deliverAs: 'followUp' });
+        if (environment === null) {
+            pi.sendMessage(
+                {
+                    customType: 'environment',
+                    content:
+                        '<environment>\nworking locally on this machine\nevery tool acts here, including ctx_execute and ctx_batch_execute\n</environment>',
+                    display: true,
+                },
+                { deliverAs: 'followUp' },
+            );
+            return;
+        }
+
+        const facts = await describe(environment);
+        const state = published[PUBLISHED];
+        pi.sendMessage(
+            {
+                customType: 'environment',
+                content: [
+                    '<environment>',
+                    facts,
+                    'bash, read, write and edit act on this machine.',
+                    'ctx_execute, ctx_execute_file and ctx_batch_execute do not: they run on the',
+                    'laptop and are refused while this is attached, whatever the context-mode',
+                    'guidance says. use bash for commands here.',
+                    '</environment>',
+                ].join('\n'),
+                display: true,
+                // What the renderer draws, so the screen shows a line and the
+                // model still gets the whole block.
+                details: { host: environment.host, cwd: state?.cwd, shell: state?.shell },
+            },
+            { deliverAs: 'followUp' },
+        );
     };
 
     const attach = async (name: string, address: string, note: (text: string) => void): Promise<Environment> => {

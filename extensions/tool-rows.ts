@@ -210,16 +210,21 @@ if (titles || detail || execPreview) {
         // so the callPreview path above never sees it, and without this the
         // only sign of where a command ran was a marker line pushed into the
         // output, which is noise in the model's context and ugly on screen.
-        const marked = (component: Component, where: string): Component => ({
+        const marked = (component: Component, where: string, rowTheme: RowTheme): Component => ({
             render(width: number): string[] {
                 const lines = component.render(width);
                 const first = lines[0];
                 if (first === undefined) return lines;
-                const tag = truncate(`(${where})`, Math.max(4, width - 10));
-                const room = Math.max(4, width - visibleWidth(tag) - 1);
-                const head = truncate(first, room);
-                const pad = Math.max(1, width - visibleWidth(head) - visibleWidth(tag));
-                return [`${head}${' '.repeat(pad)}${tag}`, ...lines.slice(1)];
+                const tag = rowTheme.fg('dim', truncate(`(${where})`, Math.max(4, width - 10)));
+                const tagWidth = visibleWidth(tag);
+                // the row a tool draws is padded to the full width, so the
+                // trailing space is measured as content: trimming it first is
+                // what stops a line that fits being truncated to make room.
+                const head = first.trimEnd();
+                const room = Math.max(4, width - tagWidth - 1);
+                const shown = visibleWidth(head) > room ? truncate(head, room) : head;
+                const pad = Math.max(1, width - visibleWidth(shown) - tagWidth);
+                return [`${shown}${' '.repeat(pad)}${tag}`, ...lines.slice(1)];
             },
             invalidate: () => component.invalidate(),
             handleMouse: (event: TuiMouseEvent) => component.handleMouse?.(event),
@@ -230,7 +235,7 @@ if (titles || detail || execPreview) {
             return (args, theme, context) => {
                 const where = whereOf(context.args ?? args);
                 const component = inner(args, theme, context);
-                return where === undefined ? component : marked(component, where);
+                return where === undefined ? component : marked(component, where, adapt(theme));
             };
         }
         return (args, theme, context) => {
@@ -241,7 +246,7 @@ if (titles || detail || execPreview) {
             const unwrapped = last instanceof Retitled ? last.inner : last;
             const retitled = new Retitled(inner(args, theme, { ...context, lastComponent: unwrapped }), name, title);
             const where = whereOf(context.args ?? args);
-            return where === undefined ? retitled : marked(retitled, where);
+            return where === undefined ? retitled : marked(retitled, where, adapt(theme));
         };
     };
 

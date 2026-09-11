@@ -145,6 +145,8 @@ export default function (pi: ExtensionAPI) {
      * point -- the work is on a host that stays up, and this laptop can close.
      */
     let viewing: { name: string; host: string; child: ReturnType<typeof spawn> } | null = null;
+    /** A viewer that closed by itself, so input refuses rather than running here. */
+    let lost: { name: string; host: string } | null = null;
 
     const show = (text: string): void => {
         pi.sendMessage({ customType: 'remote', content: text, display: true }, {});
@@ -202,16 +204,46 @@ export default function (pi: ExtensionAPI) {
         child.on('close', () => {
             if (viewing?.name === name) {
                 viewing = null;
-                show(`Disconnected from ${name}. It is still running on ${host}.`);
+                // Not the same as leaving on purpose. Until somebody says what
+                // to do, typing here must not quietly become a local turn: the
+                // person believes they are talking to the session on the host,
+                // and a local agent answering in its place is the same silent
+                // wrong-machine failure the environment used to have.
+                lost = { name, host };
+                show(
+                    `The viewer for ${name} closed. It is still running on ${host}.\n` +
+                        `Typing here will not reach it: /remote connect ${name} to attach again, ` +
+                        'or /remote disconnect to work locally.',
+                );
             }
         });
     };
 
     // Typing goes to the session being viewed, not to a local agent.
-    pi.on('input', async (event) => {
-        if (viewing === null || event.source === 'extension') return { action: 'continue' as const };
+    pi.on('input', async (event, ctx) => {
+        if (event.source === 'extension') return { action: 'continue' as const };
+        // Commands always work: they are how the person gets out of this.
         if (event.text.startsWith('/')) return { action: 'continue' as const };
-        viewing.child.stdin?.write(`${JSON.stringify({ type: 'prompt', message: event.text })}\n`);
+
+        if (viewing === null) {
+            if (lost === null) return { action: 'continue' as const };
+            ctx.ui.notify(
+                `Not connected to ${lost.name} any more, so that went nowhere. ` +
+                    `/remote connect ${lost.name} attaches again; /remote disconnect works here instead.`,
+                'error',
+            );
+            return { action: 'handled' as const };
+        }
+
+        const stdin = viewing.child.stdin;
+        if (stdin === null || stdin === undefined || stdin.destroyed) {
+            const { name, host } = viewing;
+            viewing = null;
+            lost = { name, host };
+            ctx.ui.notify(`The connection to ${name} is closed, so that was not sent.`, 'error');
+            return { action: 'handled' as const };
+        }
+        stdin.write(`${JSON.stringify({ type: 'prompt', message: event.text })}\n`);
         return { action: 'handled' as const };
     });
 
@@ -411,12 +443,22 @@ export default function (pi: ExtensionAPI) {
 
             if (verb === 'disconnect') {
                 if (viewing === null) {
-                    ctx.ui.notify('Not viewing anything.', 'info');
+                    // Clearing this is what makes typing work again after a
+                    // viewer died: it is the deliberate choice to work here.
+                    const was = lost;
+                    lost = null;
+                    ctx.ui.notify(
+                        was === null
+                            ? 'Not viewing anything.'
+                            : `Left ${was.name}; it is still running on ${was.host}. Working locally.`,
+                        'info',
+                    );
                     return;
                 }
                 const { name, host } = viewing;
                 viewing.child.kill('SIGTERM');
                 viewing = null;
+                lost = null;
                 // Leaving is not stopping: the session stays up, which is the
                 // difference between this and an ssh that owns the agent.
                 ctx.ui.notify(`Left ${name}. It is still running on ${host}.`, 'info');

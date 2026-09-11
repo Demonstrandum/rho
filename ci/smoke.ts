@@ -325,8 +325,12 @@ async function main(): Promise<number> {
             // let the startup header settle, type a prompt, let the turn finish,
             // then quit with two ctrl+c.
             { afterSeconds: 6, text: 'run the smoke check\\r' },
+            // the theme picker: open it, let one frame of the card draw, leave
+            // it without choosing.
+            { afterSeconds: 18, text: '/theme-picker\\r' },
+            { afterSeconds: 4, text: '\\033' },
             // ctrl+d quits when the editor is empty; ctrl+c only clears it.
-            { afterSeconds: 18, text: '\\004' },
+            { afterSeconds: 2, text: '\\004' },
             { afterSeconds: 2, text: '\\004' },
             { afterSeconds: 4, text: '' },
         ]),
@@ -338,6 +342,7 @@ async function main(): Promise<number> {
         ['prompts', 'skills', 'commands', 'themes'].every((label) => screen.includes(label)),
         tail(screen, 60));
     check('the reply rendered', screen.includes(REPLY_SWAPPED), tail(screen, 60));
+    check('the theme picker opened', screen.includes('enter keep'), tail(screen, 60));
     check('exits on ctrl+d', tui.code === 0, `exit ${tui.code}\n${tail(screen, 20)}`);
     checkNoCrash('terminal session', tui);
 

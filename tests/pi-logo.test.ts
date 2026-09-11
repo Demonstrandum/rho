@@ -402,19 +402,27 @@ test('the renderer is a pure function of its inputs', () => {
 
 // the guard that started all this: one implementation, two callers.
 
-test('startup and the demo both drive the shared module, holding no copy', () => {
+test('the intro card and the demo both drive the shared module, holding no copy', () => {
     const root = join(import.meta.dir, '..');
     const sources = {
-        'extensions/startup.ts': readFileSync(join(root, 'extensions/startup.ts'), 'utf8'),
+        'extensions/lib/intro-card.ts': readFileSync(join(root, 'extensions/lib/intro-card.ts'), 'utf8'),
         'demo/preview-animation.ts': readFileSync(join(root, 'demo/preview-animation.ts'), 'utf8'),
     };
     for (const [name, src] of Object.entries(sources)) {
-        expect(`${name} imports pi-logo: ${src.includes('lib/pi-logo')}`).toBe(`${name} imports pi-logo: true`);
+        expect(`${name} imports pi-logo: ${src.includes('pi-logo')}`).toBe(`${name} imports pi-logo: true`);
         expect(`${name} calls renderLogoLines: ${src.includes('renderLogoLines(')}`).toBe(`${name} calls renderLogoLines: true`);
         // the shapes and the trace constants live in the module alone.
         for (const symbol of ['P_SHIMMER:', 'RHO_SHIMMER:', 'TRACE_TAIL', 'PI_LIFT']) {
             expect(`${name} redefines ${symbol}: ${src.includes(`const ${symbol}`)}`)
                 .toBe(`${name} redefines ${symbol}: false`);
         }
+    }
+    // every place that plays the intro plays the same one.
+    for (const caller of ['extensions/startup.ts', 'extensions/theme.ts']) {
+        const src = readFileSync(join(root, caller), 'utf8');
+        expect(`${caller} builds its own frame: ${src.includes('renderLogoLines(')}`)
+            .toBe(`${caller} builds its own frame: false`);
+        expect(`${caller} plays the card: ${src.includes('createIntro(')}`)
+            .toBe(`${caller} plays the card: true`);
     }
 });

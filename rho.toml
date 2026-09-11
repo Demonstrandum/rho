@@ -67,6 +67,17 @@ max-height-fraction = 0.4
 # resume, when the directory still exists
 remember = true
 
+[personality]
+# the file /personality reads from the working tree when no argument is
+# given and no personality is set. an empty string disables the lookup
+project-file = "PERSONALITY.md"
+# load the project file at session start, before the first turn, so it
+# lands in the system prompt rather than in the conversation
+auto = true
+# store the personality for this session and restore it on a resume, in
+# the mode it was applied in
+remember = true
+
 [rewind]
 # when pi-rewind takes a checkpoint of the working directory each turn.
 # git: only inside a git work tree, and never in the home directory,
@@ -179,8 +190,10 @@ read-emoji = "eyes"
 # has that surface; for a plain bot the call fails once and is dropped
 typing = true
 # what the status line rotates through while a turn runs. slack prefixes
-# each with the app name. up to ten
-loading-messages = [ "is reading it", "is working on it", "is still on it" ]
+# each with the app name. up to ten. the empty array (the default)
+# draws from extensions/assets/maxims.txt, the same pool the spinner
+# uses, so one place decides what the agent says while it works
+loading-messages = []
 # also forward the first reply of an exchange as a message, the way the
 # daemon version did. the status line already says the message landed,
 # so this costs a message in the thread for nothing unless the app has
@@ -243,6 +256,27 @@ tight-after-tool-rows = true
 # skip pi's IdleStatus, which parks two blank rows in the dock while idle.
 # needs terminal.clearOnShrink, which clear-on-shrink.ts sets
 hide-idle-status = true
+
+[theme]
+# apply a theme as its name passes under the cursor in the /theme
+# completion menu, and put the old one back if nothing is chosen
+preview-on-focus = true
+# write a chosen theme to pi's settings, so it survives a restart the
+# way one picked in /settings does. false keeps it for this session
+persist = true
+
+[tools]
+# name a tool row by its derived display name rather than the name the
+# model calls: slack_reply reads "slack reply", ctx_batch_execute reads
+# "batch". a namespace prefix (ctx, mcp) is dropped
+titles = true
+# give a tool that renders nothing but its name a subject and a quoted
+# first line of whatever text it sends, with the rest on expand
+detail = true
 # shorten ctx_execute / ctx_execute_file / ctx_batch_execute tool rows to
 # one highlighted line each, expanding to the full command and output
 exec-preview = true
+
+# display names for particular tools, as tool-name = "shown name".
+# overrides the derivation, e.g. ctx_execute = "run"
+[tools.names]

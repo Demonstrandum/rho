@@ -109,6 +109,8 @@ const repoName = (repo: string): string =>
 export default function (pi: ExtensionAPI) {
     /** Where each named session lives, so connect and stop need only the name. */
     const hosts = new Map<string, string>();
+    /** A project's worktree, so connecting to it starts the session in the right directory. */
+    const worktrees = new Map<string, { host: string; path: string }>();
 
     /**
      * Clone on the host using the laptop's credentials.
@@ -133,6 +135,13 @@ export default function (pi: ExtensionAPI) {
         say(`cloning ${name} on ${host}`);
         const script = [
             `set -e`,
+            // The host may never have spoken to this cloud before, and a first
+            // clone otherwise dies on "Host key verification failed" with no
+            // way to answer the prompt: there is no terminal on this side of
+            // the ssh call. accept-new trusts an unknown host once and still
+            // refuses a host whose key has changed, which is the case that
+            // matters.
+            `export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new"`,
             `mkdir -p ${root}/checkout ${root}/worktrees`,
             // Idempotent: running it twice fetches rather than failing, so a
             // second worktree on an existing project is one command.
@@ -185,7 +194,7 @@ export default function (pi: ExtensionAPI) {
         description:
             'run the session on another machine: /remote create <name> user@host, /remote connect <name>, /remote list <user@host>',
         getArgumentCompletions: (prefix) => {
-            const words = ['create', 'connect', 'list', 'stop', ...hosts.keys()];
+            const words = ['create', 'connect', 'project', 'list', 'stop', ...hosts.keys(), ...worktrees.keys()];
             const found = words.filter((word) => word.startsWith(prefix));
             return found.length > 0 ? found.map((word) => ({ value: word, label: word })) : null;
         },
@@ -207,6 +216,39 @@ export default function (pi: ExtensionAPI) {
                 return;
             }
 
+            if (verb === 'project') {
+                // /remote project <repo> <project/branch> [user@host]
+                if (first === undefined || second === undefined) {
+                    ctx.ui.notify('Usage: /remote project <repo> <project/branch> [user@host]', 'error');
+                    return;
+                }
+                const host = parts[3] ?? [...hosts.values()][0];
+                if (host === undefined) {
+                    ctx.ui.notify('No host known yet: /remote project <repo> <project/branch> user@host', 'error');
+                    return;
+                }
+                const [projectName, ...branchParts] = second.split('/');
+                const branch = branchParts.join('/') || 'main';
+                if (projectName === undefined) {
+                    ctx.ui.notify('Give a project name: <project>/<branch>', 'error');
+                    return;
+                }
+                try {
+                    const worktree = await project(host, first, projectName, branch, (note) =>
+                        ctx.ui.notify(note, 'info'),
+                    );
+                    worktrees.set(projectName, { host, path: worktree });
+                    hosts.set(projectName, host);
+                    ctx.ui.notify(
+                        `${projectName} is at ${worktree} on ${host}. /remote connect ${projectName} starts a session there.`,
+                        'info',
+                    );
+                } catch (error) {
+                    ctx.ui.notify(`Could not set up ${projectName}: ${(error as Error).message}`, 'error');
+                }
+                return;
+            }
+
             if (verb === 'list') {
                 const host = first ?? [...hosts.values()][0];
                 if (host === undefined) {
@@ -221,6 +263,18 @@ export default function (pi: ExtensionAPI) {
                 if (first === undefined) {
                     ctx.ui.notify('Usage: /remote connect <name>', 'error');
                     return;
+                }
+                // A project that has no session yet gets one, in its worktree,
+                // so /remote project then /remote connect is the whole of it.
+                const known = worktrees.get(first);
+                if (known !== undefined && !hosts.has(`${first}:session`)) {
+                    try {
+                        await create(first, `${known.host}:${known.path}`, (note) => ctx.ui.notify(note, 'info'));
+                        hosts.set(`${first}:session`, known.host);
+                    } catch (error) {
+                        ctx.ui.notify(`Could not start a session for ${first}: ${(error as Error).message}`, 'error');
+                        return;
+                    }
                 }
                 const host = second ?? hosts.get(first);
                 if (host === undefined) {

@@ -64,3 +64,11 @@ rented node.
 the agent never runs on the rented node: it runs on the host and acts on the
 node through the environment, because a pre-empted machine takes everything
 running on it with no warning.
+
+## reading one file on another machine
+
+a path may name its machine.
+`user@host:/abs/path` reads or writes there, attaching to that host if nothing is attached to it yet.
+`local:/abs/path` always means the machine the session runs on.
+a plain path means whichever machine is current, so `local:` is how to reach a file here while an environment is attached.
+this is for one file: `environment connect` is still how the session moves, and a command is not a path, so bash always runs on the current machine.

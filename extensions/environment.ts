@@ -260,12 +260,28 @@ export default function (pi: ExtensionAPI) {
         return environment.connection;
     };
 
-    const route = <T extends { execute: (...args: never[]) => unknown }>(
+    /**
+     * Said in the tool's own description, because that is the only place the
+     * model reads before choosing an argument. A syntax nothing documents is a
+     * syntax nobody uses.
+     */
+    const ADDRESSING = [
+        '',
+        'Paths may name their machine: "user@host:/abs/path" reads or writes on that',
+        'machine, attaching to it if nothing is attached yet, and "local:/abs/path"',
+        'always means the machine this session runs on. A plain path means whichever',
+        'machine the environment tool currently points at, so while an environment is',
+        'attached, "local:" is how to reach a file here.',
+    ].join(' ');
+
+    const route = <T extends { execute: (...args: never[]) => unknown; description?: string }>(
         local: T,
         make: (operations: ReturnType<typeof operationsFor>) => T,
     ): T =>
         ({
             ...local,
+            description:
+                typeof local.description === 'string' ? `${local.description}${ADDRESSING}` : local.description,
             async execute(...args: never[]) {
                 // An addressed path decides the machine by itself, before any
                 // of the rules about the current environment apply.
@@ -362,6 +378,7 @@ export default function (pi: ExtensionAPI) {
         promptGuidelines: [
             'Use environment connect after allocating a node, and environment default local when it is finished with.',
             'A rented node can vanish mid-command: if an environment goes, say so rather than retrying against it.',
+            'To read or write one file on another machine, or on this one while an environment is attached, address the path as user@host:/abs/path or local:/abs/path rather than switching environment for a single file.',
         ],
         parameters: Type.Object({
             action: Type.Union([Type.Literal('connect'), Type.Literal('default'), Type.Literal('list')]),

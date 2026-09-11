@@ -20,6 +20,7 @@ import { Editor, Container, SelectList, Text, type SelectItem, type SelectListTh
 import { HistoryLog, parseHistoryState, type HistoryEntry, type HistoryEntryId, type HistoryState } from './lib/prompt-history';
 import { PersistedState, type StateScope } from './lib/state-store';
 import { config } from './lib/config';
+import { ago, preview as previewOf } from './lib/text';
 
 const STATE_NAME = 'prompt-history';
 const PREVIEW_CHARS = 72;
@@ -38,20 +39,8 @@ function persistScope(): StateScope | null {
     return setting === 'off' ? null : setting;
 }
 
-function preview(text: string): string {
-    const flat = text.replace(/\s+/g, ' ').trim();
-    return flat.length > PREVIEW_CHARS ? `${flat.slice(0, PREVIEW_CHARS - 3)}...` : flat;
-}
-
-function age(at: number): string {
-    const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-    if (seconds < 60) return `${seconds}s ago`;
-    const minutes = Math.round(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.round(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    return `${Math.round(hours / 24)}d ago`;
-}
+const preview = (text: string): string => previewOf(text, PREVIEW_CHARS);
+const age = ago;
 
 export default function (pi: ExtensionAPI) {
     const scope = persistScope();

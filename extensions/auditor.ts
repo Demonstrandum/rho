@@ -18,7 +18,7 @@ import type {
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
 import { config } from './lib/config';
-import { formatDuration } from './spinner';
+import { duration as formatDuration } from './lib/text';
 import { withSpinner } from './lib/widget-spinner';
 import { proseOf, runAudit, type AuditResult, type Finding } from './lib/audit';
 

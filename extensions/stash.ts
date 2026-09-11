@@ -24,6 +24,7 @@ import { parseStashState, Stash, type StashEntry, type StashEntryId, type PopRes
 import { actionsBoundTo, ensureKeybinding, type KeybindingId } from './lib/keybindings-store';
 import { PersistedState, type StateScope } from './lib/state-store';
 import { config } from './lib/config';
+import { ago, preview as previewOf, quantity } from './lib/text';
 
 const STATUS_ID = 'rho-stash';
 // SelectList ignores plain letters (its filter is only set programmatically), so
@@ -41,22 +42,12 @@ const DOUBLE_TAP_MS = 500;
 // how long the post-clear view stays up before it closes itself.
 const CLEARED_LINGER_MS = 600;
 
-function preview(text: string): string {
-    const flat = text.replace(/\s+/g, ' ').trim();
-    return flat.length > PREVIEW_CHARS ? `${flat.slice(0, PREVIEW_CHARS - 3)}...` : flat;
-}
-
-function age(at: number): string {
-    const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-    if (seconds < 60) return `${seconds}s ago`;
-    const minutes = Math.round(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    return `${Math.round(minutes / 60)}h ago`;
-}
+const preview = (text: string): string => previewOf(text, PREVIEW_CHARS);
+const age = ago;
 
 function shape(text: string): string {
     const lines = text.split('\n').length;
-    return lines > 1 ? `${lines} lines, ${text.length} chars` : `${text.length} chars`;
+    return lines > 1 ? `${quantity(lines, 'line')}, ${quantity(text.length, 'char')}` : quantity(text.length, 'char');
 }
 
 function item(entry: StashEntry, ordinal: number): SelectItem {

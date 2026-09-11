@@ -26,6 +26,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { config } from './lib/config';
 import { PersistedState } from './lib/state-store';
+import { plain } from './lib/text';
 
 const swapsPath = join(dirname(fileURLToPath(import.meta.url)), 'assets', 'wordswap.json');
 
@@ -275,14 +276,14 @@ export const wordEntries: [string, string[]][] = Object.entries(_file.words)
 export const patternEntries: [string, string[]][] = Object.entries(_file.patterns ?? {})
     .map(([k, v]) => [k, [v]]);
 
-// a real escape, and the printable remains of one whose ESC was already lost
-// on a trip through the model's context. the orphan forms are the ones this
-// extension itself used to emit (dim, its reset, and a 24-bit background).
-const ANSI_SGR = /\x1b\[[0-9;]*m/g;
+// text.ts removes a real escape; this removes the printable remains of one
+// whose ESC was already lost on a trip through the model's context. the orphan
+// forms are the ones this extension itself used to emit (dim, its reset, and a
+// 24-bit background).
 const ORPHANED_SGR = /\[(?:0|2|22|39|49)m|\[(?:38|48);(?:2;\d+;\d+;\d+|5;\d+)m/g;
 
 export function stripAnsi(text: string): string {
-    return text.replace(ANSI_SGR, '').replace(ORPHANED_SGR, '');
+    return plain(text).replace(ORPHANED_SGR, '');
 }
 
 /** the marker, and any backticks or stale dim remnants hugging it. */

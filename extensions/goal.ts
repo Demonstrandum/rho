@@ -29,7 +29,8 @@ import { truncateToWidth } from '@earendil-works/pi-tui';
 import { config } from './lib/config';
 import { PersistedState } from './lib/state-store';
 import { withSpinner } from './lib/widget-spinner';
-import { formatDuration, loadMaxims } from './spinner';
+import { loadMaxims } from './spinner';
+import { duration as formatDuration } from './lib/text';
 import {
     chooseMessage,
     classifyFailure,

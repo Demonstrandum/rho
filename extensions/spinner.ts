@@ -16,6 +16,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
 import { themeRgb, blend, ansiFg, RESET, type Rgb } from './lib/utils';
 import { evalTemplates } from './lib/template';
+import { duration as formatDuration } from './lib/text';
 import { config } from './lib/config';
 
 
@@ -221,11 +222,7 @@ export function colorSweep(text: string, frame: number, base: Rgb, shimmer: Rgb)
     return out + RESET;
 }
 
-export function formatDuration(ms: number): string {
-    const s = Math.round(ms / 1000);
-    const m = Math.floor(s / 60);
-    return m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
-}
+
 
 export default function (pi: ExtensionAPI) {
     let ctx: ExtensionContext | undefined;

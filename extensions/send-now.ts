@@ -44,6 +44,7 @@ import { type KeyId, Text } from '@earendil-works/pi-tui';
 import type { UserMessage } from '@earendil-works/pi-ai';
 import { SteeringMirror } from './lib/steering-mirror';
 import { config } from './lib/config';
+import { preview } from './lib/text';
 
 const STATUS_ID = 'rho-send-now';
 // how often the elapsed wait in the footer is redrawn while a send is armed.
@@ -77,10 +78,7 @@ interface Armed {
     readonly at: number;
 }
 
-function preview(text: string): string {
-    const flat = text.replace(/\s+/g, ' ').trim();
-    return flat.length > 48 ? `${flat.slice(0, 45)}...` : flat;
-}
+const PREVIEW_CHARS = 48;
 
 export default function (pi: ExtensionAPI) {
     const mirror = new SteeringMirror();
@@ -101,7 +99,7 @@ export default function (pi: ExtensionAPI) {
 
     const drawWidget = (ctx: ExtensionContext): void => {
         if (armed === null) return;
-        const held = preview(armed.text);
+        const held = preview(armed.text, PREVIEW_CHARS);
         const colour = stalled() ? 'warning' : 'muted';
         const note = stalled()
             ? 'the turn has not stopped yet'

@@ -93,9 +93,72 @@ async function place(host: string, say: (note: string) => void): Promise<string>
     return `${runtime} ${remote}`;
 }
 
+/**
+ * Where a project lives on the host. One clone, many worktrees, because that
+ * is what a session per branch needs: a worktree is a directory sharing one
+ * object store, so ten branches cost one clone rather than ten.
+ *
+ *   ~/projects/<project>/checkout/<repo>     the clone
+ *   ~/projects/<project>/worktrees/<branch>  where a session works
+ */
+const PROJECTS = 'projects';
+
+const repoName = (repo: string): string =>
+    (repo.split('/').pop() ?? repo).replace(/\.git$/, '').replace(/[^A-Za-z0-9._-]/g, '-');
+
 export default function (pi: ExtensionAPI) {
     /** Where each named session lives, so connect and stop need only the name. */
     const hosts = new Map<string, string>();
+
+    /**
+     * Clone on the host using the laptop's credentials.
+     *
+     * `ssh -A` forwards the agent, so the host authenticates to GitHub as the
+     * person sitting here and no deploy key has to exist on it. The key never
+     * lands on the host: only the ability to use it, for as long as the
+     * connection is open.
+     */
+    const project = async (
+        host: string,
+        repo: string,
+        projectName: string,
+        branch: string,
+        say: (note: string) => void,
+    ): Promise<string> => {
+        const name = repoName(repo);
+        const root = `$HOME/${PROJECTS}/${projectName}`;
+        const checkout = `${root}/checkout/${name}`;
+        const worktree = `${root}/worktrees/${branch}`;
+
+        say(`cloning ${name} on ${host}`);
+        const script = [
+            `set -e`,
+            `mkdir -p ${root}/checkout ${root}/worktrees`,
+            // Idempotent: running it twice fetches rather than failing, so a
+            // second worktree on an existing project is one command.
+            `if [ -d ${checkout}/.git ]; then git -C ${checkout} fetch --all --prune;`,
+            `else git clone ${JSON.stringify(repo)} ${checkout}; fi`,
+            // An existing worktree is reused rather than refused: asking for
+            // the same branch twice should land you in it, not error.
+            `if [ ! -d ${worktree} ]; then`,
+            `  if git -C ${checkout} show-ref --verify --quiet refs/heads/${branch}; then`,
+            `    git -C ${checkout} worktree add ${worktree} ${branch};`,
+            `  elif git -C ${checkout} show-ref --verify --quiet refs/remotes/origin/${branch}; then`,
+            `    git -C ${checkout} worktree add --track -b ${branch} ${worktree} origin/${branch};`,
+            `  else`,
+            `    git -C ${checkout} worktree add -b ${branch} ${worktree};`,
+            `  fi;`,
+            `fi`,
+            `echo ${worktree}`,
+        ].join('\n');
+
+        // -A forwards the agent for the clone. Without it a private repo needs
+        // a key on the host, which is the thing this avoids.
+        const done = await run('ssh', ['-A', host, script]);
+        if (done.code !== 0) throw new Error(done.err.trim() || done.out.trim() || 'the clone failed');
+        const path = done.out.trim().split('\n').pop() ?? worktree;
+        return path;
+    };
 
     const create = async (name: string, address: string, say: (note: string) => void): Promise<string> => {
         const target = parseTarget(address);

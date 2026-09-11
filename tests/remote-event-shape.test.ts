@@ -9,7 +9,7 @@ import { StreamingMessage, reshape } from '../extensions/lib/remote/event-shape'
  */
 
 const update = (inner: Record<string, unknown>) =>
-    reshape({ type: 'message_update', assistantMessageEvent: inner }, streaming) as {
+    reshape({ type: 'message_update', assistantMessageEvent: inner }, streaming) as unknown as {
         message: { content: { type: string; text?: string }[] };
     };
 

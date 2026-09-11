@@ -615,6 +615,14 @@ const SCHEMA = {
             true,
             'whether the block names the operating system and its release',
         ),
+        shell: field(
+            'shell',
+            isBool,
+            true,
+            'whether the block names the shell bash commands are handed to. it',
+            'follows the machine: with an environment attached it is that',
+            "machine's shell, not this one's",
+        ),
         date: field(
             'date',
             isBool,

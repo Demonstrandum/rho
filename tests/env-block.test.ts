@@ -10,9 +10,10 @@ const facts = {
     platform: 'darwin 25.5.0',
     date: '2026-09-07',
     model: 'anthropic/claude-opus-4-5, thinking high',
+    shell: '/bin/zsh',
 };
 
-const all: RenderFields = { git: true, platform: true, date: true, model: true };
+const all: RenderFields = { git: true, platform: true, date: true, model: true, shell: true };
 
 describe('render', () => {
     test('names every fact inside one block', () => {
@@ -21,6 +22,7 @@ describe('render', () => {
                 '<env>',
                 'cwd: /Users/samuel/Code/rho',
                 'git repo: yes',
+                'shell: /bin/zsh',
                 'platform: darwin 25.5.0',
                 'date: 2026-09-07',
                 'model: anthropic/claude-opus-4-5, thinking high',
@@ -37,8 +39,18 @@ describe('render', () => {
     });
 
     test('the working directory is always named', () => {
-        const out = render(facts, { git: false, platform: false, date: false, model: false });
+        const out = render(facts, { git: false, platform: false, date: false, model: false, shell: false });
         expect(out).toBe('<env>\ncwd: /Users/samuel/Code/rho\n</env>');
+    });
+
+    test('a remote machine is named first, so the directory is not read as local', () => {
+        const out = render({ ...facts, host: 'samuel@robotics-vm', shell: '/run/current-system/sw/bin/bash' }, all);
+        expect(out.split('\n')[1]).toBe('host: samuel@robotics-vm');
+        expect(out).toContain('shell: /run/current-system/sw/bin/bash');
+    });
+
+    test('no host line when the tools act on this machine', () => {
+        expect(render(facts, all)).not.toContain('host:');
     });
 
     test('a directory that is not a work tree says so', () => {

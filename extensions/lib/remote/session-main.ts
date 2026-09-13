@@ -13,7 +13,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { attach, Broker, existing, named, stop } from './broker';
@@ -105,9 +105,12 @@ const readFromStdin = async (): Promise<Lent> => {
  * still resolve. PI_CODING_AGENT_DIR points pi at it. It is removed when the
  * session ends.
  */
+const credentialDir = (name: string): string =>
+    join(process.env.XDG_RUNTIME_DIR ?? tmpdir(), `rho-session-${name}`);
+
 const lendCredentials = (auth: string, name: string): string => {
     const real = join(process.env.HOME ?? '/tmp', '.pi', 'agent');
-    const dir = join(process.env.XDG_RUNTIME_DIR ?? tmpdir(), `rho-session-${name}`);
+    const dir = credentialDir(name);
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true, mode: 0o700 });
 
@@ -127,6 +130,25 @@ const lendCredentials = (auth: string, name: string): string => {
     writeFileSync(join(dir, 'auth.json'), auth, { mode: 0o600 });
     return dir;
 };
+
+/**
+ * Credentials again, for a session that is already running.
+ *
+ * An OAuth token lasts hours and its refresh token is single use: the laptop
+ * refreshing its own login invalidates the copy the far side is holding, and
+ * the next turn there comes back empty with the refusal buried in the message.
+ * pi rereads auth.json when it changes, so handing it a newer one is enough --
+ * no restart, and the session keeps its history.
+ */
+if (verb === 'relend') {
+    const lent = await readFromStdin();
+    if (lent.auth === null) die('nothing to lend');
+    const dir = credentialDir(name);
+    if (!existsSync(dir)) die(`${name} has no credentials of its own to replace`);
+    writeFileSync(join(dir, 'auth.json'), lent.auth ?? '{}', { mode: 0o600 });
+    process.stdout.write(`${name} has fresh credentials\n`);
+    process.exit(0);
+}
 
 if (verb === 'serve') {
     if (await existing(name)) die(`${name} is already running`);

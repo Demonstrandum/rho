@@ -89,6 +89,15 @@ export class RemoteState {
             case 'message_end': {
                 const message = (event as { message?: AgentMessage }).message;
                 if (message !== undefined) this.history.push(message);
+                // An assistant message that carries a refusal instead of an
+                // answer reads as the model having nothing to say: the token
+                // expiring on the far side looked exactly like silence. The
+                // trouble is kept where a client can ask for it.
+                const trouble = (message as { errorMessage?: string } | undefined)?.errorMessage;
+                // Only from a live turn: a refusal in the replayed history is
+                // something that already happened, and reporting it as current
+                // is how a fixed problem gets diagnosed twice.
+                if (!this.replaying && typeof trouble === 'string' && trouble !== '') this.lastTrouble = trouble;
                 break;
             }
         }
@@ -118,6 +127,13 @@ export class RemoteState {
 
     get messages(): readonly AgentMessage[] {
         return this.history;
+    }
+
+    private lastTrouble: string | null = null;
+
+    /** What the far side refused with, if a turn ended in a refusal. */
+    get trouble(): string | null {
+        return this.lastTrouble;
     }
 }
 

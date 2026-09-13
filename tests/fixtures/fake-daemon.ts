@@ -64,6 +64,26 @@ process.stdin.on('data', (chunk: Buffer) => {
                 });
                 say({ type: 'rho_replay_end' });
                 break;
+            case 'refuse':
+                // A turn that ends in a refusal rather than an answer: the
+                // message is empty and the reason is inside it.
+                say({ type: 'response', id: command.id, data: {} });
+                say({ type: 'agent_start' });
+                say({
+                    type: 'message_end',
+                    message: { role: 'assistant', content: [], errorMessage: 'the token expired' },
+                });
+                say({ type: 'agent_settled' });
+                break;
+            case 'old_refusal':
+                say({ type: 'response', id: command.id, data: {} });
+                say({ type: 'rho_replay_start' });
+                say({
+                    type: 'message_end',
+                    message: { role: 'assistant', content: [], errorMessage: 'a refusal from last week' },
+                });
+                say({ type: 'rho_replay_end' });
+                break;
             case 'die':
                 process.stderr.write('the daemon fell over\n');
                 process.exit(3);

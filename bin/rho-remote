@@ -214,7 +214,13 @@ const interactive = new InteractiveMode(runtime, {
 
 drawing = interactive;
 await interactive.run();
+
+// The interface is done with the terminal, so this process is done too. The
+// link holds an ssh child that keeps the event loop alive on its own: leaving
+// it means the interface says goodbye and the shell never comes back.
+link.stop();
 if (farewell !== null) {
     process.stderr.write(`${farewell}\n`);
     process.exit(1);
 }
+process.exit(0);

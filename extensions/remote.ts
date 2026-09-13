@@ -16,9 +16,10 @@
  * session is where it was, because the agent was never running here.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
@@ -267,7 +268,42 @@ const progress = (ctx: { ui: { setStatus: (key: string, text?: string) => void }
 
 export default function (pi: ExtensionAPI) {
     /** Where each named session lives, so connect and stop need only the name. */
-    const hosts = new Map<string, string>();
+    /**
+     * Which machine each session is on, remembered across pi processes.
+     *
+     * A session outlives the pi that started it -- that is the point of it --
+     * so the next pi has to be told where it is, or connecting to a session
+     * created five minutes ago in another window fails with "I do not know
+     * which host". It is a small file beside the runner cache rather than
+     * session state, because it is a fact about the machine, not about a
+     * conversation.
+     */
+    const ledger = join(homedir(), REMOTE_DIR, 'sessions.json');
+
+    const readLedger = (): Map<string, string> => {
+        try {
+            const parsed: unknown = JSON.parse(readFileSync(ledger, 'utf8'));
+            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return new Map();
+            const pairs = Object.entries(parsed as Record<string, unknown>).filter(
+                (pair): pair is [string, string] => typeof pair[1] === 'string',
+            );
+            return new Map(pairs);
+        } catch {
+            return new Map();
+        }
+    };
+
+    const hosts = readLedger();
+
+    const rememberHosts = (): void => {
+        try {
+            mkdirSync(dirname(ledger), { recursive: true });
+            writeFileSync(ledger, `${JSON.stringify(Object.fromEntries(hosts), null, 2)}\n`);
+        } catch {
+            // A ledger that cannot be written costs the next process a host
+            // name on the command line; it is not worth failing a session for.
+        }
+    };
     /** A project's worktree, so connecting to it starts the session in the right directory. */
     const worktrees = new Map<string, { host: string; path: string }>();
 
@@ -381,10 +417,14 @@ export default function (pi: ExtensionAPI) {
         // create is how you get one, and one exists.
         if (/already running/.test(attempt.out) || /already running/.test(attempt.err)) {
             hosts.set(name, host);
+            rememberHosts();
+        rememberHosts();
             return `${name} is already running on ${host}`;
         }
         if (attempt.code === 0) {
             hosts.set(name, host);
+            rememberHosts();
+        rememberHosts();
             await run('ssh', [...SSH_FLAGS, host, linkRunner]);
             return attempt.out.trim();
         }
@@ -431,6 +471,7 @@ export default function (pi: ExtensionAPI) {
             throw new Error(started.err.trim() || started.out.trim() || `could not start ${name}`);
         }
         hosts.set(name, host);
+        rememberHosts();
         return started.out.trim();
     };
 
@@ -521,6 +562,7 @@ export default function (pi: ExtensionAPI) {
                     const worktree = await project(host, first, projectName, branch, (note) => bar.say(note));
                     worktrees.set(projectName, { host, path: worktree });
                     hosts.set(projectName, host);
+                    rememberHosts();
                     ctx.ui.notify(
                         `${projectName} is at ${worktree} on ${host}. /remote connect ${projectName} starts a session there.`,
                         'info',
@@ -556,20 +598,34 @@ export default function (pi: ExtensionAPI) {
                 // The terminal is handed over, not described.
                 //
                 // The interface that draws a remote session is a different
-                // process: this one owns the terminal, so it stands down and
-                // the client takes it, and when the client exits the terminal
-                // is free again. The session is untouched either way -- it
-                // lives on the far side and neither process owns it.
+                // process, and this one owns the terminal. Shutting down and
+                // spawning it does not work: the child dies with the parent
+                // and the window closes. pi already knows how to stand aside
+                // for a program that needs the terminal -- it is what it does
+                // for an external editor -- so this borrows that: the drawing
+                // stops, the client runs in its place, and when it exits the
+                // interface comes back exactly as it was.
                 const client = join(rhoRoot(), 'bin', 'rho-remote');
-                ctx.ui.notify(`handing this terminal to ${first} on ${host}`, 'info');
-                const viewer = spawn('bun', [client, host, first], {
-                    stdio: 'inherit',
-                    detached: false,
-                });
-                viewer.on('error', (error) =>
-                    ctx.ui.notify(`could not start the client: ${error.message}`, 'error'),
+                await ctx.ui.custom<void>(
+                    (tui, _theme, _keys, done) => {
+                        queueMicrotask(() => {
+                            tui.stop();
+                            try {
+                                spawnSync('bun', [client, host, first], { stdio: 'inherit' });
+                            } finally {
+                                tui.start();
+                                tui.requestRender(true);
+                                done();
+                            }
+                        });
+                        return {
+                            render: () => [],
+                            handleInput: () => {},
+                        } as never;
+                    },
+                    { overlay: true },
                 );
-                ctx.shutdown();
+                ctx.ui.notify(`back from ${first} on ${host}, which is still running`, 'info');
                 return;
             }
 
@@ -585,6 +641,7 @@ export default function (pi: ExtensionAPI) {
                 }
                 await ask(host, `stop ${first}`, () => {});
                 hosts.delete(first);
+                rememberHosts();
                 ctx.ui.notify(`Stopped ${first}.`, 'info');
                 return;
             }

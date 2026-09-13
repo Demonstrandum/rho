@@ -68,6 +68,22 @@ export function remoteSession(
         get autoCompactionEnabled() {
             return state.state.autoCompactionEnabled !== false;
         },
+        get model() {
+            return state.state.model ?? (local.model as unknown);
+        },
+        get pendingMessageCount() {
+            return state.state.pendingMessageCount ?? 0;
+        },
+        get sessionFile() {
+            return state.state.sessionFile ?? (local.sessionFile as string);
+        },
+        get isBashRunning() {
+            // The far side runs the commands; this process runs none.
+            return false;
+        },
+        get isRetrying() {
+            return false;
+        },
 
         // what it is asked to do
         prompt: (text: string) => actions.prompt(text).then(() => undefined),
@@ -79,6 +95,25 @@ export function remoteSession(
         setModel: (model: { provider?: string; id?: string }) =>
             void actions.setModel(model.provider ?? '', model.id ?? ''),
 
+        // Everything the interface can ask for, asked of the machine the
+            // session is on. Escape aborting a local session that is not
+            // running, while the far side carries on answering, is the shape of
+            // bug this closes: it looks like the abort failed.
+        abort: () => actions.abort().then(() => undefined),
+        abortBash: () => actions.abortBash().then(() => undefined),
+        abortRetry: () => actions.abortRetry().then(() => undefined),
+        abortCompaction: () => actions.abort().then(() => undefined),
+        executeBash: (command: string) => actions.bash(command).then(() => undefined),
+        cycleModel: () => actions.cycleModel(),
+        cycleThinkingLevel: () => actions.cycleThinkingLevel(),
+        setSessionName: (name: string) => void actions.setSessionName(name),
+        setSteeringMode: (mode: string) => void actions.setSteeringMode(mode),
+        setFollowUpMode: (mode: string) => void actions.setFollowUpMode(mode),
+        setAutoCompactionEnabled: (enabled: boolean) => void actions.setAutoCompaction(enabled),
+        setAutoRetryEnabled: (enabled: boolean) => void actions.setAutoRetry(enabled),
+        getSessionStats: () => actions.sessionStats(),
+        getLastAssistantText: () => actions.lastAssistantText(),
+
         subscribe: subscription(state),
 
         dispose: () => {
@@ -87,11 +122,34 @@ export function remoteSession(
         },
     };
 
+    /**
+     * Asked of the far side, but there is no way to ask it.
+     *
+     * Answering these from the local session would be answering about the
+     * wrong machine: a transcript this process never wrote, a tree of sessions
+     * that is not this one's. A refusal that names the reason is the only
+     * honest answer, and it is louder than a wrong one.
+     */
+    const unreachable = new Set([
+        'exportToJsonl',
+        'exportToHtml',
+        'navigateTree',
+        'reload',
+        'getUserMessagesForForking',
+        'createReplacedSessionContext',
+        'recordBashResult',
+    ]);
+
     // Everything not named above is the local session's: the settings, the
     // session manager, the resource loader, the extension runner. Reaching for
     // the remote's copy of those would mean reimplementing them.
     return new Proxy(local, {
         get(target, property, receiver) {
+            if (typeof property === 'string' && unreachable.has(property)) {
+                return () => {
+                    throw new Error(`${property} is not something a remote session can answer from here`);
+                };
+            }
             if (property in overrides) {
                 const value = Reflect.get(overrides, property, overrides);
                 return typeof value === 'function' ? value.bind(overrides) : value;

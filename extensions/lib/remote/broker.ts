@@ -134,7 +134,37 @@ export class Broker {
                 for (const line of this.recent) client.write(line);
                 client.write(`${JSON.stringify({ type: 'rho_replay_end' })}\n`);
             }
-            client.on('data', (chunk: Buffer) => this.agent.stdin?.write(chunk));
+            // Some questions are the broker's own, not the agent's: where the
+            // session is, and what it is called. A client that has to ask the
+            // agent for those gets an answer about a machine it cannot see.
+            let asked = '';
+            client.on('data', (chunk: Buffer) => {
+                asked += chunk.toString();
+                const lines = asked.split('\n');
+                asked = lines.pop() ?? '';
+                for (const line of lines) {
+                    if (line.trim() === '') continue;
+                    let parsed: { type?: string; id?: string } | null = null;
+                    try {
+                        parsed = JSON.parse(line) as { type?: string; id?: string };
+                    } catch {
+                        parsed = null;
+                    }
+                    if (parsed?.type === 'rho_info') {
+                        client.write(
+                            `${JSON.stringify({
+                                type: 'response',
+                                id: parsed.id,
+                                command: 'rho_info',
+                                success: true,
+                                data: { cwd: this.cwd, name: this.name },
+                            })}\n`,
+                        );
+                        continue;
+                    }
+                    this.agent.stdin?.write(`${line}\n`);
+                }
+            });
             const drop = () => this.clients.delete(client);
             client.on('close', drop);
             client.on('error', drop);

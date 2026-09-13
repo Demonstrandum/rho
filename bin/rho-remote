@@ -119,10 +119,44 @@ if (trace !== undefined) {
 }
 await state.refresh();
 
+/**
+ * Where the session is, asked of the broker rather than the agent.
+ *
+ * The interface shows a working directory and resolves paths against it. Left
+ * as this machine's, it shows the directory the client was started from, which
+ * is not where anything the session does happens: the footer said ~/Code/rho
+ * for a session working in /home/nix.
+ */
+const info = (await link.send({ type: 'rho_info' }).catch(() => ({}))) as { data?: { cwd?: string } };
+const remoteCwd = info.data?.cwd ?? process.cwd();
+
+/**
+ * Tell the rest of the interface which machine this is.
+ *
+ * The footer, the environment block and /cwd all read one published value to
+ * know whether the work is happening here. Without it the footer shows the
+ * directory the client was started from, which belongs to a machine the
+ * session cannot see -- and a path read as local is how a command goes to the
+ * wrong host. It is the same marker an attached environment publishes.
+ */
+(globalThis as Record<string, unknown>).__rho_environment = {
+    name: target,
+    host: target.includes('@') ? target.slice(target.indexOf('@') + 1) : target,
+    cwd: remoteCwd,
+    shell: 'bash',
+    alive: true,
+    chdir: async (path: string) => {
+        const answer = (await actions.bash(`cd ${path} && pwd`)) as { data?: { output?: string } };
+        const landed = (answer.data?.output ?? '').trim();
+        if (landed !== '') (globalThis as Record<string, { cwd: string }>).__rho_environment.cwd = landed;
+        return landed;
+    },
+};
+
 // The local half: settings, the editor, the renderer, and a session file of
 // this machine's own. None of it is the agent; all of it is the interface.
-const services = await createAgentSessionServices({ cwd: process.cwd() });
-const sessionManager = SessionManager.inMemory(process.cwd());
+const services = await createAgentSessionServices({ cwd: remoteCwd });
+const sessionManager = SessionManager.inMemory(remoteCwd);
 const made = await createAgentSessionFromServices({ services, sessionManager });
 
 const proxied = remoteSession(made.session as unknown as Record<string, unknown>, link, state, actions);

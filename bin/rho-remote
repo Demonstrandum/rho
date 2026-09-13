@@ -91,14 +91,33 @@ const relend = () => {
 };
 relend();
 
+/** Said once the interface has given the terminal back, not over the top of it. */
+let farewell: string | null = null;
+let drawing: { stop: () => void } | null = null;
+
 const link = new RpcLink('ssh', [...SSH_FLAGS, target, `${RUNNER} attach ${name}`], {
     // No deadline on the link: a model call takes as long as it takes, and the
     // interface shows that it is working. A link that has died says so by
     // closing, which is a different thing from an answer that is slow.
     timeoutMs: 0,
     onClosed: (why) => {
-        process.stderr.write(`\n${name} on ${target}: ${why}\n`);
-        process.exit(1);
+        // The interface owns the terminal: writing over it leaves the screen
+        // half drawn and the cursor wherever the last frame put it. It is
+        // stopped first, and then the reason is said on a clean line.
+        farewell = `${name} on ${target}: ${why}`;
+        if (drawing === null) {
+            process.stderr.write(`\n${farewell}\n`);
+            process.exit(1);
+        }
+        // Stopping restores the terminal; leaving it at that does not end the
+        // process, because the interface is waiting on input that will never
+        // come. A session whose far side has gone must not keep drawing as
+        // though it were still there, so the exit is not left to chance.
+        drawing.stop();
+        setTimeout(() => {
+            process.stderr.write(`${farewell}\n`);
+            process.exit(1);
+        }, 150).unref?.();
     },
 });
 
@@ -193,4 +212,9 @@ const interactive = new InteractiveMode(runtime, {
     verbose: false,
 });
 
+drawing = interactive;
 await interactive.run();
+if (farewell !== null) {
+    process.stderr.write(`${farewell}\n`);
+    process.exit(1);
+}

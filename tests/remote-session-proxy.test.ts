@@ -91,7 +91,7 @@ const build = () => {
         },
     } as unknown as RpcLink;
 
-    const session = remoteSession(local, link, state, actions) as Record<string, never>;
+    const session = remoteSession(local, link, state, actions) as Record<string, unknown>;
     return { session, asked, localCalls, stopped: () => stopped };
 };
 

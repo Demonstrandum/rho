@@ -159,6 +159,24 @@ const services = await createAgentSessionServices({ cwd: remoteCwd });
 const sessionManager = SessionManager.inMemory(remoteCwd);
 const made = await createAgentSessionFromServices({ services, sessionManager });
 
+/**
+ * What was said before this client arrived.
+ *
+ * The interface builds its opening transcript from the local session manager,
+ * which for a client that has just started is empty: reattaching to a session
+ * with an afternoon of work in it showed a blank screen, and the work was
+ * still there but invisible. The far side's messages are put in, so the first
+ * thing drawn is the conversation as it stands.
+ */
+for (const message of state.messages) {
+    try {
+        sessionManager.appendMessage(message as never);
+    } catch {
+        // A message shape this build does not know is better skipped than
+        // fatal: the rest of the history is still worth drawing.
+    }
+}
+
 const proxied = remoteSession(made.session as unknown as Record<string, unknown>, link, state, actions);
 
 const runtime = new AgentSessionRuntime(

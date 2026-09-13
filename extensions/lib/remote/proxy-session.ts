@@ -22,6 +22,8 @@ export type Listener = (event: RpcEvent) => void;
 
 interface Snapshot {
     model?: { id?: string; provider?: string; contextWindow?: number };
+    pendingMessageCount?: number;
+    sessionFile?: string;
     thinkingLevel?: string;
     isStreaming?: boolean;
     isCompacting?: boolean;
@@ -153,5 +155,66 @@ export class RemoteActions {
 
     clearQueue(): Promise<unknown> {
         return this.link.send({ type: 'clear_queue' });
+    }
+
+    // The rest of what a session can be asked. Each of these used to run on
+    // this machine instead, quietly: escape aborted a local session that was
+    // not running while the far side carried on answering, and a bash command
+    // typed into a remote session ran here.
+
+    abortBash(): Promise<unknown> {
+        return this.link.send({ type: 'abort_bash' });
+    }
+
+    abortRetry(): Promise<unknown> {
+        return this.link.send({ type: 'abort_retry' });
+    }
+
+    bash(command: string): Promise<unknown> {
+        return this.link.send({ type: 'bash', command });
+    }
+
+    cycleModel(): Promise<unknown> {
+        return this.link.send({ type: 'cycle_model' });
+    }
+
+    cycleThinkingLevel(): Promise<unknown> {
+        return this.link.send({ type: 'cycle_thinking_level' });
+    }
+
+    setSessionName(name: string): Promise<unknown> {
+        return this.link.send({ type: 'set_session_name', name });
+    }
+
+    setSteeringMode(mode: string): Promise<unknown> {
+        return this.link.send({ type: 'set_steering_mode', mode });
+    }
+
+    setFollowUpMode(mode: string): Promise<unknown> {
+        return this.link.send({ type: 'set_follow_up_mode', mode });
+    }
+
+    setAutoCompaction(enabled: boolean): Promise<unknown> {
+        return this.link.send({ type: 'set_auto_compaction', enabled });
+    }
+
+    setAutoRetry(enabled: boolean): Promise<unknown> {
+        return this.link.send({ type: 'set_auto_retry', enabled });
+    }
+
+    sessionStats(): Promise<unknown> {
+        return this.link.send({ type: 'get_session_stats' });
+    }
+
+    lastAssistantText(): Promise<unknown> {
+        return this.link.send({ type: 'get_last_assistant_text' });
+    }
+
+    availableModels(): Promise<unknown> {
+        return this.link.send({ type: 'get_available_models' });
+    }
+
+    availableThinkingLevels(): Promise<unknown> {
+        return this.link.send({ type: 'get_available_thinking_levels' });
     }
 }

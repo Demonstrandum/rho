@@ -20,6 +20,9 @@ import {
     createAgentSessionServices,
 } from '@earendil-works/pi-coding-agent';
 import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { RpcLink } from '../extensions/lib/remote/rpc-link';
 import { RemoteActions, RemoteState } from '../extensions/lib/remote/proxy-session';
 import { remoteSession } from '../extensions/lib/remote/remote-session';
@@ -66,6 +69,27 @@ if (ready.status !== 0) {
     );
     process.exit(1);
 }
+
+/**
+ * Hand the far side credentials as fresh as this machine's, before attaching.
+ *
+ * An OAuth token lasts hours and its refresh token is single use, so the copy
+ * lent when the session started goes stale the moment this machine refreshes
+ * its own. The far side then answers with an empty message and the refusal
+ * buried inside it, which reads as the model having nothing to say.
+ */
+const relend = () => {
+    const authPath = join(homedir(), '.pi', 'agent', 'auth.json');
+    if (!existsSync(authPath)) return;
+    const sent = spawnSync('ssh', [...SSH_FLAGS, target, `${RUNNER} relend ${name}`], {
+        input: JSON.stringify({ auth: readFileSync(authPath, 'utf8'), env: {} }),
+        encoding: 'utf8',
+    });
+    if (sent.status !== 0 && !/no credentials of its own/.test(sent.stderr ?? '')) {
+        process.stderr.write(`could not refresh the credentials on ${target}: ${(sent.stderr ?? '').trim()}\n`);
+    }
+};
+relend();
 
 const link = new RpcLink('ssh', [...SSH_FLAGS, target, `${RUNNER} attach ${name}`], {
     // No deadline on the link: a model call takes as long as it takes, and the

@@ -81,7 +81,20 @@ export class Broker {
                 this.broadcast(bytes);
             }
         });
-        this.agent.stderr?.on('data', (chunk: Buffer) => this.broadcast(chunk));
+        // The agent's stderr is not the protocol: pi writes stack traces there,
+        // and pushing those bytes into a jsonl stream leaves clients walking
+        // past half-lines that look like frames. It travels as an event of its
+        // own, so a client can show it as what it is.
+        let complaint = '';
+        this.agent.stderr?.on('data', (chunk: Buffer) => {
+            complaint += chunk.toString();
+            const lines = complaint.split('\n');
+            complaint = lines.pop() ?? '';
+            for (const line of lines) {
+                if (line.trim() === '') continue;
+                this.broadcast(Buffer.from(`${JSON.stringify({ type: 'rho_stderr', text: line })}\n`));
+            }
+        });
         this.agent.on('close', () => {
             this.ended = true;
             for (const client of this.clients) client.end();

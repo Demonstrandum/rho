@@ -99,6 +99,25 @@ describe('the far side, mirrored here', () => {
         ]);
     });
 
+    test('a turn that refuses is not silence', async () => {
+        // An empty assistant message reads as the model having nothing to say.
+        // The far side's token expiring looked exactly like that.
+        const link = open();
+        const state = new RemoteState(link);
+        expect(state.trouble).toBeNull();
+        await link.send({ type: 'refuse' });
+        await quiet();
+        expect(state.trouble).toBe('the token expired');
+    });
+
+    test('a refusal in the history is not reported as current trouble', async () => {
+        const link = open();
+        const state = new RemoteState(link);
+        await link.send({ type: 'old_refusal' });
+        await quiet();
+        expect(state.trouble).toBeNull();
+    });
+
     test('a listener can leave without stopping the mirror', async () => {
         const link = open();
         const state = new RemoteState(link);

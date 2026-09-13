@@ -8,6 +8,8 @@
  */
 
 let held = '';
+if (process.argv.includes('--complain')) process.stderr.write('a stack trace\nover two lines\n');
+
 process.stdin.on('data', (chunk: Buffer) => {
     held += chunk.toString();
     const lines = held.split('\n');

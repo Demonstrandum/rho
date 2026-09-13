@@ -19,8 +19,8 @@ afterEach(() => {
     brokers.length = 0;
 });
 
-const start = (name: string): Broker => {
-    const broker = new Broker(name, 'bun', [STAND_IN], mkdtempSync(join(tmpdir(), 'rho-broker-')));
+const start = (name: string, extra: readonly string[] = []): Broker => {
+    const broker = new Broker(name, 'bun', [STAND_IN, ...extra], mkdtempSync(join(tmpdir(), 'rho-broker-')));
     broker.listen();
     brokers.push(broker);
     return broker;
@@ -122,5 +122,19 @@ describe('broker', () => {
         broker.stop();
         await settle(400);
         expect(await existing('six')).toBe(false);
+    });
+
+    test('what the agent complains about travels as an event, not as raw bytes', async () => {
+        // pi writes stack traces to stderr. Pushed into a jsonl stream those
+        // are half-lines that look like frames, and a client walks past them
+        // without ever showing what went wrong.
+        start('complaining', ['--complain']);
+        const watcher = await client('complaining');
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        const complaints = watcher.lines
+            .map((line) => JSON.parse(line) as { type: string; text?: string })
+            .filter((event) => event.type === 'rho_stderr');
+        expect(complaints.map((event) => event.text)).toEqual(['a stack trace', 'over two lines']);
+        watcher.end();
     });
 });

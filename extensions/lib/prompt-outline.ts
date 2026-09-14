@@ -166,6 +166,54 @@ export function pretty(value: unknown, indent = ''): string[] {
     return out.length === 0 ? [`${indent}(empty)`] : out;
 }
 
+/**
+ * the system instructions inside a payload, as the provider will read them.
+ *
+ * `ctx.getSystemPrompt()` is pi's string, which is not the same text: the
+ * provider serializer moves it, splits it into cacheable blocks, or turns it
+ * into a message, and an extension may rewrite it after pi has handed it over.
+ * three placements cover every provider pi ships: a top-level `system` (a
+ * string or a list of content blocks), a `systemInstruction` holding `parts`,
+ * and a leading message whose role is `system` or `developer`.
+ *
+ * null means the payload holds no such field, which is itself worth reporting:
+ * the instructions went somewhere this does not know about.
+ */
+export function systemText(payload: unknown): string | null {
+    if (!isRecord(payload)) return null;
+    const direct = textOf(payload.system);
+    if (direct !== null) return direct;
+    const instruction = payload.systemInstruction;
+    if (isRecord(instruction)) {
+        const parts = textOf(instruction.parts);
+        if (parts !== null) return parts;
+    }
+    const instructionText = textOf(instruction);
+    if (instructionText !== null) return instructionText;
+    if (Array.isArray(payload.messages)) {
+        const blocks = payload.messages
+            .filter((message) => isRecord(message) && (message.role === 'system' || message.role === 'developer'))
+            .map((message) => textOf((message as Record<string, unknown>).content))
+            .filter((text): text is string => text !== null);
+        if (blocks.length > 0) return blocks.join('\n');
+    }
+    return null;
+}
+
+/** a string, or the text of the content blocks in a list, or null. */
+function textOf(value: unknown): string | null {
+    if (typeof value === 'string') return value;
+    if (!Array.isArray(value)) return null;
+    const parts = value
+        .map((block) => {
+            if (typeof block === 'string') return block;
+            if (isRecord(block) && typeof block.text === 'string') return block.text;
+            return null;
+        })
+        .filter((text): text is string => text !== null);
+    return parts.length === 0 ? null : parts.join('\n');
+}
+
 export function raw(value: unknown): string[] {
     return JSON.stringify(value, null, 2).split('\n');
 }

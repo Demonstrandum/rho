@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { outline, pretty, raw, weight } from '../extensions/lib/prompt-outline';
+import { outline, pretty, raw, systemText, weight } from '../extensions/lib/prompt-outline';
 import { RequestLog } from '../extensions/lib/prompt-log';
 
 const PAYLOAD = {
@@ -61,4 +61,13 @@ test('the log keeps its capacity and never reuses an ordinal', () => {
     expect(log.latest()?.payload).toEqual({ n: 3 });
     expect(log.clear()).toBe(2);
     expect(log.record({ n: 4 }, null).ordinal).toBe(4);
+});
+
+test('the system text comes out of wherever the provider put it', () => {
+    expect(systemText({ system: 'one\ntwo' })).toBe('one\ntwo');
+    expect(systemText({ system: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] })).toBe('a\nb');
+    expect(systemText({ systemInstruction: { parts: [{ text: 'g' }] } })).toBe('g');
+    expect(systemText({ messages: [{ role: 'developer', content: 'd' }, { role: 'user', content: 'u' }] })).toBe('d');
+    expect(systemText({ messages: [{ role: 'user', content: 'u' }] })).toBeNull();
+    expect(systemText('not a payload')).toBeNull();
 });

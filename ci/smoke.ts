@@ -339,6 +339,10 @@ async function main(): Promise<number> {
             // then writes that payload to the session scratch directory.
             { afterSeconds: 18, text: '/prompt view\\r' },
             { afterSeconds: 3, text: '\\033' },
+            // the system view reads the system text back out of that payload,
+            // so what it shows is the prompt the provider was sent.
+            { afterSeconds: 2, text: '/prompt view system\\r' },
+            { afterSeconds: 3, text: '\\033' },
             { afterSeconds: 2, text: '/prompt dump\\r' },
             // the theme picker: open it, let one frame of the card draw, leave
             // it without choosing.
@@ -362,6 +366,12 @@ async function main(): Promise<number> {
     // round), so the check is on the viewer's own chrome and the payload keys.
     check('the payload viewer listed the request',
         /request \d/.test(screen) && screen.includes('enter open'),
+        tail(screen, 80));
+    // rho appends its own text at the end of the prompt, so the first screen of
+    // the pager is pi's; the check is on the view opening over the request it
+    // read the text out of.
+    check('the system view shows the prompt that was sent',
+        screen.includes('system prompt') && screen.includes('esc back'),
         tail(screen, 80));
     const dumped = dumpedPayloads(workspace.project);
     check('/prompt dump wrote a payload', dumped.length > 0, `scratch: ${workspace.project}/.rho/scratch`);

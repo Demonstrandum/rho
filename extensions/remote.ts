@@ -27,6 +27,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { addressName, parseAddress, sshTarget } from './lib/remote/address';
 import { browse } from './lib/picker';
 import { shorthandFor, takeVerb } from './lib/shorthand';
+import { completeLastWord, lastWord } from './lib/complete-words';
 import { branchSlug, parseProjectRequest, repoName, sessionName } from './lib/remote/naming';
 
 /** What /remote can be asked to do. A word is matched against these. */
@@ -882,32 +883,30 @@ export default function (pi: ExtensionAPI) {
          * Completing verbs everywhere meant `/remote connect <tab>` offered
          * `create`, and never offered the session you were about to name.
          */
-        getArgumentCompletions: (prefix) => {
-            const written = prefix.split(/\s+/);
-            const verb = written.length > 1 ? shorthandFor(written[0] ?? '', VERBS) : null;
-            const typing = written[written.length - 1] ?? '';
+        getArgumentCompletions: (text) => {
+            const { before, word } = lastWord(text);
+            const first = before.trim().split(/\s+/)[0] ?? '';
+            const verb = before.trim() === '' ? null : shorthandFor(first, VERBS);
 
             const sessionRows = [...new Set([...hosts.keys(), ...worktrees.keys()])].map((name) => ({
                 value: name,
-                label: name,
                 description: worktrees.get(name)?.path ?? hosts.get(name) ?? '',
             }));
-            const hostRows = [...new Set(hosts.values())].map((host) => ({ value: host, label: host }));
+            const hostRows = [...new Set(hosts.values())].map((host) => ({ value: host }));
 
             const offers =
                 verb === null
-                    ? [
-                          ...VERBS.map((word) => ({ value: word, label: word, description: '' })),
-                          ...sessionRows,
-                      ]
+                    ? [...VERBS.map((name) => ({ value: name })), ...sessionRows]
                     : verb === 'connect' || verb === 'stop'
                       ? [...sessionRows, ...hostRows]
                       : verb === 'list' || verb === 'manage' || verb === 'create' || verb === 'project'
                         ? hostRows
                         : [];
 
-            const found = offers.filter((offer) => offer.value.startsWith(typing));
-            return found.length > 0 ? found : null;
+            // Whole lines, not bare words: pi replaces the argument text with
+            // the value it is given, so a value holding only this word throws
+            // away everything typed before it.
+            return completeLastWord(`${before}${word}`, offers);
         },
         handler: async (args, ctx) => {
             // `/remote l` is list, `/remote conn` is connect: the first word is

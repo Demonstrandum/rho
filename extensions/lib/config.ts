@@ -352,6 +352,25 @@ const SCHEMA = {
             'the mode it was applied in',
         ),
     },
+    http: {
+        keepAliveMs: field(
+            'keep-alive-ms',
+            isPosInt,
+            15_000,
+            'how long an unused connection may be kept before it is closed rather',
+            'than reused. a machine behind NAT loses the record of an idle flow',
+            'after a few minutes and then answers nothing, so a connection older',
+            'than that window is a request that hangs until it times out. 0 keeps',
+            "whatever pi installed",
+        ),
+        responseMs: field(
+            'response-ms',
+            isPosInt,
+            120_000,
+            'how long to wait for a response that has begun but stopped arriving',
+        ),
+    },
+
     rewind: {
         autoCheckpoint: field(
             'auto-checkpoint',

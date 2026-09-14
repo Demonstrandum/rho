@@ -236,6 +236,32 @@ for (const message of state.messages) {
     }
 }
 
+/**
+ * Let the extensions see the far side's turn as a turn.
+ *
+ * The interface draws from session events, but everything around it is fed by
+ * extension events, which are raised by the session running the agent -- here,
+ * a session on another machine. Without this the working indicator has no
+ * message and draws as a blank line, so an answer that takes minutes is
+ * indistinguishable from a hang. One turn took five minutes and the screen did
+ * not move once.
+ *
+ * The mapping from agent event to extension event is pi's own, reused rather
+ * than copied, because a second copy of it would drift. What must not follow
+ * from this is local work on a remote turn: the checkpoint guard reads the
+ * environment marker and stands down.
+ */
+const raise = (made.session as unknown as { _emitExtensionEvent?: (event: unknown) => Promise<void> })
+    ._emitExtensionEvent;
+if (typeof raise === 'function') {
+    state.subscribe((event) => {
+        void raise.call(made.session, event).catch(() => {
+            // An extension that throws on a remote turn is not a reason to stop
+            // drawing one.
+        });
+    });
+}
+
 const proxied = remoteSession(made.session as unknown as Record<string, unknown>, link, state, actions);
 
 const runtime = new AgentSessionRuntime(

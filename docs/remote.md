@@ -43,7 +43,10 @@ the client hands over credentials as fresh as this machine's before every attach
 a host's own pi is whatever was installed there, and a host that has never had pi can hold a session this way.
 it is installed rather than copied, because pi's cli is a bundle whose externals resolve only when a package manager has put them there, and it is run with node in preference to bun, because a host's bun can be older than the pi it is asked to run.
 
-rho is not sent: the agent on the far side is pi with no extensions, and everything rho does happens in the client.
+rho is sent too, so the agent there is this agent: its tools, its prompt, its rules.
+the extensions are built to javascript here, where bun is, because the pi on a host runs under node when that host's bun is older than this pi, and node cannot load typescript.
+`bin/build-remote-rho` makes that package, and it is sent under a name taken from its contents, so an edit here is a different directory there.
+bun-runtime.ts is left out of it: it exists to force this process to be bun, which on such a host is a crash rather than a repair.
 
 **What the footer says.** the machine, the directory the session is working in, and the branch checked out there.
 the branch comes from the far side with the directory, since a branch read here belongs to a checkout the session cannot see.

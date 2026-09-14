@@ -224,6 +224,29 @@ async function place(host: string, say: (note: string) => void): Promise<string>
 
 /** Where the agent's own pi is kept on a host, one directory per version. */
 const PI_DIR = '.cache/rho/pi';
+/** Where a bun new enough to run it is kept, when the host's own is not. */
+const BUN_DIR = '.cache/rho/bun';
+/** Where rho itself is kept, one directory per revision of its source. */
+const RHO_DIR = '.cache/rho/agent';
+
+/**
+ * The oldest bun that can run the pi this machine is running.
+ *
+ * dev-box's 1.3.13 dies inside undici on pi 0.85.1, with an error about
+ * markAsUncloneable, and rho's extensions are typescript, which means bun
+ * rather than node has to be the one that loads them.
+ */
+const MIN_BUN = [1, 4, 0] as const;
+
+const newEnough = (version: string): boolean => {
+    const parts = version.trim().split('.').map((piece) => Number.parseInt(piece, 10));
+    for (const [index, least] of MIN_BUN.entries()) {
+        const found = parts[index] ?? 0;
+        if (found > least) return true;
+        if (found < least) return false;
+    }
+    return true;
+};
 
 /** The version of pi this machine is running. */
 function localPiVersion(): string | null {
@@ -445,10 +468,13 @@ export default function (pi: ExtensionAPI) {
         // say so plainly if it does not; only then is anything copied.
         const { hash } = await bundle();
         const file = `${REMOTE_DIR}/session-${hash}.js`;
-        // The laptop's own pi, so both machines run the same agent. Sent while
-        // the runner is being checked, since neither waits on the other.
-        const [lentPi] = await Promise.all([ensurePi(host, say).catch(() => null)]);
-        const withPi = lentPi === null ? '' : `RHO_PI_CLI=${lentPi} `;
+        // The same agent on both machines: this pi, a bun new enough to run it,
+        // and rho itself. Each is kept on the host and sent only when it is not
+        // already the one that is wanted.
+        const lentPi = await ensurePi(host, say).catch(() => null);
+        const lentRho = await ensureRho(host, lentPi, say).catch(() => null);
+        const withPi =
+            (lentPi === null ? '' : `RHO_PI_CLI=${lentPi} `) + (lentRho === null ? '' : `RHO_RHO_DIR=${lentRho} `);
         const quick = [
             `R=$(command -v bun || command -v node || true)`,
             `[ -n "$R" ] || exit 42`,
@@ -703,6 +729,49 @@ export default function (pi: ExtensionAPI) {
      * this way, and two machines that disagree about the version stop
      * disagreeing.
      */
+    /**
+     * A bun on that host new enough for this pi and for typescript extensions.
+     *
+     * Returns what to run it with. The host's own is used when it is new
+     * enough; otherwise the official build for its architecture is fetched
+     * once, kept here, and sent.
+     */
+    const ensureBun = async (host: string, say: (note: string) => void): Promise<string> => {
+        const asked = await run('ssh', [...SSH_FLAGS, host, 'bun --version 2>/dev/null; echo ---; uname -m']);
+        const [version = '', machine = ''] = asked.out.split('---');
+        if (version.trim() !== '' && newEnough(version)) return 'bun';
+
+        const mine = (await run('bun', ['--version'])).out.trim();
+        const arm = machine.trim().startsWith('aarch64') || machine.trim().startsWith('arm64');
+        const build = arm ? 'bun-linux-aarch64' : 'bun-linux-x64';
+        const remote = `${BUN_DIR}/${mine}/bun`;
+        const present = await run('ssh', [...SSH_FLAGS, host, `test -x ${remote} && echo yes || echo no`]);
+        if (present.out.trim() === 'yes') return `$HOME/${remote}`;
+
+        const zip = join(CACHE, `${build}-${mine}.zip`);
+        if (!existsSync(zip)) {
+            say(`fetching bun ${mine} for ${build.replace('bun-linux-', '')}`);
+            const url = `https://github.com/oven-sh/bun/releases/download/bun-v${mine}/${build}.zip`;
+            const got = await run('curl', ['-sSfL', '-o', zip, url]);
+            if (got.code !== 0) throw new Error(`could not fetch bun ${mine}: ${got.err.trim()}`);
+        }
+
+        say(`sending bun ${mine} to ${host}`);
+        const sent = await run(
+            'ssh',
+            [
+                ...SSH_FLAGS,
+                host,
+                `mkdir -p $HOME/${BUN_DIR}/${mine} && cat > /tmp/bun-${mine}.zip && ` +
+                    `cd $HOME/${BUN_DIR}/${mine} && unzip -oq /tmp/bun-${mine}.zip && ` +
+                    `mv ${build}/bun bun && chmod +x bun && rm -rf ${build} /tmp/bun-${mine}.zip`,
+            ],
+            readFileSync(zip),
+        );
+        if (sent.code !== 0) throw new Error(`could not send bun to ${host}: ${sent.err.trim()}`);
+        return `$HOME/${remote}`;
+    };
+
     const ensurePi = async (host: string, say: (note: string) => void): Promise<string | null> => {
         const version = localPiVersion();
         if (version === null) return null;
@@ -729,6 +798,59 @@ export default function (pi: ExtensionAPI) {
         const made = await run('ssh', [...SSH_FLAGS, host, install]);
         if (made.code !== 0) throw new Error(`could not install pi ${version} on ${host}: ${made.err.trim()}`);
         return cli;
+    };
+
+    /**
+     * rho itself on that host, so the agent there is the agent here.
+     *
+     * Without it the far side is pi with no extensions: none of rho's tools,
+     * none of its prompt, and a different agent from the one this machine
+     * talks to. The source is a few hundred kilobytes; its dependencies are
+     * installed there, which takes about ten seconds the first time.
+     *
+     * Keyed by the content of what is sent, so an edit here is a different
+     * directory there and nothing has to be invalidated by hand.
+     */
+    const ensureRho = async (host: string, piRoot: string | null, say: (note: string) => void): Promise<string | null> => {
+        if (piRoot === null) return null;
+        const root = join(remoteDir(), '..', '..', '..');
+
+        // Built here, where bun is. The far side loads it with node, because a
+        // host's bun can be older than this pi and the official build will not
+        // run on NixOS at all, and node cannot load typescript.
+        const packed = join(CACHE, 'remote-rho');
+        const made = await run('bun', [join(root, 'bin', 'build-remote-rho'), packed]);
+        if (made.code !== 0) throw new Error(`could not build rho for ${host}: ${made.err.trim() || made.out.trim()}`);
+
+        const listing = await run('sh', ['-c', `cd ${JSON.stringify(packed)} && find . -type f | sort`]);
+        const digest = createHash('sha256');
+        for (const file of listing.out.split('\n').filter((name) => name !== '')) {
+            try {
+                digest.update(file).update(readFileSync(join(packed, file)));
+            } catch {
+                // a file that vanished between listing and reading is not sent
+            }
+        }
+        const tag = digest.digest('hex').slice(0, 12);
+        const remote = `${RHO_DIR}/${tag}`;
+        const present = await run('ssh', [...SSH_FLAGS, host, `test -d ${remote}/extensions && echo yes || echo no`]);
+        // The link is remade either way: it points at the pi this session runs,
+        // and that pi's directory is where the bundles' externals resolve from.
+        const link = `ln -sfn ${piRoot.replace(/\/dist\/bundle\/cli\.js$/, '')}/../.. ${remote}/node_modules`;
+        if (present.out.trim() === 'yes') {
+            await run('ssh', [...SSH_FLAGS, host, link]);
+            return `$HOME/${remote}`;
+        }
+
+        say(`sending rho to ${host}`);
+        const sent = await run('sh', [
+            '-c',
+            `tar czf - -C ${JSON.stringify(packed)} . | ssh ${SSH_FLAGS.join(' ')} ${host} ` +
+                `'rm -rf ${remote}.part && mkdir -p ${remote}.part && tar xzf - -C ${remote}.part && ` +
+                `rm -rf ${remote} && mv ${remote}.part ${remote} && ${link}'`,
+        ]);
+        if (sent.code !== 0) throw new Error(`could not send rho to ${host}: ${sent.err.trim()}`);
+        return `$HOME/${remote}`;
     };
 
     /** Every session a host holds, stopped ones included. */

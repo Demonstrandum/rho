@@ -38,6 +38,8 @@ export interface SnapshotOptions {
     readonly timeoutMs: number;
 }
 
+import { runGit } from './run-git';
+
 type Run = { readonly ok: true; readonly text: string } | { readonly ok: false; readonly failure: Failure };
 
 // LC_ALL=C so the message below is the one git prints, whatever the user's
@@ -46,36 +48,17 @@ type Run = { readonly ok: true; readonly text: string } | { readonly ok: false; 
 const OUTSIDE_WORK_TREE = /not a git repository/i;
 
 const run = async (args: readonly string[], cwd: string, timeoutMs: number): Promise<Run> => {
-    try {
-        const proc = Bun.spawn(['git', ...args], {
-            cwd,
-            stdout: 'pipe',
-            stderr: 'pipe',
-            env: { ...process.env, LC_ALL: 'C' },
-        });
-        let timedOut = false;
-        const timer = setTimeout(() => {
-            timedOut = true;
-            proc.kill();
-        }, timeoutMs);
-        const text = await new Response(proc.stdout).text();
-        const errors = await new Response(proc.stderr).text();
-        clearTimeout(timer);
-        if ((await proc.exited) === 0) return { ok: true, text };
-        if (timedOut) {
-            return { ok: false, failure: { reason: 'unavailable', detail: `git ${args[0]} timed out after ${timeoutMs}ms` } };
-        }
-        if (OUTSIDE_WORK_TREE.test(errors)) return { ok: false, failure: { reason: 'not-a-repo' } };
-        const first = errors.split('\n').find((line) => line.length > 0) ?? `git ${args[0]} exited non-zero`;
-        return { ok: false, failure: { reason: 'unavailable', detail: first } };
-    } catch (error) {
-        // git missing from PATH, or a runtime without Bun.spawn. either way the
-        // work tree was never read, so nothing is known about it.
-        return {
-            ok: false,
-            failure: { reason: 'unavailable', detail: error instanceof Error ? error.message : String(error) },
-        };
+    // Through runGit, so this works under node as well as bun: the agent on
+    // another machine runs under whichever of them that machine can give it.
+    const answer = await runGit(args, cwd, timeoutMs);
+    if (answer.ok) return { ok: true, text: answer.text };
+    if (answer.code === null) return { ok: false, failure: { reason: 'unavailable', detail: answer.errors } };
+    if (answer.timedOut) {
+        return { ok: false, failure: { reason: 'unavailable', detail: `git ${args[0]} timed out after ${timeoutMs}ms` } };
     }
+    if (OUTSIDE_WORK_TREE.test(answer.errors)) return { ok: false, failure: { reason: 'not-a-repo' } };
+    const first = answer.errors.split('\n').find((line) => line.length > 0) ?? `git ${args[0]} exited non-zero`;
+    return { ok: false, failure: { reason: 'unavailable', detail: first } };
 };
 
 /**

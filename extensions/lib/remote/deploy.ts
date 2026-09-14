@@ -8,6 +8,7 @@
  * node costs a `test -x` and nothing else.
  */
 
+import { controlPath } from './agent-tag';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
@@ -84,7 +85,7 @@ export function parseTarget(text: string): Address {
  */
 const sshOptions = (role: 'command' | 'attach' = 'command'): string[] => {
     mkdirSync(CACHE, { recursive: true });
-    const path = join(CACHE, 'cm-%C');
+    const path = controlPath(CACHE);
     // `no` for the attach, `auto` for everything else.
     //
     // A session that becomes the master keeps the shared connection alive, and

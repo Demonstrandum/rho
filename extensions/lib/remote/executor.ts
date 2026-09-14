@@ -78,6 +78,9 @@ const concat = (chunks: readonly Uint8Array[], total: number): Uint8Array => {
 };
 
 export class Executor {
+    /** what the current connection lends: a forwarded agent, mostly. */
+    private lent: Record<string, string> = {};
+
     private readonly processes = new Map<ProcessId, Held>();
     private next = 1;
     private cwd: string;
@@ -142,6 +145,13 @@ export class Executor {
                 return { kind: 'cwd', path: this.cwd };
             }
 
+            case 'environment': {
+                // Replaced rather than merged: what the last connection lent is
+                // gone with it, and keeping a dead socket path around is how a
+                // clone fails with a message about permissions.
+                this.lent = { ...request.env };
+                return { kind: 'ok' };
+            }
             case 'cwd':
                 return { kind: 'cwd', path: this.cwd };
 
@@ -231,7 +241,7 @@ export class Executor {
         try {
             child = spawn(shell(), ['-lc', request.command], {
                 cwd: request.cwd === undefined ? this.cwd : this.at(request.cwd),
-                env: { ...process.env, ...request.env },
+                env: { ...process.env, ...this.lent, ...request.env },
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
         } catch (error) {

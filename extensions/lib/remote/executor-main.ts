@@ -11,6 +11,7 @@ import { connect as connectSocket, createServer } from 'node:net';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { Executor, serve } from './executor';
+import { encode } from './protocol';
 
 /**
  * Three shapes, chosen by argv, because reconnecting must not cost a deploy.
@@ -53,6 +54,27 @@ if (attachPath !== undefined) {
             process.exit(0);
         };
         socket.on('connect', () => {
+            /**
+             * What this connection lends the daemon.
+             *
+             * A forwarded ssh agent belongs to the connection it arrived on,
+             * and the daemon outlives connections: the socket path it was
+             * started with is dead by the next attach, so a clone on the far
+             * side asks an agent that is not there and fails about public
+             * keys. This relay is inside the live connection, so it is the one
+             * that knows the live path.
+             *
+             * Sent as a framed request before the pipes are joined, so it is
+             * the first thing the daemon reads and every later command has it.
+             */
+            const lending: Record<string, string> = {};
+            for (const name of ['SSH_AUTH_SOCK', 'SSH_CONNECTION', 'SSH_CLIENT']) {
+                const value = process.env[name];
+                if (value !== undefined && value !== '') lending[name] = value;
+            }
+            if (Object.keys(lending).length > 0) {
+                socket.write(encode({ type: 'request', id: 0, body: { kind: 'environment', env: lending } }));
+            }
             process.stdin.pipe(socket);
             socket.pipe(process.stdout);
         });

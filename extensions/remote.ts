@@ -26,6 +26,7 @@ import { Type } from 'typebox';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { addressName, parseAddress, sshTarget } from './lib/remote/address';
 import { browse } from './lib/picker';
+import { controlPath } from './lib/remote/agent-tag';
 import { shorthandFor, takeVerb } from './lib/shorthand';
 import { completeLastWord, lastWord } from './lib/complete-words';
 import { troubleWith } from './lib/remote/advice';
@@ -86,7 +87,7 @@ const SSH_FLAGS = [
     '-o',
     'ControlMaster=auto',
     '-o',
-    `ControlPath=${join(CACHE, 'cm-%C')}`,
+    `ControlPath=${controlPath(CACHE)}`,
     '-o',
     'ControlPersist=10m',
 ];

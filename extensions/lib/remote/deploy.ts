@@ -101,6 +101,22 @@ const sshOptions = (role: 'command' | 'attach' = 'command'): string[] => {
     // because a clone on the far side needs it, and ssh is told to keep quiet
     // about anything short of an error.
     const quiet = [
+        // A machine allocated a minute ago has a host key nothing has seen
+        // before, and there is no terminal on this side of the call to answer
+        // the prompt with: attaching to a fresh node failed with "Host key
+        // verification failed" and the tools quietly stayed on the laptop.
+        // accept-new trusts an unknown host once and still refuses one whose
+        // key has changed, which is the case that matters.
+        '-o',
+        'StrictHostKeyChecking=accept-new',
+        // The agent goes with the connection, because cloning a private
+        // repository on the far side is the ordinary thing to do there and the
+        // alternative is a key on a machine that should not hold one. It is
+        // the same trade ssh config already makes for the hosts a person has
+        // written ForwardAgent for; this makes it true for a node allocated a
+        // minute ago, which nobody has written anything about.
+        '-o',
+        'ForwardAgent=yes',
         '-o',
         'ClearAllForwardings=yes',
         '-o',

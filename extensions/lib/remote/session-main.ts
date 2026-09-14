@@ -216,6 +216,11 @@ if (verb === 'serve') {
     if (await existing(name)) die(`${name} is already running`);
 
     const cwd = rest[0] !== undefined && !rest[0].startsWith('-') ? rest[0] : process.env.HOME ?? '/';
+    // Checked here, where the directory is named, because a spawn with a
+    // working directory that does not exist reports ENOENT against the binary:
+    // asking for a session in a directory that is not there produced a stack
+    // trace about bun not existing, which it did.
+    if (!existsSync(cwd)) die(`${cwd} does not exist on this machine`);
     const piArgs = rest.includes('--') ? rest.slice(rest.indexOf('--') + 1) : [];
 
     // Detach unless asked not to: `ssh host rho-session serve` returns as soon
@@ -229,6 +234,9 @@ if (verb === 'serve') {
             stdio: 'ignore',
             env: { ...process.env, ...lent.env, ...credentials, RHO_SESSION_FOREGROUND: '1' },
         });
+        // A spawn that cannot start says so once, in a sentence, rather than
+        // as a stack trace through node's child_process.
+        child.on('error', (trouble: Error) => die(`could not start ${name}: ${trouble.message}`));
         child.unref();
         // Wait for the socket rather than claiming success: a session that
         // failed to start should say so while the laptop is still listening.

@@ -138,13 +138,27 @@ function unquote(literal: string): string {
 
 function stringField(block: string, key: string): string | null {
     const m = new RegExp(`${key}\\s*:\\s*(["'\`])((?:[^\\\\]|\\\\.)*?)\\1`).exec(block);
-    return m ? unquote(m[2]) : null;
+    return m ? interpolated(unquote(m[2])) : null;
 }
 
-/** parse `{ name: "x", description: "y", argumentHint: "z" }` object literals. */
+// `Quit ${APP_NAME}` reaches here with the interpolation unevaluated. the only
+// one pi uses names the app, and the value is not in scope of a parse, so the
+// placeholder is replaced by the name it stands for.
+function interpolated(text: string): string {
+    return text.replace(/\$\{APP_NAME\}/g, 'pi').replace(/\$\{[^}]*\}/g, '');
+}
+
+/**
+ * parse `{ name: "x", description: "y", argumentHint: "z" }` object literals.
+ *
+ * a block may hold one level of nesting, because a description is sometimes a
+ * template literal naming the app: `Quit ${APP_NAME}`. without that level the
+ * braces of the interpolation end the block early, and the entry carrying it is
+ * dropped from the index.
+ */
 export function parseBuiltinCommands(source: string): CommandRecord[] {
     const out: CommandRecord[] = [];
-    for (const m of source.matchAll(/\{[^{}]*\}/g)) {
+    for (const m of source.matchAll(/\{(?:[^{}]|\{[^{}]*\})*\}/g)) {
         const block = m[0];
         const name = stringField(block, 'name');
         if (name === null || !/^[a-z][a-z0-9:-]*$/i.test(name)) continue;

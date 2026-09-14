@@ -39,6 +39,15 @@ a member that cannot be asked at all refuses by name rather than answering about
 the far side then answers with an empty message carrying the refusal inside it, which reads as the model having nothing to say.
 the client hands over credentials as fresh as this machine's before every attach, and pi rereads them without restarting.
 
+**Which pi runs there.** the version this machine runs, installed on the host under `~/.cache/rho/pi/<version>` the first time it is needed and reused after.
+a host's own pi is whatever was installed there, and a host that has never had pi can hold a session this way.
+it is installed rather than copied, because pi's cli is a bundle whose externals resolve only when a package manager has put them there, and it is run with node in preference to bun, because a host's bun can be older than the pi it is asked to run.
+
+rho is not sent: the agent on the far side is pi with no extensions, and everything rho does happens in the client.
+
+**What the footer says.** the machine, the directory the session is working in, and the branch checked out there.
+the branch comes from the far side with the directory, since a branch read here belongs to a checkout the session cannot see.
+
 **When nothing arrives.** a model request that gets no answer looks exactly like one that is thinking, because both are an absence of events.
 one request from dev-box, after the session had sat idle, went out over a keep-alive socket the network had already dropped and took five minutes to time out and retry, with nothing drawn in between.
 fifteen seconds of silence during a turn now says so, and counts: `waiting on the model, 45s without a reply`.

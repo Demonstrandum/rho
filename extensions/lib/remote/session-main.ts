@@ -181,6 +181,9 @@ if (verb === 'serve') {
     }
 
     const broker = new Broker(name, 'pi', ['--mode', 'rpc', '--name', name, ...piArgs], cwd);
+    // The session is the agent: when it goes, this process has nothing left to
+    // hold and no reason to stay resident.
+    broker.onEnded = () => process.exit(0);
     broker.listen();
     for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => broker.stop());
     // Nothing else to do: the broker owns the process and the socket.

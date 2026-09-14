@@ -137,4 +137,19 @@ describe('broker', () => {
         expect(complaints.map((event) => event.text)).toEqual(['a stack trace', 'over two lines']);
         watcher.end();
     });
+
+    test('a broker does not outlive the agent it exists to hold', async () => {
+        // Stopping a session killed the agent and left the broker resident,
+        // reparented to init, holding a machine's memory for nothing and a
+        // stale socket that the next attach would connect to.
+        const broker = start('mortal');
+        const ended = new Promise<void>((resolve) => {
+            broker.onEnded = () => resolve();
+        });
+        broker.stop();
+        await ended;
+        expect(broker.state.alive).toBe(false);
+        expect(await existing('mortal')).toBe(false);
+        expect(named()).not.toContain('mortal');
+    });
 });

@@ -39,6 +39,8 @@ export interface DirectoryFacts {
     readonly cwd: string;
     readonly home: string;
     readonly insideGitWorkTree: boolean;
+    /** true when the agent is running on another machine. */
+    readonly elsewhere?: boolean;
 }
 
 /**
@@ -46,6 +48,10 @@ export interface DirectoryFacts {
  * repo turns every turn into a snapshot of everything under home.
  */
 export function shouldCheckpoint(mode: CheckpointMode, facts: DirectoryFacts): boolean {
+    // A session running on another machine edits files there, and a snapshot
+    // of this machine's directory records none of it: it would be a checkpoint
+    // of the wrong tree, taken every turn, that /rewind could not undo.
+    if (facts.elsewhere === true) return false;
     if (mode === 'always') return true;
     if (mode === 'never') return false;
     if (resolve(facts.cwd) === resolve(facts.home)) return false;
@@ -126,10 +132,14 @@ export default function (pi: ExtensionAPI) {
     if (config.rewind.onFailure === 'disable-session') watchCheckpointFailures(pi);
 
     const cwd = process.cwd();
+    // The remote client publishes this before any extension loads, so a
+            // session drawn here but running elsewhere is known at this point.
+    const elsewhere = (globalThis as { __rho_environment?: { alive?: boolean } }).__rho_environment?.alive === true;
     const enabled = shouldCheckpoint(config.rewind.autoCheckpoint, {
         cwd,
         home: homedir(),
-        insideGitWorkTree: insideGitWorkTree(cwd),
+        insideGitWorkTree: elsewhere ? false : insideGitWorkTree(cwd),
+        elsewhere,
     });
     try {
         ensureGlobalSetting(['ayu', 'checkpoint', 'enabled'], enabled);

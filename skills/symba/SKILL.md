@@ -53,7 +53,7 @@ a gpu profile costs roughly a hundred times a cpu one, and a node that expires t
 
 ```sh
 symba extend <id> --hours 4      # before it expires, never after
-symba download ubuntu@<node>:/home/ubuntu/runs/out.tar.zst ./out.tar.zst
+symba download --node <id> /home/ubuntu/runs/out.tar.zst ./out.tar.zst
 symba storage upload ubuntu@<node>:/home/ubuntu/runs/out.tar.zst <name>.tar.zst
 symba terminate <id> --yes       # the moment the run is done
 ```
@@ -66,11 +66,19 @@ symba terminate <id> --yes       # the moment the run is done
 `bin/symba-doctor` in robotics-server answers, in one command, whether this machine can allocate at all: tailnet membership, whether the forge api resolves, whether it answers, and whether symba itself is installed.
 run it on robotics-vm before anything else, because every failure below looks like a network error from the cli.
 
-- symba's built-in api address is `forge-api.tailbce956.ts.net`, which is not a name this tailnet serves; the device is `symbolica-forge-api`.
-  `SYMBA_API_URL=https://symbolica-forge-api.tailbce956.ts.net symba profiles` is the form that has a chance of working.
+- symba's api address, `forge-api.tailbce956.ts.net`, is a tailnet name: it resolves on the laptop and not on robotics-vm, which is the whole difference between them today.
+  allocate from the laptop while that is true, and attach the agent to the node from wherever it is.
 - a peer this device is not permitted to see reports `no matching peer` from `tailscale ping`, and the cli says only `Name or service not known`.
   that is an acl question for the tailnet admin, not something to retry.
 - forge nodes accept tailscale ssh from robotics-vm only where the acl allows those tags to talk.
+
+## two things that bite
+
+a spot profile can be taken back at any moment: one taken for this demo went away after eight minutes, mid run.
+anything that must survive an hour is on-demand, and `-spot` is for work that can be lost.
+
+a node allocated a minute ago has a host key nothing has seen and no repository of its own.
+the agent's ssh accepts an unknown host once and forwards the laptop's ssh agent, so a clone on the node works and leaves no key there; the agent is what github sees, and it goes away with the connection.
 
 ## rules that are not negotiable
 

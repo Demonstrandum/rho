@@ -675,7 +675,20 @@ export default function (pi: ExtensionAPI) {
                     await attach(name, verb, (note) => ctx.ui.notify(note, 'info'));
                     ctx.ui.notify(`Attached ${name}. /environment local comes back.`, 'info');
                 } catch (error) {
-                    ctx.ui.notify(`Could not attach: ${(error as Error).message}`, 'error');
+                    // Refused, not quietly left here. Asking to work on another
+                    // machine and being given this one is the failure that
+                    // matters: a node allocated a minute ago whose host key was
+                    // unknown left the tools on the laptop, and the next
+                    // command ran here as though nothing had happened.
+                    dead = { name, why: (error as Error).message };
+                    current = null;
+                    published[PUBLISHED] = undefined;
+                    remember();
+                    ctx.ui.notify(
+                        `Could not attach ${name}: ${(error as Error).message}. ` +
+                            `Commands are refused until this works or /environment local is asked for.`,
+                        'error',
+                    );
                 }
                 return;
             }
@@ -722,7 +735,20 @@ export default function (pi: ExtensionAPI) {
                     await attach(name, rest, (note) => ctx.ui.notify(note, 'info'));
                     ctx.ui.notify(`Attached ${name}. Tools now act there; /environment default local comes back.`, 'info');
                 } catch (error) {
-                    ctx.ui.notify(`Could not attach: ${(error as Error).message}`, 'error');
+                    // Refused, not quietly left here. Asking to work on another
+                    // machine and being given this one is the failure that
+                    // matters: a node allocated a minute ago whose host key was
+                    // unknown left the tools on the laptop, and the next
+                    // command ran here as though nothing had happened.
+                    dead = { name, why: (error as Error).message };
+                    current = null;
+                    published[PUBLISHED] = undefined;
+                    remember();
+                    ctx.ui.notify(
+                        `Could not attach ${name}: ${(error as Error).message}. ` +
+                            `Commands are refused until this works or /environment local is asked for.`,
+                        'error',
+                    );
                 }
                 return;
             }

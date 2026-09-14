@@ -13,7 +13,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { attach, Broker, existing, facts, named, stop } from './broker';
@@ -95,7 +95,8 @@ const readFromStdin = async (): Promise<Lent> => {
 };
 
 /**
- * A config directory of this session's own, holding the laptop's credentials.
+ * A config directory of this session's own, holding the laptop's credentials
+ * and its transcript.
  *
  * An API key can travel as an environment variable; an OAuth login cannot,
  * because pi reads it from auth.json. Writing that into the host's own
@@ -104,25 +105,33 @@ const readFromStdin = async (): Promise<Lent> => {
  *
  * So the session gets its own directory, mode 0700, with everything else in
  * the real config directory symlinked in so settings, packages and extensions
- * still resolve. PI_CODING_AGENT_DIR points pi at it. It is removed when the
- * session ends.
+ * still resolve. PI_CODING_AGENT_DIR points pi at it.
+ *
+ * It lives where state is kept rather than in a temporary directory, and
+ * starting a session again keeps what is in it. It used to be under /tmp and
+ * to be emptied on every start, so stopping a session and starting it under
+ * the same name destroyed the conversation, and a reboot destroyed all of
+ * them. Only the credentials are rewritten; `forget` is how a transcript goes.
  */
-const credentialDir = (name: string): string =>
-    join(process.env.XDG_RUNTIME_DIR ?? tmpdir(), `rho-session-${name}`);
+const stateHome = (): string =>
+    process.env.XDG_STATE_HOME ?? join(process.env.HOME ?? tmpdir(), '.local', 'state');
+
+const credentialDir = (name: string): string => join(stateHome(), 'rho', 'sessions', name);
 
 const lendCredentials = (auth: string, name: string): string => {
     const real = join(process.env.HOME ?? '/tmp', '.pi', 'agent');
     const dir = credentialDir(name);
-    rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true, mode: 0o700 });
 
     try {
         for (const entry of readdirSync(real)) {
-            if (entry === 'auth.json') continue;
+            // auth.json is written here, and sessions is this session's own.
+            if (entry === 'auth.json' || entry === 'sessions') continue;
             try {
                 symlinkSync(join(real, entry), join(dir, entry));
             } catch {
-                // an entry that cannot be linked is one pi will do without
+                // an entry that cannot be linked is one pi will do without, and
+                // a link that is already there is the one we would have made
             }
         }
     } catch {
@@ -142,6 +151,57 @@ const lendCredentials = (auth: string, name: string): string => {
  * pi rereads auth.json when it changes, so handing it a newer one is enough --
  * no restart, and the session keeps its history.
  */
+/** Every session this machine holds, running or stopped. */
+if (verb === 'all') {
+    const dir = join(stateHome(), 'rho', 'sessions');
+    const held = (() => {
+        try {
+            return readdirSync(dir);
+        } catch {
+            return [] as string[];
+        }
+    })();
+    const names = [...new Set([...named(), ...held])].sort();
+    for (const session of names) {
+        const alive = await existing(session);
+        const where = alive ? (facts(session)?.cwd ?? '') : '';
+        process.stdout.write(`${session}\t${alive ? 'running' : 'stopped'}\t${where}\n`);
+    }
+    if (names.length === 0) process.stdout.write('no sessions\n');
+    process.exit(0);
+}
+
+/**
+ * A new name for a session, transcript and all.
+ *
+ * Only while it is stopped: the name is in the socket, the pid file and the
+ * agent's own arguments, and renaming those under a running session would
+ * leave a client talking to a socket nobody answers.
+ */
+if (verb === 'rename') {
+    const to = rest[0];
+    if (to === undefined) die('usage: rename <old> <new>');
+    if (!/^[A-Za-z0-9._-]+$/.test(to)) die(`${to} is not a name a session can have`);
+    if (await existing(name)) die(`${name} is running: stop it before renaming it`);
+    const from = credentialDir(name);
+    const onto = credentialDir(to);
+    if (!existsSync(from)) die(`no session called ${name}`);
+    if (existsSync(onto)) die(`${to} already exists`);
+    renameSync(from, onto);
+    process.stdout.write(`${name} is now ${to}\n`);
+    process.exit(0);
+}
+
+/** The transcript and the credentials, gone. This is the destructive one. */
+if (verb === 'forget') {
+    if (await existing(name)) die(`${name} is running: stop it before forgetting it`);
+    const dir = credentialDir(name);
+    if (!existsSync(dir)) die(`no session called ${name}`);
+    rmSync(dir, { recursive: true, force: true });
+    process.stdout.write(`forgot ${name}\n`);
+    process.exit(0);
+}
+
 if (verb === 'relend') {
     const lent = await readFromStdin();
     if (lent.auth === null) die('nothing to lend');
@@ -182,7 +242,11 @@ if (verb === 'serve') {
         die(`${name} did not start`);
     }
 
-    const broker = new Broker(name, 'pi', ['--mode', 'rpc', '--name', name, ...piArgs], cwd);
+    // A session that has been here before picks up where it stopped: its
+            // transcript is in its own directory, and stopping is not forgetting.
+    const kept = existsSync(join(credentialDir(name), 'sessions'));
+    const resume = kept ? ['--continue'] : [];
+    const broker = new Broker(name, 'pi', ['--mode', 'rpc', '--name', name, ...resume, ...piArgs], cwd);
     // The session is the agent: when it goes, this process has nothing left to
     // hold and no reason to stay resident.
     broker.onEnded = () => process.exit(0);

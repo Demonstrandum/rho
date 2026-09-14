@@ -65,14 +65,14 @@ eight attach and detach cycles leave no relays behind and settle at 370ms per at
 ## /remote project: a repo and a worktree, without ssh
 
 ```
-/remote project git@github.com:example-org/demo-server.git demo/main samuel@dev-box
-/remote connect demo
+/remote project git@github.com:example-org/demo-server.git feature/remote samuel@dev-box
+/remote connect demo-server-feature-remote
 ```
 
 makes `~/projects/demo/checkout/demo-server` and `~/projects/demo/worktrees/main`, then starts a session in the worktree.
 the clone uses the laptop's forwarded agent, so no key is on the host.
 
-- ask for a second branch: `/remote project <same repo> demo/other`; it should.
+- ask for a second branch: `/remote project <same repo> other`; it should.
   reuse the clone and add a worktree, not clone again.
 - asking for the same branch twice should land in the existing worktree rather.
   than failing.

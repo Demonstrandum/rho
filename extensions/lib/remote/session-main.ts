@@ -173,6 +173,21 @@ const lendCredentials = (auth: string, name: string): string => {
     }
 
     writeFileSync(join(dir, 'auth.json'), auth, { mode: 0o600 });
+
+    /**
+     * rho, when it was sent, as the package this session loads.
+     *
+     * Written rather than symlinked from the host's own config: the host may
+     * have no pi config at all, and what the agent loads here should be the
+     * rho that was sent rather than whatever that machine happens to hold.
+     */
+    const rho = process.env.RHO_RHO_DIR;
+    if (rho !== undefined && rho !== '') {
+        rmSync(join(dir, 'settings.json'), { force: true });
+        writeFileSync(join(dir, 'settings.json'), `${JSON.stringify({ packages: [rho] }, null, 2)}\n`, {
+            mode: 0o600,
+        });
+    }
     return dir;
 };
 
@@ -284,7 +299,16 @@ if (verb === 'serve') {
     // it is being asked to run, and robotics-vm's 1.3.13 dies inside undici on
     // pi 0.85.1 with an error about markAsUncloneable. node is what the
     // package was installed for.
-    const runtime = which('node') ?? which('bun') ?? process.execPath;
+    // node unless a bun was sent for this session.
+    //
+    // rho arrives here already built to javascript, so node can load it, and a
+    // host's own bun can be older than the pi it is being asked to run:
+    // robotics-vm's 1.3.13 dies inside undici on pi 0.85.1.
+    const sentBun = process.env.RHO_BUN;
+    const runtime =
+        sentBun !== undefined && sentBun !== '' && (sentBun === 'bun' || existsSync(sentBun))
+            ? sentBun
+            : (which('node') ?? which('bun') ?? process.execPath);
     const [command, head] = usable ? [runtime, [lentPi as string]] : ['pi', [] as string[]];
     const broker = new Broker(name, command, [...head, '--mode', 'rpc', '--name', name, ...resume, ...piArgs], cwd);
     // The session is the agent: when it goes, this process has nothing left to

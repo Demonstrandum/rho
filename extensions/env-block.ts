@@ -2,6 +2,10 @@ import { platform, release } from 'node:os';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { config } from './lib/config';
 import { currentEnvironment } from './environment';
+import { runGit } from './lib/run-git';
+
+/** long enough for a cold work tree, short enough not to hold up a turn. */
+const PROBE_TIMEOUT_MS = 5_000;
 
 // states the facts about the machine and the session that the agent otherwise
 // spends a tool call to learn: where it is, what it is running on, what day it
@@ -47,26 +51,17 @@ interface Facts {
 }
 
 export const probeRepo = async (cwd: string): Promise<RepoState> => {
-    try {
-        const proc = Bun.spawn(['git', 'rev-parse', '--is-inside-work-tree'], {
-            cwd,
-            stdout: 'pipe',
-            stderr: 'ignore',
-            // passed rather than inherited, so the lookup of git follows the
-            // PATH this process holds now.
-            env: { ...process.env },
-        });
-        const out = (await new Response(proc.stdout).text()).trim();
-        // git answers `false` inside a bare repository, and exits non-zero with
-        // no output outside a work tree. both are answers.
-        if (out === 'true') return 'yes';
-        if (out === 'false') return 'no';
-        return (await proc.exited) === 0 ? 'unknown' : 'no';
-    } catch {
-        // git missing from PATH, or a runtime without Bun.spawn: the probe never
-        // ran, so the directory is not what this describes.
-        return 'unknown';
-    }
+    // Through runGit, because the agent on another machine runs under whatever
+    // runtime that machine can give it, and a probe that never ran must not be
+    // reported as an answer about the directory.
+    const answer = await runGit(['rev-parse', '--is-inside-work-tree'], cwd, PROBE_TIMEOUT_MS);
+    if (!answer.ok) return answer.code === null ? 'unknown' : 'no';
+    const out = answer.text.trim();
+    // git answers `false` inside a bare repository, and exits non-zero with no
+    // output outside a work tree. both are answers.
+    if (out === 'true') return 'yes';
+    if (out === 'false') return 'no';
+    return 'unknown';
 };
 
 const modelLine = (ctx: ExtensionContext): string => {

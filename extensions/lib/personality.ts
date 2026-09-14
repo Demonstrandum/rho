@@ -17,6 +17,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { rhoRoot } from './rho-root';
 import { fileURLToPath } from 'node:url';
 import envPaths from 'env-paths';
 
@@ -42,7 +43,9 @@ export interface Personality extends PersonalityRef {
  */
 export type InjectionMode = 'prompt' | 'message';
 
-const packageDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// found rather than counted: the remote agent package has these files at a
+// different depth, and a count lands outside it. see rho-root.ts.
+const packageDir = rhoRoot(fileURLToPath(import.meta.url));
 const paths = envPaths('rho', { suffix: '' });
 
 export const BUNDLED_DIR = join(packageDir, 'personalities');

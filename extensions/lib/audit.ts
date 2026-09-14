@@ -9,12 +9,13 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { rhoRoot } from './rho-root';
 import { Type, type Static } from 'typebox';
 import type { Api, AssistantMessage, Model, Tool, ToolCall } from '@earendil-works/pi-ai';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { config } from './config';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const root = rhoRoot(fileURLToPath(import.meta.url));
 
 const TOOL_NAME = 'report_findings';
 

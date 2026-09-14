@@ -1,0 +1,91 @@
+#!/usr/bin/env bun
+/**
+ * rho as a package a host can load without bun.
+ *
+ * The agent on another machine should be this agent: the same tools, the same
+ * prompt, the same rules. Sending the source does not achieve that, because
+ * rho is typescript and the pi that runs there runs under node, which cannot
+ * load it. A host's own bun is not a way round it either: robotics-vm's is too
+ * old for this pi, and the official build will not run on NixOS at all.
+ *
+ * So the extensions are built here, where bun is, into plain javascript with
+ * pi's own modules left external, and the resources they read travel beside
+ * them. The result is a directory pi can be pointed at by `packages`.
+ */
+
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { $ } from 'bun';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const out = process.argv[2] ?? join(root, 'build', 'remote-rho');
+
+/** pi's own modules come from the pi that loads this, never from a copy. */
+const EXTERNAL = ['@earendil-works/*', '@mariozechner/*'];
+
+/**
+ * Left out of the remote package.
+ *
+ * bun-runtime.ts exists to force this process to be bun, by re-running pi
+ * under whatever bun the machine has. On a host whose bun is older than this
+ * pi that is a crash rather than a repair, and the reason the extensions are
+ * built to javascript is that node is what will load them there.
+ */
+const WITHOUT = ['bun-runtime'];
+
+/** what an extension reads at runtime, beside the code that reads it. */
+const RESOURCES = ['skills', 'prompts', 'themes', 'system', 'rho.toml', 'maxims.txt'];
+
+rmSync(out, { recursive: true, force: true });
+mkdirSync(join(out, 'extensions'), { recursive: true });
+
+const built = await $`bun build ${join(root, 'extensions')}/*.ts --target=node --outdir ${join(out, 'extensions')} ${EXTERNAL.flatMap((name) => ['--external', name])}`.quiet();
+if (built.exitCode !== 0) {
+    process.stderr.write(built.stderr.toString());
+    process.exit(1);
+}
+
+for (const name of WITHOUT) rmSync(join(out, 'extensions', 'extensions', `${name}.js`), { force: true });
+
+// bun keeps the entry points' directory, so the files land one level in.
+const nested = join(out, 'extensions', 'extensions');
+if (existsSync(nested)) {
+    cpSync(nested, join(out, 'extensions'), { recursive: true });
+    rmSync(nested, { recursive: true, force: true });
+}
+
+// Assets an extension reads by path rather than by import.
+const assets = join(root, 'extensions', 'assets');
+if (existsSync(assets)) cpSync(assets, join(out, 'extensions', 'assets'), { recursive: true });
+for (const name of RESOURCES) {
+    const from = join(root, name);
+    if (existsSync(from)) cpSync(from, join(out, name), { recursive: true });
+}
+
+const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+    version?: string;
+    pi?: { skills?: string[]; prompts?: string[]; themes?: string[] };
+};
+
+writeFileSync(
+    join(out, 'package.json'),
+    `${JSON.stringify(
+        {
+            name: 'rho-remote-agent',
+            version: manifest.version ?? '0.0.0',
+            type: 'module',
+            private: true,
+            pi: {
+                extensions: ['./extensions'],
+                skills: existsSync(join(out, 'skills')) ? ['./skills'] : undefined,
+                prompts: existsSync(join(out, 'prompts')) ? ['./prompts'] : undefined,
+                themes: existsSync(join(out, 'themes')) ? ['./themes'] : undefined,
+            },
+        },
+        null,
+        2,
+    )}\n`,
+);
+
+process.stdout.write(`${out}\n`);

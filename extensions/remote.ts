@@ -451,13 +451,11 @@ export default function (pi: ExtensionAPI) {
         if (/already running/.test(attempt.out) || /already running/.test(attempt.err)) {
             hosts.set(name, host);
             rememberHosts();
-        rememberHosts();
             return `${name} is already running on ${host}`;
         }
         if (attempt.code === 0) {
             hosts.set(name, host);
             rememberHosts();
-        rememberHosts();
             await run('ssh', [...SSH_FLAGS, host, linkRunner]);
             return attempt.out.trim();
         }
@@ -641,6 +639,39 @@ export default function (pi: ExtensionAPI) {
             lines.push(`  ${name}  not running${tree === undefined ? '' : `, project at ${tree.path}`}`);
         }
         return lines.join('\n');
+    };
+
+    /**
+     * The runner on that host, brought up to date.
+     *
+     * It is installed by content hash, so a newer rho is a different file and
+     * the stable name is repointed at it. Done on connect as well as create:
+     * the runner is rho's own code and a session started last week should not
+     * be attached to by last week's version of it.
+     */
+    const ensureRunner = async (host: string, say: (note: string) => void): Promise<void> => {
+        // One call for the usual case, where the runner is already the current
+        // one: it checks and relinks in the same round trip, and only a runner
+        // that is genuinely missing costs a second one. Asking separately took
+        // three seconds of ssh handshakes to discover that nothing had changed.
+        const { path, hash } = await bundle();
+        const file = `${REMOTE_DIR}/session-${hash}.js`;
+        const quick = [`[ -s ${file} ] || exit 43`, `ln -sf session-${hash}.js ${RUNNER_LINK}`].join('; ');
+        const attempt = await run('ssh', [...SSH_FLAGS, host, quick]);
+        if (attempt.code === 0) return;
+        if (attempt.code !== 43) throw new Error(attempt.err.trim() || `could not reach ${host}`);
+
+        say(`copying the session runner to ${host}`);
+        const sent = await run(
+            'ssh',
+            [
+                ...SSH_FLAGS,
+                host,
+                `mkdir -p ${REMOTE_DIR} && cat > ${file}.part && mv ${file}.part ${file} && ln -sf session-${hash}.js ${RUNNER_LINK}`,
+            ],
+            readFileSync(path),
+        );
+        if (sent.code !== 0) throw new Error(`could not copy the session runner: ${sent.err.trim()}`);
     };
 
     /** Every session a host holds, stopped ones included. */
@@ -889,6 +920,14 @@ export default function (pi: ExtensionAPI) {
                 // for an external editor -- so this borrows that: the drawing
                 // stops, the client runs in its place, and when it exits the
                 // interface comes back exactly as it was.
+                // rho's own code on that machine, brought up to date before it
+                // is used: a session started last week should not be attached
+                // to by last week's runner.
+                await ensureRunner(host, () => {}).catch(() => {
+                    // An update that cannot be made is not a reason to refuse a
+                    // session that is already running.
+                });
+
                 const client = join(rhoRoot(), 'bin', 'rho-remote');
                 await ctx.ui.custom<void>(
                     (tui, _theme, _keys, done) => {

@@ -296,22 +296,19 @@ const interactive = new InteractiveMode(runtime, {
 });
 
 /**
- * Draw over what is already on the screen, and give it back on the way out.
+ * The same terminal a local session gets.
  *
- * The remote session is a different conversation from the one in this
- * terminal, and scrolling them into one another loses both: the interface
- * underneath is still there, mid-thought, and it should be where it was left.
- * The alternate screen is what a terminal has for exactly this, and it is
- * entered here rather than by whoever launched the client, so leaving restores
- * the screen whether the client was started by hand or by /remote connect.
+ * This drew on the alternate screen, so that leaving it restored the session
+ * underneath. That screen has no scrollback, and a terminal in it turns the
+ * wheel into arrow keys, which the editor reads as walking back through the
+ * prompt history: scrolling changed what was typed. pi does not put a session
+ * there and neither does this.
+ *
+ * What is left of the overlay is the clear: the remote session starts at the
+ * top of the screen rather than under the local one's transcript, and the
+ * interface that launched it redraws itself when this exits.
  */
-const overlay = process.stdout.isTTY === true;
-const lift = (): void => {
-    if (overlay) process.stdout.write('\u001b[?1049l\u001b[?25h');
-};
-if (overlay) process.stdout.write('\u001b[?1049h\u001b[H');
-for (const signal of ['SIGHUP', 'SIGTERM'] as const) process.on(signal, () => { lift(); process.exit(1); });
-process.on('exit', lift);
+if (process.stdout.isTTY === true) process.stdout.write('\u001b[2J\u001b[H');
 
 drawing = interactive;
 await interactive.run();

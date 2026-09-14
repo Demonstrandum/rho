@@ -222,6 +222,23 @@ async function place(host: string, say: (note: string) => void): Promise<string>
     return `${runtime} ${remote}`;
 }
 
+/** Where the agent's own pi is kept on a host, one directory per version. */
+const PI_DIR = '.cache/rho/pi';
+
+/** The version of pi this machine is running. */
+function localPiVersion(): string | null {
+    try {
+        const entry = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'));
+        const manifest = JSON.parse(readFileSync(join(dirname(entry), '..', 'package.json'), 'utf8')) as {
+            version?: string;
+        };
+        return manifest.version ?? null;
+    } catch {
+        // pi is not resolvable from here: the host's own is what there is.
+        return null;
+    }
+}
+
 /**
  * Where a project lives on the host. One clone, many worktrees, because that
  * is what a session per branch needs: a worktree is a directory sharing one
@@ -428,11 +445,15 @@ export default function (pi: ExtensionAPI) {
         // say so plainly if it does not; only then is anything copied.
         const { hash } = await bundle();
         const file = `${REMOTE_DIR}/session-${hash}.js`;
+        // The laptop's own pi, so both machines run the same agent. Sent while
+        // the runner is being checked, since neither waits on the other.
+        const [lentPi] = await Promise.all([ensurePi(host, say).catch(() => null)]);
+        const withPi = lentPi === null ? '' : `RHO_PI_CLI=${lentPi} `;
         const quick = [
             `R=$(command -v bun || command -v node || true)`,
             `[ -n "$R" ] || exit 42`,
             `[ -s ${file} ] || exit 43`,
-            `exec "$R" ${file} serve ${name} ${address_.path ?? '$HOME'}`,
+            `${withPi}exec "$R" ${file} serve ${name} ${address_.path ?? '$HOME'}`,
         ].join('; ');
         /**
          * The name the client attaches by.
@@ -494,7 +515,7 @@ export default function (pi: ExtensionAPI) {
 
         const started = await run(
             'ssh',
-            [...SSH_FLAGS, host, `${runner} serve ${name} ${address_.path ?? '$HOME'}`],
+            [...SSH_FLAGS, host, `${withPi}${runner} serve ${name} ${address_.path ?? '$HOME'}`],
             lend(),
         );
         await run('ssh', [...SSH_FLAGS, host, linkRunner]);
@@ -672,6 +693,42 @@ export default function (pi: ExtensionAPI) {
             readFileSync(path),
         );
         if (sent.code !== 0) throw new Error(`could not copy the session runner: ${sent.err.trim()}`);
+    };
+
+    /**
+     * The laptop's pi on that host, sent once per version.
+     *
+     * Returns the path to run, or null when there is nothing to send and the
+     * host's own pi has to do. A host with no pi at all can hold a session
+     * this way, and two machines that disagree about the version stop
+     * disagreeing.
+     */
+    const ensurePi = async (host: string, say: (note: string) => void): Promise<string | null> => {
+        const version = localPiVersion();
+        if (version === null) return null;
+        const root = `${PI_DIR}/${version}`;
+        const cli = `$HOME/${root}/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js`;
+
+        // Installed rather than copied: pi's bundle is not self-contained, and
+        // the copy that is enough for bun to auto-install its way through is
+        // not enough for node. The package manager already knows how to put
+        // exactly this version somewhere.
+        const check = `[ -s ${cli} ] && echo yes || echo no`;
+        const present = await run('ssh', [...SSH_FLAGS, host, check]);
+        if (present.out.trim() === 'yes') return cli;
+
+        say(`installing pi ${version} on ${host}`);
+        const install = [
+            `mkdir -p $HOME/${root}`,
+            `cd $HOME/${root}`,
+            `I=$(command -v bun || command -v npm || true)`,
+            `[ -n "$I" ] || exit 44`,
+            `case "$I" in *bun) "$I" add @earendil-works/pi-coding-agent@${version} ;;`,
+            `                *) "$I" install --no-fund --no-audit @earendil-works/pi-coding-agent@${version} ;; esac`,
+        ].join('; ');
+        const made = await run('ssh', [...SSH_FLAGS, host, install]);
+        if (made.code !== 0) throw new Error(`could not install pi ${version} on ${host}: ${made.err.trim()}`);
+        return cli;
     };
 
     /** Every session a host holds, stopped ones included. */

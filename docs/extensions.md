@@ -157,6 +157,18 @@ all three behaviours are independently switched from `[input]` in `rho.toml`.
 colours are sampled live from `borderColor` (tracks bash mode, thinking levels) and the theme's `userMessageBg`, so they follow theme and mode changes with no state tracking.
 falls back to pi's rows untouched in 256-colour mode.
 
+`prompt-inspect.ts` reads what was sent to the provider.
+`ctx.getSystemPrompt()` reports pi's system prompt string, which is not the request: the payload carries the serialised system block, every message, every tool schema, and whatever an extension rewrote in `before_provider_request`.
+that hook is the only place the finished payload exists, so each one is kept as it goes out in `lib/prompt-log.ts`, a log bounded at eight entries, since a payload holds the whole conversation and a turn sends one per tool round.
+`/prompt view` browses the newest, `/prompt view <n>` an older one by its ordinal, `/prompt list` picks from the log, `/prompt view system` opens the system prompt, `/prompt view json` the newest payload as raw JSON, `/prompt clear` drops the log.
+`/prompt dump [path]` writes the newest payload as JSON, `/prompt dump all [dir]` writes every kept payload, `/prompt dump system [path]` writes the system prompt as text; with no path they land in the session scratch directory, which is where a throwaway file belongs and what gets cleaned up.
+`lib/prompt-outline.ts` reads a payload as a tree: the payload type is `unknown`, so the walk is over JSON itself, every property and every array element becoming a node down to a depth of four, which reaches one content block without naming a single provider field.
+the one place shape is guessed at is the label, where an element carrying a `role`, `type`, or `name` string is named by it.
+`pretty` prints a string over the newlines it holds rather than as a `\n` escape, which is the reason for reading a payload here instead of through `JSON.stringify`; `r` in the pager switches to the JSON anyway.
+`lib/pager.ts` is the scrolling view: pi-tui ships `ScrollView`, but it takes its viewport from a layout pass only a fullscreen TUI runs, so the pager keeps the window itself, caching the wrapped text per width so a resize reflows.
+the outline reopens after each pager rather than mutating, because `SelectList` takes its items at construction, the same constraint the stash picker works under.
+the smoke test drives `/prompt view` and `/prompt dump` in the pty run and checks the dumped file exists.
+
 `quit.ts` ends the session from the editor.
 pi exits on ctrl+D and on `/quit`; this covers `/exit`, and the same words typed with no slash at all.
 the slash forms are registered as commands, one per word in `[quit] words` (`quit`, `exit`), so each carries a description in the completion menu.

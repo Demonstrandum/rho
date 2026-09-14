@@ -30,6 +30,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `prompt-history.ts` prompt history that survives a restart, `/history`, `[history]`
   - `cwd.ts` `/cwd [path]` changes the agent's working directory mid-session, `[cwd]`
   - `quit.ts` `/exit`, and the bare words `quit` / `exit`, end the session, `[quit]`
+  - `prompt-inspect.ts` `/prompt` browses the provider payloads and the system prompt, and dumps either to disk.
   - `input-field.ts` styles the input field: half-block edges, background, gradient, `[input]`
   - `spinner.ts` working indicator and shimmering message, from `assets/spinners.json`, `maxims.txt`, `verbs.txt`
   - `startup.ts` replaces pi's startup block with a compact header.

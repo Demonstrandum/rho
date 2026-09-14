@@ -15,7 +15,7 @@
 //
 // the docker image in ./Dockerfile runs this as its entrypoint.
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -82,6 +82,15 @@ function section(name: string): void {
 function checkNoCrash(name: string, result: RunResult): void {
     const hits = CRASH_PATTERNS.filter((pattern) => result.output.includes(pattern));
     check(`${name}: no crash output`, hits.length === 0, `matched: ${hits.join(', ')}\n${tail(result.output)}`);
+}
+
+/** the JSON files /prompt dump left in the session scratch directories. */
+function dumpedPayloads(project: string): string[] {
+    const root = join(project, '.rho', 'scratch');
+    if (!existsSync(root)) return [];
+    return readdirSync(root, { recursive: true, encoding: 'utf8' })
+        .filter((entry) => /prompt-\d+-.*\.json$/.test(entry))
+        .map((entry) => join(root, entry));
 }
 
 function tail(text: string, lines = 40): string {
@@ -325,9 +334,15 @@ async function main(): Promise<number> {
             // let the startup header settle, type a prompt, let the turn finish,
             // then quit with two ctrl+c.
             { afterSeconds: 6, text: 'run the smoke check\\r' },
+            // the payload viewer: the turn above sent one provider request, so
+            // the outline has something to list. escape closes it; the dump
+            // then writes that payload to the session scratch directory.
+            { afterSeconds: 18, text: '/prompt view\\r' },
+            { afterSeconds: 3, text: '\\033' },
+            { afterSeconds: 2, text: '/prompt dump\\r' },
             // the theme picker: open it, let one frame of the card draw, leave
             // it without choosing.
-            { afterSeconds: 18, text: '/theme-picker\\r' },
+            { afterSeconds: 3, text: '/theme-picker\\r' },
             { afterSeconds: 4, text: '\\033' },
             // ctrl+d quits when the editor is empty; ctrl+c only clears it.
             { afterSeconds: 2, text: '\\004' },
@@ -343,6 +358,13 @@ async function main(): Promise<number> {
         tail(screen, 60));
     check('the reply rendered', screen.includes(REPLY_SWAPPED), tail(screen, 60));
     check('the theme picker opened', screen.includes('enter keep'), tail(screen, 60));
+    // the ordinal depends on how many requests the turn took (one per tool
+    // round), so the check is on the viewer's own chrome and the payload keys.
+    check('the payload viewer listed the request',
+        /request \d/.test(screen) && screen.includes('enter open'),
+        tail(screen, 80));
+    const dumped = dumpedPayloads(workspace.project);
+    check('/prompt dump wrote a payload', dumped.length > 0, `scratch: ${workspace.project}/.rho/scratch`);
     check('exits on ctrl+d', tui.code === 0, `exit ${tui.code}\n${tail(screen, 20)}`);
     checkNoCrash('terminal session', tui);
 

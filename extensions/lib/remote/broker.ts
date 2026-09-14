@@ -15,6 +15,9 @@ import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createServer, connect as connectSocket } from 'node:net';
 import type { Server, Socket } from 'node:net';
+
+/** `c3|r1`: which client asked, and what it called the question. */
+const TAG = /^(c\d+)\|(.+)$/;
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Decoder, encode } from './protocol';
@@ -58,6 +61,8 @@ export class Broker {
     private readonly recent: Buffer[] = [];
     private server: Server | null = null;
     private ended = false;
+    private readonly tagged = new Map<string, Socket>();
+    private nextTag = 1;
 
     constructor(
         readonly name: string,
@@ -76,9 +81,7 @@ export class Broker {
             held = lines.pop() ?? '';
             for (const line of lines) {
                 if (line.trim() === '') continue;
-                const bytes = Buffer.from(`${line}\n`);
-                this.remember(bytes);
-                this.broadcast(bytes);
+                this.deliver(line);
             }
         });
         // The agent's stderr is not the protocol: pi writes stack traces there,
@@ -117,6 +120,40 @@ export class Broker {
     /** Called once the agent has gone, for an owner that should go with it. */
     onEnded: (() => void) | undefined;
 
+    /**
+     * An answer goes to whoever asked; an event goes to everyone.
+     *
+     * The agent speaks to one stdout and the broker has several clients, all
+     * numbering their commands from one. Broadcasting the answers meant a
+     * client could resolve its own r1 with another client's r1: asking where
+     * the session was returned somebody else's state, one request behind, for
+     * as long as two clients were attached.
+     *
+     * So a command is tagged with the client it came from on the way in, and
+     * the tag is taken off the answer on the way out.
+     */
+    private deliver(line: string): void {
+        let parsed: { type?: string; id?: unknown } | null = null;
+        try {
+            parsed = JSON.parse(line) as { type?: string; id?: unknown };
+        } catch {
+            parsed = null;
+        }
+        const id = typeof parsed?.id === 'string' ? parsed.id : null;
+        const tagged = parsed?.type === 'response' && id !== null ? TAG.exec(id) : null;
+        if (tagged === null) {
+            // An event: everyone watching wants it, and a late client wants it
+            // replayed. Answers are nobody else's business and are not kept.
+            const bytes = Buffer.from(`${line}\n`);
+            if (parsed?.type !== 'response') this.remember(bytes);
+            this.broadcast(bytes);
+            return;
+        }
+        const owner = this.tagged.get(tagged[1] as string);
+        if (owner === undefined) return; // the client that asked has gone
+        owner.write(`${JSON.stringify({ ...parsed, id: tagged[2] })}\n`);
+    }
+
     private remember(line: Buffer): void {
         this.recent.push(line);
         if (this.recent.length > REPLAY) this.recent.shift();
@@ -135,6 +172,8 @@ export class Broker {
         rmSync(path, { force: true });
         this.server = createServer((client) => {
             this.clients.add(client);
+            const tag = `c${this.nextTag++}`;
+            this.tagged.set(tag, client);
             // The buffer is history, and a client that cannot tell it from
             // live events answers the last question again: it is bracketed so
             // a viewer can draw it as what already happened.
@@ -159,6 +198,12 @@ export class Broker {
                     } catch {
                         parsed = null;
                     }
+                    if (parsed !== null && typeof parsed.id === 'string' && parsed.type !== 'rho_info') {
+                        // Tagged with the client, so the answer can find its
+                        // way back to it rather than to everyone.
+                        this.agent.stdin?.write(`${JSON.stringify({ ...parsed, id: `${tag}|${parsed.id}` })}\n`);
+                        continue;
+                    }
                     if (parsed?.type === 'rho_info') {
                         client.write(
                             `${JSON.stringify({
@@ -174,7 +219,10 @@ export class Broker {
                     this.agent.stdin?.write(`${line}\n`);
                 }
             });
-            const drop = () => this.clients.delete(client);
+            const drop = () => {
+                this.clients.delete(client);
+                this.tagged.delete(tag);
+            };
             client.on('close', drop);
             client.on('error', drop);
         });

@@ -29,6 +29,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `send-now.ts` `ctrl+enter` cuts into a running turn, `ctrl+shift+enter` sends the newest queued message alone, `[send-now]`
   - `prompt-history.ts` prompt history that survives a restart, `/history`, `[history]`
   - `cwd.ts` `/cwd [path]` changes the agent's working directory mid-session, `[cwd]`
+  - `quit.ts` `/exit`, and the bare words `quit` / `exit`, end the session, `[quit]`
   - `input-field.ts` styles the input field: half-block edges, background, gradient, `[input]`
   - `spinner.ts` working indicator and shimmering message, from `assets/spinners.json`, `maxims.txt`, `verbs.txt`
   - `startup.ts` replaces pi's startup block with a compact header.

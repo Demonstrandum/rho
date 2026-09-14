@@ -19,7 +19,7 @@ import {
     createAgentSessionFromServices,
     createAgentSessionServices,
 } from '@earendil-works/pi-coding-agent';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -60,15 +60,19 @@ const SSH_FLAGS = [
 const RUNNER_FILE = '.cache/rho/remote/session-runner.js';
 const RUNNER = process.env.RHO_REMOTE_RUNNER ?? `bun ${RUNNER_FILE}`;
 
-// The runner is installed by /remote create; a client that arrives before it
-// exists says so rather than failing with ssh's exit code, which names nothing.
-const ready = spawnSync('ssh', [...SSH_FLAGS, target, `test -s ${RUNNER_FILE}`], { stdio: 'ignore' });
-if (ready.status !== 0) {
-    process.stderr.write(
-        `${target} has no session runner installed: /remote create ${name} ${target} puts one there\n`,
-    );
-    process.exit(1);
-}
+/** One ssh call, answered when it is answered. */
+const ask = (command: string, input?: string): Promise<{ code: number; out: string; err: string }> =>
+    new Promise((settle) => {
+        const child = spawn('ssh', [...SSH_FLAGS, target, command], { stdio: ['pipe', 'pipe', 'pipe'] });
+        let out = '';
+        let err = '';
+        child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
+        child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
+        child.on('close', (code) => settle({ code: code ?? 1, out, err }));
+        child.on('error', (error) => settle({ code: 1, out, err: error.message }));
+        if (input !== undefined) child.stdin.end(input);
+        else child.stdin.end();
+    });
 
 /**
  * Hand the far side credentials as fresh as this machine's, before attaching.
@@ -78,24 +82,42 @@ if (ready.status !== 0) {
  * its own. The far side then answers with an empty message and the refusal
  * buried inside it, which reads as the model having nothing to say.
  */
-const relend = () => {
+const relend = async (): Promise<void> => {
+    if (process.env.RHO_REMOTE_SSH !== undefined) return;
     const authPath = join(homedir(), '.pi', 'agent', 'auth.json');
     if (!existsSync(authPath)) return;
-    const sent = spawnSync('ssh', [...SSH_FLAGS, target, `${RUNNER} relend ${name}`], {
-        input: JSON.stringify({ auth: readFileSync(authPath, 'utf8'), env: {} }),
-        encoding: 'utf8',
-    });
-    if (sent.status !== 0 && !/no credentials of its own/.test(sent.stderr ?? '')) {
-        process.stderr.write(`could not refresh the credentials on ${target}: ${(sent.stderr ?? '').trim()}\n`);
+    const sent = await ask(`${RUNNER} relend ${name}`, JSON.stringify({ auth: readFileSync(authPath, 'utf8'), env: {} }));
+    if (sent.code !== 0 && !/no credentials of its own/.test(sent.err)) {
+        process.stderr.write(`could not refresh the credentials on ${target}: ${sent.err.trim()}\n`);
     }
 };
-relend();
+
+// Started, not awaited: the credentials have to be there before a prompt, not
+// before the interface draws, and the far side is a round trip away.
+const credentials = relend();
 
 /** Said once the interface has given the terminal back, not over the top of it. */
 let farewell: string | null = null;
 let drawing: { stop: () => void } | null = null;
 
-const link = new RpcLink('ssh', [...SSH_FLAGS, target, `${RUNNER} attach ${name}`], {
+/**
+ * The interface's own half, built while the far side is being asked.
+ *
+ * None of this needs an answer from the other machine: the settings, the
+ * theme, the editor and the extensions are this machine's, and loading pi
+ * takes about as long as the round trips do.
+ */
+const local = (async () => {
+    const services = await createAgentSessionServices({ cwd: process.cwd() });
+    return services;
+})();
+
+// RHO_REMOTE_SSH replaces the transport, so the client can be driven against a
+// stand-in daemon on this machine. Nothing else changes: same framing, same
+// proxy, same interface.
+const TRANSPORT = process.env.RHO_REMOTE_SSH ?? 'ssh';
+
+const link = new RpcLink(TRANSPORT, [...SSH_FLAGS, target, `${RUNNER} attach ${name}`], {
     // No deadline on the link: a model call takes as long as it takes, and the
     // interface shows that it is working. A link that has died says so by
     // closing, which is a different thing from an answer that is slow.
@@ -136,7 +158,20 @@ if (trace !== undefined) {
     // what the session hands the interface, as opposed to what the wire carried
     state.subscribe((event) => appendFileSync(trace, `session:${(event as { type: string }).type}\n`));
 }
-await state.refresh();
+/**
+ * Everything the far side is asked before drawing, asked at once.
+ *
+ * These were sequential, and each one is a round trip to another machine: the
+ * state, the messages and where the session is came to about a second between
+ * them, on top of a local build that could have been happening at the same
+ * time.
+ */
+const [info] = await Promise.all([
+    link.send({ type: 'rho_info' }).catch(() => ({})) as Promise<{ data?: { cwd?: string } }>,
+    state.refresh(),
+    credentials,
+    local,
+]);
 
 /**
  * Where the session is, asked of the broker rather than the agent.
@@ -146,7 +181,6 @@ await state.refresh();
  * is not where anything the session does happens: the footer said ~/Code/rho
  * for a session working in /home/nix.
  */
-const info = (await link.send({ type: 'rho_info' }).catch(() => ({}))) as { data?: { cwd?: string } };
 const remoteCwd = info.data?.cwd ?? process.cwd();
 
 /**
@@ -174,8 +208,14 @@ const remoteCwd = info.data?.cwd ?? process.cwd();
 
 // The local half: settings, the editor, the renderer, and a session file of
 // this machine's own. None of it is the agent; all of it is the interface.
-const services = await createAgentSessionServices({ cwd: remoteCwd });
-const sessionManager = SessionManager.inMemory(remoteCwd);
+//
+// Built against this machine's directory, not the far side's. Pointing it at a
+// path that exists only there made everything local reach for a directory that
+// is not here: pi's own checkpointing failed with ENOENT on every turn. Where
+// the session is belongs to the environment marker, which is what the footer
+// and /cwd read.
+const services = await local;
+const sessionManager = SessionManager.inMemory(process.cwd());
 const made = await createAgentSessionFromServices({ services, sessionManager });
 
 /**

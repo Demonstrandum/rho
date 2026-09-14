@@ -157,6 +157,14 @@ all three behaviours are independently switched from `[input]` in `rho.toml`.
 colours are sampled live from `borderColor` (tracks bash mode, thinking levels) and the theme's `userMessageBg`, so they follow theme and mode changes with no state tracking.
 falls back to pi's rows untouched in 256-colour mode.
 
+`quit.ts` ends the session from the editor.
+pi exits on ctrl+D and on `/quit`; this covers `/exit`, and the same words typed with no slash at all.
+the slash forms are registered as commands, one per word in `[quit] words` (`quit`, `exit`), so each carries a description in the completion menu.
+a word pi already defines is skipped: interactive mode matches `/quit` against its own table before it dispatches to an extension, so a command of that name could never run and would only add a second menu entry.
+the bare form cannot be a command, so it goes through the `input` event, which sees a message before the agent does, and only for `source === 'interactive'` with no attached image: an rpc client or another extension sending the text "quit" means the word.
+`[quit] bare-word` turns that path off and leaves the slash forms.
+both paths call `ctx.shutdown()`, which is where `/quit` and ctrl+D end up; pi defers it until the agent is idle, so a word typed mid-turn ends the session once the turn settles rather than killing the run, and the handler says so.
+
 `cwd.ts` adds `/cwd [path]` to change the directory the agent operates in, mid-session.
 the target is stored per session (`lib/state-store.ts`, `[cwd] remember`, on by default), so a resume chdirs back and re-registers the tools against it; a stored directory that no longer exists is dropped without a message and the session keeps the directory pi started it in.
 

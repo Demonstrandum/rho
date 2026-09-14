@@ -152,4 +152,29 @@ describe('broker', () => {
         expect(await existing('mortal')).toBe(false);
         expect(named()).not.toContain('mortal');
     });
+
+    test('an answer goes to the client that asked, and an event to everyone', async () => {
+        // Every client numbers its commands from one, and the agent has a
+        // single stdout. Broadcasting answers let one client resolve its own
+        // r1 with another client's r1: asking where the session was returned
+        // somebody else's state, one request behind.
+        start('crossed');
+        const first = await client('crossed');
+        const second = await client('crossed');
+        first.send(`${JSON.stringify({ type: 'prompt', id: 'r1', message: 'for the first' })}\n`);
+        second.send(`${JSON.stringify({ type: 'prompt', id: 'r1', message: 'for the second' })}\n`);
+        await new Promise((resolve) => setTimeout(resolve, 700));
+
+        const answers = (lines: string[]) =>
+            lines
+                .map((line) => JSON.parse(line) as { type: string; id?: string; data?: { message?: string } })
+                .filter((event) => event.type === 'response');
+
+        expect(answers(first.lines).map((a) => a.data?.message)).toEqual(['for the first']);
+        expect(answers(second.lines).map((a) => a.data?.message)).toEqual(['for the second']);
+        // And the id each client gets back is the one it chose.
+        expect(answers(first.lines).map((a) => a.id)).toEqual(['r1']);
+        first.end();
+        second.end();
+    });
 });

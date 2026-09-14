@@ -38,6 +38,11 @@ a member that cannot be asked at all refuses by name rather than answering about
 the far side then answers with an empty message carrying the refusal inside it, which reads as the model having nothing to say.
 the client hands over credentials as fresh as this machine's before every attach, and pi rereads them without restarting.
 
+**When nothing arrives.** a model request that gets no answer looks exactly like one that is thinking, because both are an absence of events.
+one request from dev-box, after the session had sat idle, went out over a keep-alive socket the network had already dropped and took five minutes to time out and retry, with nothing drawn in between.
+fifteen seconds of silence during a turn now says so, and counts: `waiting on the model, 45s without a reply`.
+escape aborts and reaches the far side in under a tenth of a second, so asking again is the way out.
+
 **Measured against dev-box**, from a host with nothing installed on it: create 5.6s, list 0.4s, attach 0.7s warm, an answer streaming 2.3s after asking.
 
 ## Stage two: the environment moves, the agent does not

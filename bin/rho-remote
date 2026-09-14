@@ -101,6 +101,29 @@ let farewell: string | null = null;
 let drawing: { stop: () => void } | null = null;
 
 /**
+ * Which machine this is, published before anything local is loaded.
+ *
+ * The footer, /cwd and the extensions read this to know the work is not
+ * happening here, and an extension factory runs while services are being
+ * built: publishing it afterwards meant they were all told they were local.
+ * The directory arrives a round trip later and is filled in then.
+ */
+const where = {
+    name: target,
+    host: target.includes('@') ? target.slice(target.indexOf('@') + 1) : target,
+    cwd: process.cwd(),
+    shell: 'bash',
+    alive: true,
+    chdir: async (path: string) => {
+        const answer = (await actions.bash(`cd ${path} && pwd`)) as { data?: { output?: string } };
+        const landed = (answer.data?.output ?? '').trim();
+        if (landed !== '') where.cwd = landed;
+        return landed;
+    },
+};
+(globalThis as Record<string, unknown>).__rho_environment = where;
+
+/**
  * The interface's own half, built while the far side is being asked.
  *
  * None of this needs an answer from the other machine: the settings, the
@@ -183,28 +206,8 @@ const [info] = await Promise.all([
  */
 const remoteCwd = info.data?.cwd ?? process.cwd();
 
-/**
- * Tell the rest of the interface which machine this is.
- *
- * The footer, the environment block and /cwd all read one published value to
- * know whether the work is happening here. Without it the footer shows the
- * directory the client was started from, which belongs to a machine the
- * session cannot see -- and a path read as local is how a command goes to the
- * wrong host. It is the same marker an attached environment publishes.
- */
-(globalThis as Record<string, unknown>).__rho_environment = {
-    name: target,
-    host: target.includes('@') ? target.slice(target.indexOf('@') + 1) : target,
-    cwd: remoteCwd,
-    shell: 'bash',
-    alive: true,
-    chdir: async (path: string) => {
-        const answer = (await actions.bash(`cd ${path} && pwd`)) as { data?: { output?: string } };
-        const landed = (answer.data?.output ?? '').trim();
-        if (landed !== '') (globalThis as Record<string, { cwd: string }>).__rho_environment.cwd = landed;
-        return landed;
-    },
-};
+// The directory, now that the far side has said where it is.
+where.cwd = remoteCwd;
 
 // The local half: settings, the editor, the renderer, and a session file of
 // this machine's own. None of it is the agent; all of it is the interface.

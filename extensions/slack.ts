@@ -30,6 +30,7 @@ import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { Type } from 'typebox';
 import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
+import { completeLastWord } from './lib/complete-words';
 import { PersistedState } from './lib/state-store';
 import { setNote } from './lib/tool-row/notes';
 import { loadMaxims } from './spinner';
@@ -811,8 +812,9 @@ export default function (pi: ExtensionAPI) {
         description: 'attach this session to a stored Slack app: /slack <app>, /slack off, /slack add <app>',
         getArgumentCompletions: (prefix) => {
             const verbs = ['off', 'add', 'new', 'drop'];
-            const candidates = [...listApps(), ...verbs].filter((word) => word.startsWith(prefix));
-            return candidates.length > 0 ? candidates.map((word) => ({ value: word, label: word })) : null;
+            // Whole lines, for the same reason as /remote: a value holding only
+            // the word being typed throws away the words before it.
+            return completeLastWord(prefix, [...listApps(), ...verbs].map((word) => ({ value: word })));
         },
         handler: async (args, ctx) => {
             const [verb = '', argument = '', modifier = ''] = args.trim().split(/\s+/);

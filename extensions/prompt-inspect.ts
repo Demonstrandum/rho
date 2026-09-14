@@ -1,11 +1,14 @@
 // /prompt: read what was actually sent to the provider, and write it to disk.
 //
-// pi reports the system prompt string through ctx.getSystemPrompt(), but that
-// is not the request: the payload carries the serialized system block, every
-// message, every tool schema, and whatever an extension rewrote in
-// before_provider_request. that hook is the only place the finished payload
-// exists, so each one is kept in a bounded log (lib/prompt-log.ts) as it goes
-// out, newest last.
+// nothing here reads ctx.getSystemPrompt(). that reports the string pi built,
+// which is not what the model read: the provider serializer places it, splits
+// it into cacheable blocks, or turns it into a message, and a
+// before_provider_request handler may rewrite it after pi has handed it over.
+// the payload carries the finished text along with every message and every tool
+// schema, and that hook is the only place it exists, so each payload is kept in
+// a bounded log (lib/prompt-log.ts) as it goes out, newest last. a session that
+// has run no turn has sent no prompt, and the command says so rather than
+// showing what pi holds.
 //
 // the viewer is two levels. the outline (lib/prompt-outline.ts) lists the
 // payload as a tree, one row per property and per array element; enter opens
@@ -26,14 +29,14 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { Pager } from './lib/pager';
 import { type CapturedRequest, RequestLog } from './lib/prompt-log';
-import { type OutlineNode, outline, pretty, raw, weight } from './lib/prompt-outline';
+import { type OutlineNode, outline, pretty, raw, systemText, weight } from './lib/prompt-outline';
 import { collapseHome, truncate } from './lib/text';
 
 type ViewKind = 'payload' | 'system' | 'json';
 
 const VIEWS: Record<ViewKind, string> = {
     payload: 'browse the last provider payload as a tree',
-    system: 'the system prompt as pi built it',
+    system: 'the system text of the last payload, as the provider read it',
     json: 'the last provider payload as raw JSON',
 };
 
@@ -221,16 +224,42 @@ export default function (pi: ExtensionAPI) {
 
     // ------------------------------------------------------------ dispatch
 
+    const NOTHING_YET = 'nothing sent yet; run a turn and the request is here';
+
     function nothingCaptured(ctx: ExtensionContext): boolean {
         if (log.size > 0) return false;
-        ctx.ui.notify('no provider request captured yet; send a message first', 'warning');
+        ctx.ui.notify(NOTHING_YET, 'warning');
         return true;
+    }
+
+    // the system prompt as the provider received it, taken out of the last
+    // payload rather than from ctx.getSystemPrompt(). the two differ: pi's
+    // string is the prompt it built, and the payload is that prompt after the
+    // provider serializer has placed it and after any before_provider_request
+    // handler has rewritten it, which is what the model actually read.
+    //
+    // nothing is captured before the first turn, so there is no prompt to show
+    // then rather than an empty one.
+    function systemPrompt(ctx: ExtensionContext): string | null {
+        const latest = log.latest();
+        if (latest === undefined) {
+            ctx.ui.notify(`no system prompt sent yet; ${NOTHING_YET}`, 'warning');
+            return null;
+        }
+        const text = systemText(latest.payload);
+        if (text === null) {
+            ctx.ui.notify('the last payload carries no system field; browse it with /prompt view', 'warning');
+            return null;
+        }
+        return text;
     }
 
     async function view(ctx: ExtensionCommandContext, rest: string[]): Promise<void> {
         const what = rest[0] ?? 'payload';
         if (what === 'system') {
-            await showPager(ctx, 'system prompt', ctx.getSystemPrompt().split('\n'), false);
+            const prompt = systemPrompt(ctx);
+            if (prompt === null) return;
+            await showPager(ctx, `system prompt  ${requestTitle(log.latest()!)}`, prompt.split('\n'), false);
             return;
         }
         const ordinal = Number(what);
@@ -255,7 +284,9 @@ export default function (pi: ExtensionAPI) {
     function dump(ctx: ExtensionCommandContext, rest: string[]): void {
         const what = rest[0] ?? '';
         if (what === 'system') {
-            const path = write(ctx, rest[1] ?? `system-prompt-${stamp(Date.now())}.md`, ctx.getSystemPrompt());
+            const prompt = systemPrompt(ctx);
+            if (prompt === null) return;
+            const path = write(ctx, rest[1] ?? `system-prompt-${stamp(Date.now())}.md`, prompt);
             ctx.ui.notify(`wrote ${collapseHome(path)}`, 'info');
             return;
         }

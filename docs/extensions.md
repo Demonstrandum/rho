@@ -158,9 +158,12 @@ colours are sampled live from `borderColor` (tracks bash mode, thinking levels) 
 falls back to pi's rows untouched in 256-colour mode.
 
 `prompt-inspect.ts` reads what was sent to the provider.
-`ctx.getSystemPrompt()` reports pi's system prompt string, which is not the request: the payload carries the serialised system block, every message, every tool schema, and whatever an extension rewrote in `before_provider_request`.
+nothing in it reads `ctx.getSystemPrompt()`: that reports the string pi built, and the model read the payload, which is that string after the provider serialiser has placed it (a top-level `system`, a list of cacheable blocks, a `systemInstruction`, or a leading `system` or `developer` message) and after any `before_provider_request` handler has rewritten it.
+`lib/prompt-outline.ts` `systemText` takes the text back out of whichever of those four places the payload put it, and reports null when it is in none of them, which is itself worth saying: the instructions went somewhere the extension does not know about.
+the payload also carries every message, every tool schema, and whatever an extension rewrote in `before_provider_request`.
 that hook is the only place the finished payload exists, so each one is kept as it goes out in `lib/prompt-log.ts`, a log bounded at eight entries, since a payload holds the whole conversation and a turn sends one per tool round.
 `/prompt view` browses the newest, `/prompt view <n>` an older one by its ordinal, `/prompt list` picks from the log, `/prompt view system` opens the system prompt, `/prompt view json` the newest payload as raw JSON, `/prompt clear` drops the log.
+before the first turn there is nothing to show, because nothing has been sent: `/prompt view system` and the payload views both say so rather than opening an empty pager, and the note names what to do, which is run a turn.
 `/prompt dump [path]` writes the newest payload as JSON, `/prompt dump all [dir]` writes every kept payload, `/prompt dump system [path]` writes the system prompt as text; with no path they land in the session scratch directory, which is where a throwaway file belongs and what gets cleaned up.
 `lib/prompt-outline.ts` reads a payload as a tree: the payload type is `unknown`, so the walk is over JSON itself, every property and every array element becoming a node down to a depth of four, which reaches one content block without naming a single provider field.
 the one place shape is guessed at is the label, where an element carrying a `role`, `type`, or `name` string is named by it.

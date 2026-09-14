@@ -27,6 +27,7 @@ import {
     createReadTool,
     createWriteTool,
 } from '@earendil-works/pi-coding-agent';
+import { completeLastWord } from './lib/complete-words';
 import { operationsFor, waitFor } from './lib/remote/client';
 import type { Connection } from './lib/remote/client';
 import { deploy } from './lib/remote/deploy';
@@ -588,8 +589,10 @@ export default function (pi: ExtensionAPI) {
             // list used to include `local` while only `default local` worked,
             // which is a completion that teaches a command that does not exist.
             const words = ['local', ...environments.keys(), 'connect', 'default', 'drop', 'list'];
-            const found = words.filter((word) => word.startsWith(prefix));
-            return found.length > 0 ? found.map((word) => ({ value: word, label: word })) : null;
+            // Whole lines: pi replaces the argument text with the value it is
+            // given, so `/environment drop <tab>` on a bare word would leave
+            // the name without the verb. See lib/complete-words.ts.
+            return completeLastWord(prefix, words.map((word) => ({ value: word })));
         },
         handler: async (args, ctx) => {
             const [verb, rest] = args.trim().split(/\s+/, 2);

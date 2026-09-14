@@ -105,8 +105,17 @@ export class Broker {
             } catch {
                 // already gone
             }
+            // A broker with no agent is a process holding a machine's memory
+            // for nothing: stopping a session left one behind every time,
+            // reparented to init, and it took a stale socket with it. What to
+            // do about it belongs to whoever built the broker, because in a
+            // test that is this very process.
+            this.onEnded?.();
         });
     }
+
+    /** Called once the agent has gone, for an owner that should go with it. */
+    onEnded: (() => void) | undefined;
 
     private remember(line: Buffer): void {
         this.recent.push(line);

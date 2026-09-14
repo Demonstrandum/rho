@@ -10,6 +10,10 @@ nothing.
 the far side gets a config directory of its own, mode 0700, with the rest of the config symlinked in, and pi is pointed at it with PI_CODING_AGENT_DIR.
 nothing is written into the host's own home, so the credentials die with the session.
 
+an oauth token lasts hours and its refresh token is single use, so the copy lent at create goes stale once this laptop refreshes its own login.
+the client hands over fresh credentials before every attach, and pi rereads them without restarting, so this should not be visible.
+if it ever is, the symptom is an answer that arrives empty: the refusal travels inside the assistant message rather than as an error.
+
 ## /environment: the agent works elsewhere
 
 ```
@@ -39,13 +43,23 @@ what is worth checking, in order of how likely it is to be wrong:
 ```
 
 `create` starts a session as a daemon on that machine and returns.
-`connect` hands this terminal to it: a client draws the session with pi's own interface, and the local session stands down while it does.
+`connect` hands this terminal to it: a client draws the session with pi's own interface, and the local session stands aside the way it does for an external editor.
 what you see is pi, streaming as it always does, reading the events of a session that is somewhere else.
 
-leaving the client gives the terminal back, and the session carries on.
+ctrl+d leaves the client and gives the terminal back, with the session still running.
+ctrl+c twice also leaves; `/exit` does not, because the client has no such command and the text goes to the model as a prompt.
 `/remote list nix@dev-box` shows what is running there, and `/remote stop mock` ends one.
 
-measured against dev-box with nothing installed on it beforehand: create 5.6s, list 0.4s, attach 4.9s cold and 0.7s warm, an answer streamed 2.3s after asking.
+what to check while you are in there, in order of how likely it is to be wrong:
+
+- the footer names the machine and the remote directory, `dev-box /home/nix`, not this laptop's.
+- ask for a command, say `hostname && pwd`; the row is pi's own and the answer is the far side's.
+- escape mid-answer: the abort must settle the far side, not a local session that is not running.
+- leave with ctrl+d and connect again: the conversation is drawn as it stands, tool calls and their output included.
+- `/remote stop mock` from another window while you are attached: the client says which session on which host closed, gives the terminal back, and exits.
+
+measured against dev-box with nothing installed on it beforehand: create 3.0s, list 0.3s, attach 0.4s, abort reaching the far side in 94ms, an answer streamed about 2s after asking.
+eight attach and detach cycles leave no relays behind and settle at 370ms per attach, because the ssh connection is shared.
 
 ## /remote project: a repo and a worktree, without ssh
 
@@ -68,24 +82,29 @@ proven live against dev-box: the executor connecting in about four seconds,
 a persistent working directory, output held on the far side and read by range,
 exact-match edits refusing an ambiguous match, a session outliving its client,
 a late client catching up, `stop`, a private repo cloned with forwarded
-credentials, a prompt reaching the remote pi and its answer coming back, and
-the forwarded key present in the session's environment but absent from every
-command line and from disk.
+credentials, and the forwarded key present in the session's environment but
+absent from every command line and from disk.
 
-not proven: a remote session answering with a real model; two viewers attached
-at once outside the unit test; reconnecting after the laptop sleeps rather than
-after a clean disconnect; an environment whose machine is pre-empted mid
-command, which is the case rented nodes will actually produce.
+also proven, on a host wiped to nothing first: a remote session answering with a
+real model and streaming token by token; two clients watching one live turn and
+both seeing every frame; one client leaving without disturbing the other; abort
+reaching the far side; a command running there and not here; reattaching to a
+conversation and continuing it; the client exiting when its session is stopped
+under it; and nothing left behind afterwards, no relays, no brokers, no sockets.
+
+not proven: reconnecting after the laptop sleeps rather than after a clean
+disconnect; an environment whose machine is pre-empted mid command, which is the
+case rented nodes will actually produce; a session left running for days.
 
 ## Known rough edges
 
-- `/remote connect` starts a session for a project that has none, but the.
-  viewer and the session runner both assume the host has bun or node. A machine
-  with neither gets the compiled executor for `/environment`, but `/remote`
-  refuses.
 - `project.toml` does not exist; nothing reads per-project settings yet.
 - the first connect as a new user copies the bundle again, because the cache is.
   per user under `~/.cache/rho`.
+- which machine a session is on is remembered in `~/.cache/rho/remote/sessions.json`;.
+  delete that and `/remote connect` needs the host spelled out again.
+- a session runs until it is stopped; nothing expires it, so a forgotten one.
+  holds about forty megabytes on the host until `/remote stop`.
 
 ## addressed paths
 

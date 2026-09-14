@@ -28,6 +28,15 @@ const KEY_DELETE: KeyId = 'd';
 const KEY_UNDO: KeyId = 'u';
 const KEY_CLEAR: KeyId = 'ctrl+c';
 
+/** A key of this list's own: `r` to rename, `s` to stop, whatever it needs. */
+export interface ExtraKey {
+    readonly key: KeyId;
+    /** What it does, in the hint line. */
+    readonly label: string;
+    /** What comes back when it is pressed. */
+    readonly id: string;
+}
+
 /** what the rows are, and what may be done to them. */
 export interface PickerAction {
     /** 'd' removes the row under the cursor. The word names it in the hints. */
@@ -38,22 +47,26 @@ export interface PickerAction {
     readonly clear?: string;
     /** what enter does, for the hint line. */
     readonly choose?: string;
+    /** keys beyond the three every list has. */
+    readonly extra?: readonly ExtraKey[];
 }
 
 export type Chosen =
     | { readonly kind: 'chosen'; readonly value: string; readonly index: number }
     | { readonly kind: 'remove'; readonly value: string; readonly index: number }
+    | { readonly kind: 'extra'; readonly id: string; readonly value: string; readonly index: number }
     | { readonly kind: 'undo' }
     | { readonly kind: 'clear' }
     | { readonly kind: 'cancel' };
 
 /** what a keystroke means here, or null to let the list have it. */
-export type Intent = 'remove' | 'undo' | 'clear' | null;
+export type Intent = 'remove' | 'undo' | 'clear' | { readonly extra: string } | null;
 
 export function intentOf(data: string, action: PickerAction): Intent {
     if (action.clear !== undefined && matchesKey(data, KEY_CLEAR)) return 'clear';
     if (action.undo === true && matchesKey(data, KEY_UNDO)) return 'undo';
     if (action.remove !== undefined && matchesKey(data, KEY_DELETE)) return 'remove';
+    for (const extra of action.extra ?? []) if (matchesKey(data, extra.key)) return { extra: extra.id };
     return null;
 }
 
@@ -61,6 +74,7 @@ export function intentOf(data: string, action: PickerAction): Intent {
 export function hints(action: PickerAction): string {
     const keys = ['up/down move', `enter ${action.choose ?? 'select'}`];
     if (action.remove !== undefined) keys.push(`d ${action.remove}`);
+    for (const extra of action.extra ?? []) keys.push(`${extra.key} ${extra.label}`);
     if (action.clear !== undefined) keys.push(`ctrl+c ${action.clear}`);
     if (action.undo === true) keys.push('u undo');
     keys.push('esc cancel');
@@ -119,6 +133,18 @@ export function showPicker(ctx: ExtensionContext, view: PickerView): Promise<Cho
                     done({ kind: 'undo' });
                     return;
                 }
+                if (intent !== null && typeof intent === 'object') {
+                    const selected = list.getSelectedItem();
+                    if (selected !== undefined && selected !== null) {
+                        done({
+                            kind: 'extra',
+                            id: intent.extra,
+                            value: selected.value,
+                            index: items.findIndex((item) => item.value === selected.value),
+                        });
+                    }
+                    return;
+                }
                 if (intent === 'remove') {
                     const selected = list.getSelectedItem();
                     if (selected !== undefined && selected !== null) {
@@ -147,6 +173,8 @@ export interface Browsable {
     remove?(value: string): boolean | void | Promise<boolean | void>;
     undo?(): boolean | void | Promise<boolean | void>;
     clear?(): boolean | void | Promise<boolean | void>;
+    /** One of this list's own keys was pressed on a row. */
+    extra?(id: string, value: string): boolean | void | Promise<boolean | void>;
     /** What there is to say when there is nothing to show. */
     readonly empty?: string;
 }
@@ -175,6 +203,11 @@ export async function browse(ctx: ExtensionContext, source: Browsable): Promise<
         if (chosen.kind === 'remove') {
             cursor = chosen.index;
             if ((await source.remove?.(chosen.value)) === false) return null;
+            continue;
+        }
+        if (chosen.kind === 'extra') {
+            cursor = chosen.index;
+            if ((await source.extra?.(chosen.id, chosen.value)) === false) return null;
             continue;
         }
         if (chosen.kind === 'undo') {

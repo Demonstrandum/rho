@@ -26,6 +26,11 @@ import { Type } from 'typebox';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { addressName, parseAddress, sshTarget } from './lib/remote/address';
 import { browse } from './lib/picker';
+import { takeVerb } from './lib/shorthand';
+import { branchSlug, parseProjectRequest, repoName, sessionName } from './lib/remote/naming';
+
+/** What /remote can be asked to do. A word is matched against these. */
+const VERBS = ['create', 'connect', 'project', 'list', 'manage', 'stop'] as const;
 
 const CACHE = join(process.env.HOME ?? '/tmp', '.cache', 'rho', 'remote');
 const REMOTE_DIR = '.cache/rho/remote';
@@ -227,9 +232,6 @@ async function place(host: string, say: (note: string) => void): Promise<string>
  */
 const PROJECTS = 'projects';
 
-const repoName = (repo: string): string =>
-    (repo.split('/').pop() ?? repo).replace(/\.git$/, '').replace(/[^A-Za-z0-9._-]/g, '-');
-
 /**
  * A turning status line for work that takes a while.
  *
@@ -370,7 +372,10 @@ export default function (pi: ExtensionAPI) {
         const name = repoName(repo);
         const root = `$HOME/${PROJECTS}/${projectName}`;
         const checkout = `${root}/checkout/${name}`;
-        const worktree = `${root}/worktrees/${branch}`;
+        // The branch as a directory name, not as a path: `feature/remote` is
+        // one branch, and a directory of that name would nest it under a
+        // directory called feature that no other branch could share.
+        const worktree = `${root}/worktrees/${branchSlug(branch)}`;
 
         say(`cloning ${name} on ${host}`);
         const script = [
@@ -626,8 +631,26 @@ export default function (pi: ExtensionAPI) {
         // session that was never created.
         const alive = new Set(answers.flatMap(({ live }) => live.map((session) => session.name)));
         const missing = [...new Set([...hosts.keys(), ...worktrees.keys()])].filter((name) => !alive.has(name));
-        if (missing.length > 0) lines.push(`not running: ${missing.join(', ')}`);
+        for (const name of missing) {
+            const tree = worktrees.get(name);
+            lines.push(`  ${name}  not running${tree === undefined ? '' : `, project at ${tree.path}`}`);
+        }
         return lines.join('\n');
+    };
+
+    /** Every session a host holds, stopped ones included. */
+    const held = async (host: string): Promise<{ name: string; state: 'running' | 'stopped'; cwd: string }[]> => {
+        const listed = await ask(host, 'all', () => {}).catch(() => '');
+        return listed
+            .split('\n')
+            .map((line) => line.split('\t'))
+            .filter((columns) => columns.length >= 2)
+            .map((columns) => ({
+                name: columns[0]?.trim() ?? '',
+                state: (columns[1]?.trim() === 'running' ? 'running' : 'stopped') as 'running' | 'stopped',
+                cwd: columns[2]?.trim() ?? '',
+            }))
+            .filter((session) => session.name !== '' && session.name !== 'no sessions');
     };
 
     const list = async (host: string): Promise<string> => {
@@ -639,13 +662,20 @@ export default function (pi: ExtensionAPI) {
         description:
             'run the session on another machine: /remote create <name> user@host, /remote connect <name>, /remote list <user@host>',
         getArgumentCompletions: (prefix) => {
-            const words = ['create', 'connect', 'project', 'list', 'stop', ...hosts.keys(), ...worktrees.keys()];
+            const words = [...VERBS, ...hosts.keys(), ...worktrees.keys()];
             const found = words.filter((word) => word.startsWith(prefix));
             return found.length > 0 ? found.map((word) => ({ value: word, label: word })) : null;
         },
         handler: async (args, ctx) => {
-            const parts = args.trim().split(/\s+/).filter(Boolean);
-            const [verb, first, second] = parts;
+            // `/remote l` is list, `/remote conn` is connect: the first word is
+            // read as the shortest thing that still means one of these.
+            const spoken = takeVerb(args, VERBS);
+            const [first, second] = spoken.rest;
+            const verb = spoken.verb;
+            if (verb === null && spoken.typed !== '') {
+                ctx.ui.notify(spoken.complaint ?? `no such subcommand: ${spoken.typed}`, 'error');
+                return;
+            }
 
             if (verb === 'create') {
                 if (first === undefined || second === undefined) {
@@ -669,36 +699,32 @@ export default function (pi: ExtensionAPI) {
             }
 
             if (verb === 'project') {
-                // /remote project <repo> <project/branch> [user@host]
-                if (first === undefined || second === undefined) {
-                    ctx.ui.notify('Usage: /remote project <repo> <project/branch> [user@host]', 'error');
+                // /remote project <repo> [branch] [user@host] [as <name>]
+                const asked = parseProjectRequest(spoken.rest);
+                if (asked === null) {
+                    ctx.ui.notify('Usage: /remote project <repo> [branch] [user@host] [as <name>]', 'error');
                     return;
                 }
-                const host = parts[3] ?? [...hosts.values()][0];
+                const host = asked.host ?? [...hosts.values()][0];
                 if (host === undefined) {
-                    ctx.ui.notify('No host known yet: /remote project <repo> <project/branch> user@host', 'error');
+                    ctx.ui.notify('No host known yet: /remote project <repo> [branch] user@host', 'error');
                     return;
                 }
-                const [projectName, ...branchParts] = second.split('/');
-                const branch = branchParts.join('/') || 'main';
-                if (projectName === undefined) {
-                    ctx.ui.notify('Give a project name: <project>/<branch>', 'error');
-                    return;
-                }
+                const projectName = repoName(asked.repo);
+                const name = sessionName(asked.repo, asked.branch, asked.name ?? undefined);
                 const bar = progress(ctx);
-                bar.say(`setting up ${projectName} on ${host}`);
+                bar.say(`setting up ${name} on ${host}`);
                 try {
-                    const worktree = await project(host, first, projectName, branch, (note) => bar.say(note));
-                    worktrees.set(projectName, { host, path: worktree });
-                    rememberHosts();
-                    hosts.set(projectName, host);
+                    const worktree = await project(host, asked.repo, projectName, asked.branch, (note) => bar.say(note));
+                    worktrees.set(name, { host, path: worktree });
+                    hosts.set(name, host);
                     rememberHosts();
                     ctx.ui.notify(
-                        `${projectName} is at ${worktree} on ${host}. /remote connect ${projectName} starts a session there.`,
+                        `${name} is at ${worktree} on ${host}. /remote connect ${name} starts a session there.`,
                         'info',
                     );
                 } catch (error) {
-                    ctx.ui.notify(`Could not set up ${projectName}: ${(error as Error).message}`, 'error');
+                    ctx.ui.notify(`Could not set up ${name}: ${(error as Error).message}`, 'error');
                 } finally {
                     bar.done();
                 }
@@ -710,13 +736,112 @@ export default function (pi: ExtensionAPI) {
                 return;
             }
 
+            if (verb === 'manage') {
+                const host = first ?? [...hosts.values()][0];
+                if (host === undefined) {
+                    ctx.ui.notify('Usage: /remote manage user@host', 'error');
+                    return;
+                }
+                // Stopping is not forgetting, so the two are different keys and
+                // only one of them destroys anything.
+                let sessions = await held(host);
+                const refresh = async () => {
+                    sessions = await held(host);
+                };
+                await browse(ctx, {
+                    title: `sessions on ${host}`,
+                    empty: `nothing on ${host}. /remote create <name> ${host} starts one`,
+                    items: () =>
+                        sessions.map((session) => ({
+                            value: session.name,
+                            label: session.name,
+                            description: `${session.state}${session.cwd === '' ? '' : `, ${session.cwd}`}${
+                                worktrees.has(session.name) ? ', project' : ''
+                            }`,
+                        })),
+                    action: () => ({
+                        choose: 'connect',
+                        remove: 'stop',
+                        extra: [
+                            { key: 'r', label: 'rename', id: 'rename' },
+                            { key: 'x', label: 'forget (deletes the transcript)', id: 'forget' },
+                        ],
+                    }),
+                    remove: async (name) => {
+                        await ask(host, `stop ${name}`, () => {});
+                        await refresh();
+                        return true;
+                    },
+                    extra: async (id, name) => {
+                        if (id === 'rename') {
+                            const to = await ctx.ui.input(`rename ${name} to`, name);
+                            if (to === undefined || to.trim() === '' || to.trim() === name) return true;
+                            const answer = await ask(host, `rename ${name} ${to.trim()}`, () => {}).catch(
+                                (trouble: Error) => trouble.message,
+                            );
+                            ctx.ui.notify(answer, 'info');
+                            const where = hosts.get(name);
+                            if (where !== undefined) {
+                                hosts.delete(name);
+                                hosts.set(to.trim(), where);
+                            }
+                            const tree = worktrees.get(name);
+                            if (tree !== undefined) {
+                                worktrees.delete(name);
+                                worktrees.set(to.trim(), tree);
+                            }
+                            rememberHosts();
+                            await refresh();
+                            return true;
+                        }
+                        // The one that destroys something asks first.
+                        const sure = await ctx.ui.confirm(
+                            `forget ${name}?`,
+                            'this deletes its conversation on that machine. stopping it instead keeps everything.',
+                        );
+                        if (!sure) return true;
+                        const answer = await ask(host, `forget ${name}`, () => {}).catch(
+                            (trouble: Error) => trouble.message,
+                        );
+                        ctx.ui.notify(answer, 'info');
+                        hosts.delete(name);
+                        worktrees.delete(name);
+                        rememberHosts();
+                        await refresh();
+                        return true;
+                    },
+                });
+                return;
+            }
+
             if (verb === 'connect') {
                 const session = first ?? (await chooseSession(ctx, 'connect'));
                 if (session === null) return;
-                const host = second ?? hosts.get(session) ?? worktrees.get(session)?.host;
-                if (host === undefined) {
+                const address_ = second ?? hosts.get(session) ?? worktrees.get(session)?.host;
+                if (address_ === undefined) {
                     ctx.ui.notify(`I do not know which host ${session} is on. /remote connect ${session} user@host`, 'error');
                     return;
+                }
+                // An address given here is create's argument, so connect takes
+                // create's place when there is nothing to connect to: asking
+                // for a session is asking for it to exist.
+                const host = address_.includes(':') ? address_.slice(0, address_.indexOf(':')) : address_;
+                const alreadyThere = (await held(host).catch(() => [])).some((s) => s.name === session);
+                if (!alreadyThere) {
+                    // A project's session belongs in its worktree, which is the
+                    // whole point of having made one.
+                    const tree = worktrees.get(session);
+                    const where = tree === undefined ? address_ : `${tree.host}:${tree.path}`;
+                    const bar = progress(ctx);
+                    bar.say(`starting ${session} on ${host}`);
+                    try {
+                        await create(session, where, (text) => bar.say(text));
+                    } catch (error) {
+                        ctx.ui.notify(`Could not create ${session}: ${(error as Error).message}`, 'error');
+                        return;
+                    } finally {
+                        bar.done();
+                    }
                 }
                 // The terminal is handed over, not described.
                 //

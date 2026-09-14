@@ -16,7 +16,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { attach, Broker, existing, named, stop } from './broker';
+import { attach, Broker, existing, facts, named, stop } from './broker';
 
 const [verb, name, ...rest] = process.argv.slice(2);
 
@@ -31,7 +31,9 @@ if (verb === 'list') {
     for (const session of sessions) {
         if (await existing(session)) {
             alive += 1;
-            process.stdout.write(`${session}\trunning\n`);
+            // The directory too: a name alone cannot tell a project's worktree
+            // from a home directory, and that is what a list is read for.
+            process.stdout.write(`${session}\trunning\t${facts(session)?.cwd ?? ''}\n`);
             continue;
         }
         // A socket with nothing behind it is litter from a broker that was

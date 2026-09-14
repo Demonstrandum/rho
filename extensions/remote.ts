@@ -23,8 +23,9 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { addressName, parseAddress, sshTarget } from './lib/remote/address';
+import { browse } from './lib/picker';
 
 const CACHE = join(process.env.HOME ?? '/tmp', '.cache', 'rho', 'remote');
 const REMOTE_DIR = '.cache/rho/remote';
@@ -280,32 +281,59 @@ export default function (pi: ExtensionAPI) {
      */
     const ledger = join(homedir(), REMOTE_DIR, 'sessions.json');
 
-    const readLedger = (): Map<string, string> => {
+    /** A project's worktree, so connecting to it starts the session in the right directory. */
+    interface Worktree {
+        readonly host: string;
+        readonly path: string;
+    }
+
+    interface Ledger {
+        readonly sessions: Record<string, string>;
+        readonly projects: Record<string, Worktree>;
+    }
+
+    const readLedger = (): { hosts: Map<string, string>; worktrees: Map<string, Worktree> } => {
+        const empty = { hosts: new Map<string, string>(), worktrees: new Map<string, Worktree>() };
         try {
             const parsed: unknown = JSON.parse(readFileSync(ledger, 'utf8'));
-            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return new Map();
-            const pairs = Object.entries(parsed as Record<string, unknown>).filter(
-                (pair): pair is [string, string] => typeof pair[1] === 'string',
+            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return empty;
+            const held = parsed as Partial<Ledger> & Record<string, unknown>;
+            // The first version of this file was a flat name-to-host map; it is
+            // read as the sessions it was.
+            const sessions = held.sessions ?? (held as Record<string, unknown>);
+            const hosts = new Map(
+                Object.entries(sessions).filter((pair): pair is [string, string] => typeof pair[1] === 'string'),
             );
-            return new Map(pairs);
+            const worktrees = new Map(
+                Object.entries(held.projects ?? {}).filter(
+                    (pair): pair is [string, Worktree] =>
+                        typeof pair[1] === 'object' &&
+                        pair[1] !== null &&
+                        typeof (pair[1] as Worktree).host === 'string' &&
+                        typeof (pair[1] as Worktree).path === 'string',
+                ),
+            );
+            return { hosts, worktrees };
         } catch {
-            return new Map();
+            return empty;
         }
     };
 
-    const hosts = readLedger();
+    const { hosts, worktrees } = readLedger();
 
     const rememberHosts = (): void => {
         try {
             mkdirSync(dirname(ledger), { recursive: true });
-            writeFileSync(ledger, `${JSON.stringify(Object.fromEntries(hosts), null, 2)}\n`);
+            const held: Ledger = {
+                sessions: Object.fromEntries(hosts),
+                projects: Object.fromEntries(worktrees),
+            };
+            writeFileSync(ledger, `${JSON.stringify(held, null, 2)}\n`);
         } catch {
             // A ledger that cannot be written costs the next process a host
             // name on the command line; it is not worth failing a session for.
         }
     };
-    /** A project's worktree, so connecting to it starts the session in the right directory. */
-    const worktrees = new Map<string, { host: string; path: string }>();
 
     /**
      * What this laptop is logged in with: the api keys in the environment, and
@@ -501,6 +529,107 @@ export default function (pi: ExtensionAPI) {
         return again.out.trim();
     };
 
+
+    /**
+     * The sessions this machine knows about, each with the host it is on.
+     *
+     * The ledger is what was started from here; the hosts in it are asked
+     * whether those sessions are still running, so a list never offers one that
+     * has been stopped from somewhere else.
+     */
+    const knownSessions = async (): Promise<{ name: string; host: string; running: boolean }[]> => {
+        const byHost = new Map<string, string[]>();
+        for (const [name, host] of hosts) byHost.set(host, [...(byHost.get(host) ?? []), name]);
+        const found: { name: string; host: string; running: boolean }[] = [];
+        await Promise.all(
+            [...byHost].map(async ([host, names]) => {
+                const listed = await ask(host, 'list', () => {}).catch(() => '');
+                const alive = new Set(parseListing(listed).map((session) => session.name));
+                for (const name of names) found.push({ name, host, running: alive.has(name) });
+            }),
+        );
+        return found.sort((a, b) => a.name.localeCompare(b.name));
+    };
+
+    /**
+     * Which session, when the command did not say.
+     *
+     * A name is easier to pick from a list than to remember, and the list is
+     * the only place that knows which of them are still running.
+     */
+    const chooseSession = async (ctx: ExtensionContext, verb: string): Promise<string | null> => {
+        const sessions = await knownSessions();
+        return browse(ctx, {
+            title: `remote sessions to ${verb}`,
+            empty: 'no remote sessions. /remote create <name> <user@host> starts one',
+            items: () =>
+                sessions.map((session) => ({
+                    value: session.name,
+                    label: session.name,
+                    description: `${worktrees.has(session.name) ? 'project on ' : ''}${session.host}${session.running ? '' : ' (not running)'}`,
+                })),
+            action: () => ({ choose: verb }),
+        });
+    };
+
+    /** One running session on one host, as the runner reports it. */
+    interface Running {
+        readonly name: string;
+        readonly cwd: string;
+    }
+
+    const parseListing = (listed: string): Running[] =>
+        listed
+            .split('\n')
+            .map((line) => line.split('\t'))
+            .filter((columns) => columns.length >= 2 && columns[1]?.trim() === 'running')
+            .map((columns) => ({ name: columns[0]?.trim() ?? '', cwd: columns[2]?.trim() ?? '' }))
+            .filter((session) => session.name !== '');
+
+    const running = async (host: string): Promise<Running[]> => parseListing(await ask(host, 'list', () => {}));
+
+    /**
+     * Every session this machine knows of, and what it is working on.
+     *
+     * A bare list of names could not tell a project's worktree from a home
+     * directory, and a project started from here was not in it at all, because
+     * only the sessions were written down.
+     */
+    const inventory = async (only?: string): Promise<string> => {
+        const machines =
+            only !== undefined
+                ? [only]
+                : [...new Set([...hosts.values(), ...[...worktrees.values()].map((tree) => tree.host)])];
+        if (machines.length === 0) return 'no remote sessions. /remote create <name> <user@host> starts one';
+
+        // Each machine is asked once, and they are asked at the same time.
+        const answers = await Promise.all(
+            machines.map(async (host) => ({ host, live: await running(host).catch(() => [] as Running[]) })),
+        );
+
+        const lines: string[] = [];
+        for (const { host, live } of answers) {
+            lines.push(`${host}:`);
+            if (live.length === 0) {
+                lines.push('  nothing running');
+                continue;
+            }
+            for (const session of live) {
+                const project = worktrees.get(session.name);
+                const where = project !== undefined ? `project, ${project.path}` : session.cwd;
+                lines.push(`  ${session.name}${where === '' ? '' : `  ${where}`}`);
+            }
+        }
+
+        // Written down here but not running there: stopped from somewhere else,
+        // or the machine could not be reached. A silent absence reads as a
+        // session that was never created.
+        const alive = new Set(answers.flatMap(({ live }) => live.map((session) => session.name)));
+        const missing = [...new Set([...hosts.keys(), ...worktrees.keys()])].filter((name) => !alive.has(name));
+        if (missing.length > 0) lines.push(`not running: ${missing.join(', ')}`);
+        return lines.join('\n');
+    };
+
     const list = async (host: string): Promise<string> => {
         const listed = await ask(host, 'list', () => {});
         return listed || 'no sessions';
@@ -561,6 +690,7 @@ export default function (pi: ExtensionAPI) {
                 try {
                     const worktree = await project(host, first, projectName, branch, (note) => bar.say(note));
                     worktrees.set(projectName, { host, path: worktree });
+                    rememberHosts();
                     hosts.set(projectName, host);
                     rememberHosts();
                     ctx.ui.notify(
@@ -576,23 +706,16 @@ export default function (pi: ExtensionAPI) {
             }
 
             if (verb === 'list') {
-                const host = first ?? [...hosts.values()][0];
-                if (host === undefined) {
-                    ctx.ui.notify('Usage: /remote list user@host', 'error');
-                    return;
-                }
-                ctx.ui.notify(await list(host), 'info');
+                ctx.ui.notify(await inventory(first), 'info');
                 return;
             }
 
             if (verb === 'connect') {
-                if (first === undefined) {
-                    ctx.ui.notify('Usage: /remote connect <name>', 'error');
-                    return;
-                }
-                const host = second ?? hosts.get(first) ?? worktrees.get(first)?.host;
+                const session = first ?? (await chooseSession(ctx, 'connect'));
+                if (session === null) return;
+                const host = second ?? hosts.get(session) ?? worktrees.get(session)?.host;
                 if (host === undefined) {
-                    ctx.ui.notify(`I do not know which host ${first} is on. /remote connect ${first} user@host`, 'error');
+                    ctx.ui.notify(`I do not know which host ${session} is on. /remote connect ${session} user@host`, 'error');
                     return;
                 }
                 // The terminal is handed over, not described.
@@ -611,7 +734,7 @@ export default function (pi: ExtensionAPI) {
                         queueMicrotask(() => {
                             tui.stop();
                             try {
-                                spawnSync('bun', [client, host, first], { stdio: 'inherit' });
+                                spawnSync('bun', [client, host, session], { stdio: 'inherit' });
                             } finally {
                                 tui.start();
                                 tui.requestRender(true);
@@ -625,24 +748,22 @@ export default function (pi: ExtensionAPI) {
                     },
                     { overlay: true },
                 );
-                ctx.ui.notify(`back from ${first} on ${host}, which is still running`, 'info');
+                ctx.ui.notify(`back from ${session} on ${host}, which is still running`, 'info');
                 return;
             }
 
             if (verb === 'stop') {
-                if (first === undefined) {
-                    ctx.ui.notify('Usage: /remote stop <name>', 'error');
-                    return;
-                }
-                const host = hosts.get(first) ?? second;
+                const session = first ?? (await chooseSession(ctx, 'stop'));
+                if (session === null) return;
+                const host = hosts.get(session) ?? second;
                 if (host === undefined) {
-                    ctx.ui.notify(`I do not know which host ${first} is on.`, 'error');
+                    ctx.ui.notify(`I do not know which host ${session} is on.`, 'error');
                     return;
                 }
-                await ask(host, `stop ${first}`, () => {});
-                hosts.delete(first);
+                await ask(host, `stop ${session}`, () => {});
+                hosts.delete(session);
                 rememberHosts();
-                ctx.ui.notify(`Stopped ${first}.`, 'info');
+                ctx.ui.notify(`Stopped ${session}.`, 'info');
                 return;
             }
 

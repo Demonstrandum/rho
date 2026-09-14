@@ -53,6 +53,8 @@ export interface Where {
     readonly name: string;
     readonly host: string;
     cwd: string;
+    /** the branch checked out there, when the directory is a work tree. */
+    branch?: string | null;
     readonly shell: string;
     readonly alive: boolean;
     chdir(path: string): Promise<string>;

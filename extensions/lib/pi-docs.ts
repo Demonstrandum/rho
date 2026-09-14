@@ -170,6 +170,13 @@ function readBuiltins(piRoot: string): CommandRecord[] {
     }
 }
 
+/** the names pi itself answers as slash commands, empty when pi is not found. */
+export function builtinCommandNames(): ReadonlySet<string> {
+    const piRoot = findPiRoot();
+    if (piRoot === null) return new Set();
+    return new Set(readBuiltins(piRoot).map((command) => command.name));
+}
+
 // -------------------------------------------------------------- doc sections
 
 /** split markdown into one record per heading, ignoring headings in code fences. */

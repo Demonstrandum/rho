@@ -302,6 +302,24 @@ const SCHEMA = {
             'the window and text then lands on top of it. 1 removes the cap.',
         ),
     },
+    quit: {
+        words: field(
+            'words',
+            isStringArray,
+            ['quit', 'exit'],
+            'words that end the session, matched without regard to case. each one',
+            'works as a command (/exit) and, when bare-word is on, as a message',
+            'holding nothing else. a word pi already defines as a command (quit)',
+            'stays pi\'s, since pi matches its own commands first',
+        ),
+        bareWord: field(
+            'bare-word',
+            isBool,
+            true,
+            'whether one of the words alone, with no slash, exits. off leaves the',
+            'slash forms only, so typing quit sends the word to the model',
+        ),
+    },
     cwd: {
         remember: field(
             'remember',

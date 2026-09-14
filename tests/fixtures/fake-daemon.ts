@@ -39,6 +39,23 @@ process.stdin.on('data', (chunk: Buffer) => {
                 break;
             case 'prompt':
                 say({ type: 'response', id: command.id, data: { accepted: true } });
+                if (command.message === 'slow') {
+                    // A model call that takes a while and streams nothing
+                    // until it is done: the case that reads as a hang.
+                    say({ type: 'agent_start' });
+                    say({ type: 'turn_start' });
+                    setTimeout(() => {
+                        say({ type: 'message_start', message: { role: 'assistant', content: [] } });
+                        say({
+                            type: 'message_end',
+                            message: { role: 'assistant', content: [{ type: 'text', text: 'late' }] },
+                        });
+                        say({ type: 'turn_end' });
+                        say({ type: 'agent_end' });
+                        say({ type: 'agent_settled' });
+                    }, 20000);
+                    break;
+                }
                 say({ type: 'agent_start' });
                 say({ type: 'message_start', message: { role: 'assistant', content: [] } });
                 say({ type: 'message_update', assistantMessageEvent: { type: 'text_start', contentIndex: 0 } });
@@ -83,6 +100,25 @@ process.stdin.on('data', (chunk: Buffer) => {
                     message: { role: 'assistant', content: [], errorMessage: 'a refusal from last week' },
                 });
                 say({ type: 'rho_replay_end' });
+                break;
+            case 'slow_turn':
+                // A turn whose model call takes a while and streams nothing:
+                // the case that looks like a hang.
+                say({ type: 'response', id: command.id, data: {} });
+                say({ type: 'agent_start' });
+                say({ type: 'turn_start' });
+                setTimeout(() => {
+                    say({ type: 'message_start', message: { role: 'assistant', content: [] } });
+                    say({ type: 'message_update', assistantMessageEvent: { type: 'text_start', contentIndex: 0 } });
+                    say({
+                        type: 'message_update',
+                        assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'late' },
+                    });
+                    say({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'late' }] } });
+                    say({ type: 'turn_end' });
+                    say({ type: 'agent_end' });
+                    say({ type: 'agent_settled' });
+                }, 25000);
                 break;
             case 'die':
                 process.stderr.write('the daemon fell over\n');

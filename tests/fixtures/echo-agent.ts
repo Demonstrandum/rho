@@ -17,11 +17,19 @@ process.stdin.on('data', (chunk: Buffer) => {
     for (const line of lines) {
         if (line.trim() === '') continue;
         let message = line;
+        let id: string | undefined;
         try {
-            const parsed = JSON.parse(line) as { message?: string };
+            const parsed = JSON.parse(line) as { message?: string; id?: string };
             message = parsed.message ?? line;
+            id = parsed.id;
         } catch {
             // not JSON: echoed as it came
+        }
+        // A command with an id gets an answer carrying that id, the way pi's
+        // rpc mode does; anything else is an event.
+        if (id !== undefined) {
+            process.stdout.write(`${JSON.stringify({ type: 'response', id, success: true, data: { message } })}\n`);
+            continue;
         }
         process.stdout.write(`${JSON.stringify({ type: 'message', text: message })}\n`);
     }

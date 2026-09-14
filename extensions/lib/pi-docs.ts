@@ -25,7 +25,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync, type Dirent } from 'node:fs';
-import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { basename, dirname, join, relative, sep } from 'node:path';
 
 export type CommandOrigin = 'builtin' | 'extension' | 'prompt' | 'skill';
@@ -80,7 +80,7 @@ const MAX_DOC_DEPTH = 4;
 
 /** the directory holding the running pi's package, or null. */
 export function findPiRoot(): string | null {
-    return fromRequire() ?? fromPath();
+    return fromResolve() ?? fromPath();
 }
 
 function walkUpToPackage(start: string): string | null {
@@ -94,10 +94,16 @@ function walkUpToPackage(start: string): string | null {
     return null;
 }
 
-function fromRequire(): string | null {
+/**
+ * pi's package exports name an `import` condition and no `require` one, so a
+ * CommonJS resolver reports the package as missing however plainly it sits in
+ * node_modules. this resolves under the same condition the extension host
+ * loads pi with.
+ */
+function fromResolve(): string | null {
     try {
-        const entry = createRequire(import.meta.url).resolve(`${SCOPE}/${PACKAGE}`);
-        return walkUpToPackage(dirname(entry));
+        const entry = import.meta.resolve(`${SCOPE}/${PACKAGE}`);
+        return walkUpToPackage(dirname(fileURLToPath(entry)));
     } catch {
         return null;
     }

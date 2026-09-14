@@ -27,6 +27,7 @@ import { RpcLink } from '../extensions/lib/remote/rpc-link';
 import { RemoteActions, RemoteState } from '../extensions/lib/remote/proxy-session';
 import { remoteSession } from '../extensions/lib/remote/remote-session';
 import { TurnGate } from '../extensions/lib/remote/turn-gate';
+import { controlPath } from '../extensions/lib/remote/agent-tag';
 import { troubleWith } from '../extensions/lib/remote/advice';
 
 const [target, name, ...rest] = process.argv.slice(2);
@@ -47,7 +48,7 @@ const SSH_FLAGS = [
     '-o',
     'ControlMaster=auto',
     '-o',
-    `ControlPath=${CACHE}/cm-%C`,
+    `ControlPath=${controlPath(CACHE)}`,
     '-o',
     'ControlPersist=10m',
     '-o',

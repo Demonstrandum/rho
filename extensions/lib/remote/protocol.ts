@@ -67,6 +67,16 @@ export type Request =
     | { readonly kind: 'list'; readonly path: string; readonly glob?: string }
     /** Where relative paths resolve from, for this connection. */
     | { readonly kind: 'chdir'; readonly path: string }
+    /**
+     * Environment for everything the executor runs from now on.
+     *
+     * The daemon outlives the ssh connection that started it, and a forwarded
+     * agent belongs to a connection: the socket path it was started with is
+     * dead by the next attach, so a clone on the far side asks an agent that
+     * is not there and fails with "Permission denied (publickey)". The relay
+     * runs inside the live connection and knows the live path.
+     */
+    | { readonly kind: 'environment'; readonly env: Readonly<Record<string, string>> }
     | { readonly kind: 'cwd' };
 
 /** What the far side sends back. Replies carry the id of their request. */

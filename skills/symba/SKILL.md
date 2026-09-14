@@ -77,4 +77,4 @@ run it on robotics-vm before anything else, because every failure below looks li
 - allocate from robotics-vm, never from the laptop: the laptop is not always on and a lease outlives it.
 - terminate what you allocate, and say the id you terminated.
 - nothing that matters stays only on a node: it goes to forge storage or off the node before the lease ends.
-- a lease is extended before it expires. after is a new node and a lost disk.
+- a lease is extended before it expires; after is a new node and a lost disk.

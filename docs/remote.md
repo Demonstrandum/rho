@@ -22,6 +22,7 @@ nothing valuable is on a machine that disappears.
 `connect` hands this terminal to a client that draws the session with pi's own interface: the rows, the streaming and the rendering are pi's, unmodified, because it is reading what it always reads.
 the local session stands aside while the client has the terminal, the same way pi stands aside for an external editor, and comes back when the client exits.
 
+the client draws on the alternate screen, so the session underneath is untouched and comes back exactly as it was left: two conversations scrolled into one another lose both.
 leaving the client gives the terminal back and the session carries on.
 reattaching draws the conversation as it stands, including tool calls and their output.
 ctrl+d leaves.

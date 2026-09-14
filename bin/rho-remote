@@ -281,6 +281,24 @@ const interactive = new InteractiveMode(runtime, {
     verbose: false,
 });
 
+/**
+ * Draw over what is already on the screen, and give it back on the way out.
+ *
+ * The remote session is a different conversation from the one in this
+ * terminal, and scrolling them into one another loses both: the interface
+ * underneath is still there, mid-thought, and it should be where it was left.
+ * The alternate screen is what a terminal has for exactly this, and it is
+ * entered here rather than by whoever launched the client, so leaving restores
+ * the screen whether the client was started by hand or by /remote connect.
+ */
+const overlay = process.stdout.isTTY === true;
+const lift = (): void => {
+    if (overlay) process.stdout.write('\u001b[?1049l\u001b[?25h');
+};
+if (overlay) process.stdout.write('\u001b[?1049h\u001b[H');
+for (const signal of ['SIGHUP', 'SIGTERM'] as const) process.on(signal, () => { lift(); process.exit(1); });
+process.on('exit', lift);
+
 drawing = interactive;
 await interactive.run();
 

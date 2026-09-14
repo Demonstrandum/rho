@@ -56,6 +56,7 @@ what to check while you are in there, in order of how likely it is to be wrong:
 - ask for a command, say `hostname && pwd`; the row is pi's own and the answer is the far side's.
 - escape mid-answer: the abort must settle the far side, not a local session that is not running.
 - leave with ctrl+d and connect again: the conversation is drawn as it stands, tool calls and their output included.
+- a turn that goes quiet for fifteen seconds says `waiting on the model, 45s without a reply` and counts until something arrives.
 - `/remote stop mock` from another window while you are attached: the client says which session on which host closed, gives the terminal back, and exits.
 
 measured against robotics-vm with nothing installed on it beforehand: create 3.0s, list 0.3s, attach 0.4s, abort reaching the far side in 94ms, an answer streamed about 2s after asking.

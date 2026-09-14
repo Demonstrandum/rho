@@ -13,7 +13,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { attach, Broker, existing, facts, named, stop } from './broker';
@@ -24,6 +24,20 @@ const stateHome = (): string =>
     process.env.XDG_STATE_HOME ?? join(process.env.HOME ?? tmpdir(), '.local', 'state');
 
 const credentialDir = (name: string): string => join(stateHome(), 'rho', 'sessions', name);
+
+/**
+ * How long a session waits on a response that has stopped arriving.
+ *
+ * pi's own wait is five minutes. A machine behind NAT loses idle connections
+ * without either end being told, so the next request goes into a socket nobody
+ * is listening on and hangs for exactly that long before the retry that
+ * succeeds: a turn measured here took 300.0 seconds from prompt to answer,
+ * with the request sent and no byte ever returned.
+ *
+ * Thirty seconds is longer than any first token on these models and short
+ * enough that a dead socket costs a pause rather than a coffee.
+ */
+const IDLE_TIMEOUT_MS = 30_000;
 
 /** Where a runtime is, or null when it is not on PATH. */
 const which = (name: string): string | null => {
@@ -182,12 +196,12 @@ const lendCredentials = (auth: string, name: string): string => {
      * rho that was sent rather than whatever that machine happens to hold.
      */
     const rho = process.env.RHO_RHO_DIR;
-    if (rho !== undefined && rho !== '') {
-        rmSync(join(dir, 'settings.json'), { force: true });
-        writeFileSync(join(dir, 'settings.json'), `${JSON.stringify({ packages: [rho] }, null, 2)}\n`, {
-            mode: 0o600,
-        });
-    }
+    rmSync(join(dir, 'settings.json'), { force: true });
+    writeFileSync(
+        join(dir, 'settings.json'),
+        `${JSON.stringify({ ...(rho === undefined || rho === '' ? {} : { packages: [rho] }), httpIdleTimeoutMs: IDLE_TIMEOUT_MS }, null, 2)}\n`,
+        { mode: 0o600 },
+    );
     return dir;
 };
 
@@ -237,6 +251,18 @@ if (verb === 'relend') {
     const dir = credentialDir(name);
     if (!existsSync(dir)) die(`${name} has no credentials of its own to replace`);
     writeFileSync(join(dir, 'auth.json'), lent.auth ?? '{}', { mode: 0o600 });
+    // The wait on a response that stopped arriving, refreshed with the
+    // credentials, so a session made before this setting existed picks it up
+    // the next time it starts.
+    try {
+        const held: Record<string, unknown> = existsSync(join(dir, 'settings.json'))
+            ? (JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')) as Record<string, unknown>)
+            : {};
+        held.httpIdleTimeoutMs = IDLE_TIMEOUT_MS;
+        writeFileSync(join(dir, 'settings.json'), `${JSON.stringify(held, null, 2)}\n`, { mode: 0o600 });
+    } catch {
+        // settings that cannot be read are settings this does not rewrite
+    }
     process.stdout.write(`${name} has fresh credentials\n`);
     process.exit(0);
 }

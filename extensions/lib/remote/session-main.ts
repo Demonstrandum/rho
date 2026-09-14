@@ -20,6 +20,11 @@ import { attach, Broker, existing, facts, named, stop } from './broker';
 
 const [verb, name, ...rest] = process.argv.slice(2);
 
+const stateHome = (): string =>
+    process.env.XDG_STATE_HOME ?? join(process.env.HOME ?? tmpdir(), '.local', 'state');
+
+const credentialDir = (name: string): string => join(stateHome(), 'rho', 'sessions', name);
+
 const die = (message: string): never => {
     process.stderr.write(`${message}\n`);
     process.exit(1);
@@ -45,7 +50,27 @@ if (verb === 'list') {
     process.exit(0);
 }
 
-if (name === undefined) die(`usage: rho-session <serve|attach|list|stop> <name>`);
+/** Every session this machine holds, running or stopped. */
+if (verb === 'all') {
+    const dir = join(stateHome(), 'rho', 'sessions');
+    const held = (() => {
+        try {
+            return readdirSync(dir);
+        } catch {
+            return [] as string[];
+        }
+    })();
+    const names = [...new Set([...named(), ...held])].sort();
+    for (const session of names) {
+        const alive = await existing(session);
+        const where = alive ? (facts(session)?.cwd ?? '') : '';
+        process.stdout.write(`${session}\t${alive ? 'running' : 'stopped'}\t${where}\n`);
+    }
+    if (names.length === 0) process.stdout.write('no sessions\n');
+    process.exit(0);
+}
+
+if (name === undefined) die('usage: rho-session <serve|attach|list|all|stop|rename|forget|relend> <name>');
 
 if (verb === 'attach') {
     if (!(await existing(name))) die(`no session called ${name}`);
@@ -113,11 +138,6 @@ const readFromStdin = async (): Promise<Lent> => {
  * the same name destroyed the conversation, and a reboot destroyed all of
  * them. Only the credentials are rewritten; `forget` is how a transcript goes.
  */
-const stateHome = (): string =>
-    process.env.XDG_STATE_HOME ?? join(process.env.HOME ?? tmpdir(), '.local', 'state');
-
-const credentialDir = (name: string): string => join(stateHome(), 'rho', 'sessions', name);
-
 const lendCredentials = (auth: string, name: string): string => {
     const real = join(process.env.HOME ?? '/tmp', '.pi', 'agent');
     const dir = credentialDir(name);
@@ -151,26 +171,6 @@ const lendCredentials = (auth: string, name: string): string => {
  * pi rereads auth.json when it changes, so handing it a newer one is enough --
  * no restart, and the session keeps its history.
  */
-/** Every session this machine holds, running or stopped. */
-if (verb === 'all') {
-    const dir = join(stateHome(), 'rho', 'sessions');
-    const held = (() => {
-        try {
-            return readdirSync(dir);
-        } catch {
-            return [] as string[];
-        }
-    })();
-    const names = [...new Set([...named(), ...held])].sort();
-    for (const session of names) {
-        const alive = await existing(session);
-        const where = alive ? (facts(session)?.cwd ?? '') : '';
-        process.stdout.write(`${session}\t${alive ? 'running' : 'stopped'}\t${where}\n`);
-    }
-    if (names.length === 0) process.stdout.write('no sessions\n');
-    process.exit(0);
-}
-
 /**
  * A new name for a session, transcript and all.
  *

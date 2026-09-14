@@ -26,7 +26,7 @@ import { Type } from 'typebox';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { addressName, parseAddress, sshTarget } from './lib/remote/address';
 import { browse } from './lib/picker';
-import { takeVerb } from './lib/shorthand';
+import { shorthandFor, takeVerb } from './lib/shorthand';
 import { branchSlug, parseProjectRequest, repoName, sessionName } from './lib/remote/naming';
 
 /** What /remote can be asked to do. A word is matched against these. */
@@ -542,17 +542,16 @@ export default function (pi: ExtensionAPI) {
      * whether those sessions are still running, so a list never offers one that
      * has been stopped from somewhere else.
      */
-    const knownSessions = async (): Promise<{ name: string; host: string; running: boolean }[]> => {
-        const byHost = new Map<string, string[]>();
-        for (const [name, host] of hosts) byHost.set(host, [...(byHost.get(host) ?? []), name]);
-        const found: { name: string; host: string; running: boolean }[] = [];
-        await Promise.all(
-            [...byHost].map(async ([host, names]) => {
-                const listed = await ask(host, 'list', () => {}).catch(() => '');
-                const alive = new Set(parseListing(listed).map((session) => session.name));
-                for (const name of names) found.push({ name, host, running: alive.has(name) });
-            }),
+    const knownSessions = async (): Promise<{ name: string; host: string; state: 'running' | 'stopped' }[]> => {
+        const machines = [...new Set([...hosts.values(), ...[...worktrees.values()].map((tree) => tree.host)])];
+        const answers = await Promise.all(
+            machines.map(async (host) => ({ host, sessions: await held(host).catch(() => []) })),
         );
+        const found = answers.flatMap(({ host, sessions }) =>
+            sessions.map((session) => ({ name: session.name, host, state: session.state })),
+        );
+        // Anything remembered here that the host did not mention: it was
+        // forgotten over there, and offering it would be offering a ghost.
         return found.sort((a, b) => a.name.localeCompare(b.name));
     };
 
@@ -571,7 +570,13 @@ export default function (pi: ExtensionAPI) {
                 sessions.map((session) => ({
                     value: session.name,
                     label: session.name,
-                    description: `${worktrees.has(session.name) ? 'project on ' : ''}${session.host}${session.running ? '' : ' (not running)'}`,
+                    description: [
+                        session.host,
+                        session.state,
+                        worktrees.has(session.name) ? 'project' : '',
+                    ]
+                        .filter((part) => part !== '')
+                        .join(', '),
                 })),
             action: () => ({ choose: verb }),
         });
@@ -661,21 +666,52 @@ export default function (pi: ExtensionAPI) {
     pi.registerCommand('remote', {
         description:
             'run the session on another machine: /remote create <name> user@host, /remote connect <name>, /remote list <user@host>',
+        /**
+         * What can be typed next, which depends on what has been typed.
+         *
+         * Completing verbs everywhere meant `/remote connect <tab>` offered
+         * `create`, and never offered the session you were about to name.
+         */
         getArgumentCompletions: (prefix) => {
-            const words = [...VERBS, ...hosts.keys(), ...worktrees.keys()];
-            const found = words.filter((word) => word.startsWith(prefix));
-            return found.length > 0 ? found.map((word) => ({ value: word, label: word })) : null;
+            const written = prefix.split(/\s+/);
+            const verb = written.length > 1 ? shorthandFor(written[0] ?? '', VERBS) : null;
+            const typing = written[written.length - 1] ?? '';
+
+            const sessionRows = [...new Set([...hosts.keys(), ...worktrees.keys()])].map((name) => ({
+                value: name,
+                label: name,
+                description: worktrees.get(name)?.path ?? hosts.get(name) ?? '',
+            }));
+            const hostRows = [...new Set(hosts.values())].map((host) => ({ value: host, label: host }));
+
+            const offers =
+                verb === null
+                    ? [
+                          ...VERBS.map((word) => ({ value: word, label: word, description: '' })),
+                          ...sessionRows,
+                      ]
+                    : verb === 'connect' || verb === 'stop'
+                      ? [...sessionRows, ...hostRows]
+                      : verb === 'list' || verb === 'manage' || verb === 'create' || verb === 'project'
+                        ? hostRows
+                        : [];
+
+            const found = offers.filter((offer) => offer.value.startsWith(typing));
+            return found.length > 0 ? found : null;
         },
         handler: async (args, ctx) => {
             // `/remote l` is list, `/remote conn` is connect: the first word is
             // read as the shortest thing that still means one of these.
             const spoken = takeVerb(args, VERBS);
             const [first, second] = spoken.rest;
-            const verb = spoken.verb;
+            let verb = spoken.verb;
             if (verb === null && spoken.typed !== '') {
                 ctx.ui.notify(spoken.complaint ?? `no such subcommand: ${spoken.typed}`, 'error');
                 return;
             }
+            // `/remote` on its own is a question about which session, and that
+            // is what the list is for: a usage line answers nobody.
+            if (verb === null) verb = 'connect';
 
             if (verb === 'create') {
                 if (first === undefined || second === undefined) {

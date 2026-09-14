@@ -98,8 +98,12 @@ export default function (pi: ExtensionAPI) {
                     let pwd = remote === null
                         ? formatCwd(process.cwd(), process.env.HOME || process.env.USERPROFILE)
                         : remote.cwd;
-                    const branch = footerData.getGitBranch();
-                    if (branch && remote === null) pwd = `${pwd} (${branch})`;
+                    // The branch of whichever checkout the session is in: this
+                    // machine's when the work is here, and the far side's when
+                    // it is not. Showing a local branch beside a remote path
+                    // names a checkout that nothing is happening in.
+                    const branch = remote === null ? footerData.getGitBranch() : remote.branch;
+                    if (branch) pwd = `${pwd} (${branch})`;
                     const sessionName = ctx.sessionManager.getSessionName();
                     if (sessionName) pwd = `${pwd} • ${sessionName}`;
 

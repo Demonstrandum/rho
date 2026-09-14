@@ -11,7 +11,7 @@
  * holds the long-lived thing, and output is read rather than pushed in full.
  */
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createServer, connect as connectSocket } from 'node:net';
 import type { Server, Socket } from 'node:net';
@@ -252,13 +252,25 @@ export class Broker {
                         continue;
                     }
                     if (parsed?.type === 'rho_info') {
+                        // The branch travels with the directory: the interface
+                        // shows one, and a branch read on the laptop belongs to
+                        // a checkout the session cannot see.
+                        let branch: string | null = null;
+                        try {
+                            branch = execFileSync('git', ['-C', this.cwd, 'rev-parse', '--abbrev-ref', 'HEAD'], {
+                                encoding: 'utf8',
+                                stdio: ['ignore', 'pipe', 'ignore'],
+                            }).trim();
+                        } catch {
+                            // not a work tree, or no git here
+                        }
                         client.write(
                             `${JSON.stringify({
                                 type: 'response',
                                 id: parsed.id,
                                 command: 'rho_info',
                                 success: true,
-                                data: { cwd: this.cwd, name: this.name },
+                                data: { cwd: this.cwd, name: this.name, branch },
                             })}\n`,
                         );
                         continue;

@@ -26,6 +26,7 @@ import { join } from 'node:path';
 import { RpcLink } from '../extensions/lib/remote/rpc-link';
 import { RemoteActions, RemoteState } from '../extensions/lib/remote/proxy-session';
 import { remoteSession } from '../extensions/lib/remote/remote-session';
+import { TurnGate } from '../extensions/lib/remote/turn-gate';
 
 const [target, name, ...rest] = process.argv.slice(2);
 // A message given on the command line is submitted on attach, which is how a
@@ -108,10 +109,11 @@ let drawing: { stop: () => void } | null = null;
  * built: publishing it afterwards meant they were all told they were local.
  * The directory arrives a round trip later and is filled in then.
  */
-const where = {
+const where: { name: string; host: string; cwd: string; branch: string | null; shell: string; alive: boolean; chdir: (path: string) => Promise<string> } = {
     name: target,
     host: target.includes('@') ? target.slice(target.indexOf('@') + 1) : target,
     cwd: process.cwd(),
+    branch: null,
     shell: 'bash',
     alive: true,
     chdir: async (path: string) => {
@@ -190,7 +192,9 @@ if (trace !== undefined) {
  * time.
  */
 const [info] = await Promise.all([
-    link.send({ type: 'rho_info' }).catch(() => ({})) as Promise<{ data?: { cwd?: string } }>,
+    link.send({ type: 'rho_info' }).catch(() => ({})) as Promise<{
+        data?: { cwd?: string; branch?: string | null };
+    }>,
     state.refresh(),
     credentials,
     local,
@@ -206,8 +210,9 @@ const [info] = await Promise.all([
  */
 const remoteCwd = info.data?.cwd ?? process.cwd();
 
-// The directory, now that the far side has said where it is.
+// The directory and its branch, now that the far side has said both.
 where.cwd = remoteCwd;
+where.branch = info.data?.branch ?? null;
 
 // The local half: settings, the editor, the renderer, and a session file of
 // this machine's own. None of it is the agent; all of it is the interface.
@@ -257,7 +262,12 @@ for (const message of state.messages) {
 const raise = (made.session as unknown as { _emitExtensionEvent?: (event: unknown) => Promise<void> })
     ._emitExtensionEvent;
 if (typeof raise === 'function') {
+    // Whole turns only: a client can attach in the middle of one, and an end
+    // without a beginning makes anything that measures a turn measure from
+    // nothing. See lib/remote/turn-gate.ts.
+    const gate = new TurnGate();
     state.subscribe((event) => {
+        if (!gate.admits((event as { type: string }).type)) return;
         void raise.call(made.session, event).catch(() => {
             // An extension that throws on a remote turn is not a reason to stop
             // drawing one.

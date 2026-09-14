@@ -25,6 +25,20 @@ const stateHome = (): string =>
 
 const credentialDir = (name: string): string => join(stateHome(), 'rho', 'sessions', name);
 
+/** Where a runtime is, or null when it is not on PATH. */
+const which = (name: string): string | null => {
+    for (const dir of (process.env.PATH ?? '').split(':')) {
+        if (dir === '') continue;
+        const candidate = join(dir, name);
+        try {
+            if (existsSync(candidate)) return candidate;
+        } catch {
+            // an unreadable directory on PATH is not this one
+        }
+    }
+    return null;
+};
+
 const die = (message: string): never => {
     process.stderr.write(`${message}\n`);
     process.exit(1);
@@ -254,7 +268,25 @@ if (verb === 'serve') {
             // transcript is in its own directory, and stopping is not forgetting.
     const kept = existsSync(join(credentialDir(name), 'sessions'));
     const resume = kept ? ['--continue'] : [];
-    const broker = new Broker(name, 'pi', ['--mode', 'rpc', '--name', name, ...resume, ...piArgs], cwd);
+
+    /**
+     * The pi to run: the laptop's, when it has been sent, and the host's
+     * otherwise.
+     *
+     * A host's own pi is whatever was installed there -- dev-box had
+     * 0.84.3 against a laptop on 0.85.1 -- and a host that has never had pi
+     * could not hold a session at all. RHO_PI_CLI names a copy of the laptop's
+     * own, so both machines run the same agent.
+     */
+    const lentPi = process.env.RHO_PI_CLI;
+    const usable = lentPi !== undefined && lentPi !== '' && existsSync(lentPi);
+    // node before bun for the lent pi: a host's bun can be older than the pi
+    // it is being asked to run, and dev-box's 1.3.13 dies inside undici on
+    // pi 0.85.1 with an error about markAsUncloneable. node is what the
+    // package was installed for.
+    const runtime = which('node') ?? which('bun') ?? process.execPath;
+    const [command, head] = usable ? [runtime, [lentPi as string]] : ['pi', [] as string[]];
+    const broker = new Broker(name, command, [...head, '--mode', 'rpc', '--name', name, ...resume, ...piArgs], cwd);
     // The session is the agent: when it goes, this process has nothing left to
     // hold and no reason to stay resident.
     broker.onEnded = () => process.exit(0);

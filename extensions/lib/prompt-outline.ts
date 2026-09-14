@@ -17,7 +17,10 @@
 // JSON.stringify: a system prompt is thousands of characters holding newlines,
 // and JSON shows them as \n on one unreadable line.
 
-export type JsonKind = 'string' | 'number' | 'boolean' | 'null' | 'array' | 'object';
+// a payload is a javascript value on its way to JSON.stringify, not JSON, so
+// `undefined` is one of the things a property can hold and is named here rather
+// than falling in with the objects.
+export type ValueKind = 'string' | 'number' | 'boolean' | 'null' | 'undefined' | 'array' | 'object';
 
 export interface OutlineNode {
     /** where the value sits, as a javascript expression: `messages[3].content` */
@@ -26,12 +29,13 @@ export interface OutlineNode {
     /** size or shape, for the list's second column */
     readonly detail: string;
     readonly depth: number;
-    readonly kind: JsonKind;
+    readonly kind: ValueKind;
     readonly value: unknown;
 }
 
-export function kindOf(value: unknown): JsonKind {
+export function kindOf(value: unknown): ValueKind {
     if (value === null) return 'null';
+    if (value === undefined) return 'undefined';
     if (Array.isArray(value)) return 'array';
     const type = typeof value;
     if (type === 'string' || type === 'number' || type === 'boolean') return type;
@@ -65,8 +69,8 @@ function detailOf(value: unknown): string {
     const kind = kindOf(value);
     if (kind === 'string') return `${(value as string).length} chars`;
     if (kind === 'array') return `${(value as unknown[]).length} items`;
-    if (kind === 'object') {
-        const keys = Object.keys(value as Record<string, unknown>);
+    if (kind === 'object' && isRecord(value)) {
+        const keys = Object.keys(value);
         return keys.length <= 4 ? keys.join(' ') : `${keys.length} keys`;
     }
     return String(value);
@@ -118,10 +122,11 @@ export function outline(payload: unknown, options: OutlineOptions = {}): Outline
         }
     };
 
-    if (Array.isArray(payload) || isRecord(payload)) {
-        for (const [key, held] of Object.entries(payload as Record<string, unknown>)) {
-            walk(held, key, key, 0);
-        }
+    // a payload that is an object is listed by its properties, so the first
+    // rows are the ones a reader came for (system, messages, tools). anything
+    // else, an array included, is one root node holding whatever it holds.
+    if (isRecord(payload)) {
+        for (const [key, held] of Object.entries(payload)) walk(held, key, key, 0);
     } else {
         walk(payload, '', 'payload', 0);
     }

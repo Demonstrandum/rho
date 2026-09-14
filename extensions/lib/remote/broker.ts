@@ -18,7 +18,7 @@ import type { Server, Socket } from 'node:net';
 
 /** `c3|r1`: which client asked, and what it called the question. */
 const TAG = /^(c\d+)\|(.+)$/;
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Decoder, encode } from './protocol';
 import type { Frame } from './protocol';
@@ -34,6 +34,52 @@ const socketFor = (name: string): string => join(SOCKETS, `${name}.sock`);
  * session.
  */
 const pidFor = (name: string): string => join(SOCKETS, `${name}.pid`);
+
+/**
+ * What a session is, beside the socket you talk to it through.
+ *
+ * A name alone does not say where the session is working, so a list of them
+ * could not tell a project's worktree from a home directory. The broker knows
+ * both and writes them down where anything enumerating sessions can read them
+ * without connecting.
+ */
+const metaFor = (name: string): string => join(SOCKETS, `${name}.json`);
+
+export interface SessionFacts {
+    readonly name: string;
+    readonly cwd: string;
+    readonly pid: number;
+    readonly started: string;
+}
+
+export function facts(name: string): SessionFacts | null {
+    try {
+        const parsed: unknown = JSON.parse(readFileSync(metaFor(name), 'utf8'));
+        if (typeof parsed !== 'object' || parsed === null) return null;
+        const held = parsed as Partial<SessionFacts>;
+        if (typeof held.cwd !== 'string' || typeof held.pid !== 'number') return null;
+        return { name, cwd: held.cwd, pid: held.pid, started: held.started ?? '' };
+    } catch {
+        return fromProcess(name);
+    }
+}
+
+/**
+ * The directory of a broker that started before it wrote one down.
+ *
+ * A session outlives the code that started it, so an upgrade leaves running
+ * sessions with no note beside their socket. The process itself still knows,
+ * and on the machines this runs on that is a readable link.
+ */
+function fromProcess(name: string): SessionFacts | null {
+    try {
+        const pid = Number.parseInt(readFileSync(pidFor(name), 'utf8').trim(), 10);
+        if (!Number.isFinite(pid)) return null;
+        return { name, cwd: readlinkSync(`/proc/${pid}/cwd`), pid, started: '' };
+    } catch {
+        return null;
+    }
+}
 
 /**
  * What a client gets when it attaches part way through.
@@ -105,6 +151,7 @@ export class Broker {
             try {
                 rmSync(socketFor(this.name), { force: true });
                 rmSync(pidFor(this.name), { force: true });
+                rmSync(metaFor(this.name), { force: true });
             } catch {
                 // already gone
             }
@@ -228,6 +275,10 @@ export class Broker {
         });
         this.server.listen(path);
         writeFileSync(pidFor(this.name), `${process.pid}\n`);
+        writeFileSync(
+            metaFor(this.name),
+            `${JSON.stringify({ name: this.name, cwd: this.cwd, pid: process.pid, started: new Date().toISOString() })}\n`,
+        );
     }
 
     stop(): void {
@@ -269,6 +320,7 @@ export function stop(name: string): boolean {
         // The broker is already gone; clear what it left behind.
         rmSync(socketFor(name), { force: true });
         rmSync(pidFor(name), { force: true });
+        rmSync(metaFor(name), { force: true });
         return false;
     }
 }

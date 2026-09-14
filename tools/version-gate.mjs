@@ -7,7 +7,7 @@
 //
 //   bun tools/version-gate.mjs   exit 0 when the runtime is new enough
 
-var MIN_BUN = '1.2.0';
+var MIN_BUN = '1.3.0';
 var MIN_NODE = '20.0.0';
 
 function parse(text) {

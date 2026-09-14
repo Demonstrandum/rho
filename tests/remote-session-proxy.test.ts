@@ -40,7 +40,10 @@ const build = () => {
         },
     } as unknown as Record<string, unknown>;
 
+    const refusals: string[] = [];
     const state = {
+        forkPoints: [{ entryId: 'e1', text: 'earlier' }],
+        refuse: (what: string) => refusals.push(what),
         state: {
             model: { id: 'remote-model', provider: 'anthropic' },
             isStreaming: false,
@@ -92,7 +95,7 @@ const build = () => {
     } as unknown as RpcLink;
 
     const session = remoteSession(local, link, state, actions) as Record<string, unknown>;
-    return { session, asked, localCalls, stopped: () => stopped };
+    return { session, asked, localCalls, refusals, stopped: () => stopped };
 };
 
 describe('which machine answers', () => {
@@ -143,18 +146,37 @@ describe('which machine answers', () => {
         expect(localCalls).toEqual([]);
     });
 
-    test('what cannot be asked refuses rather than answering about this machine', () => {
-        const { session } = build();
-        const act = session as unknown as Record<string, () => unknown>;
-        for (const name of ['exportToJsonl', 'navigateTree', 'reload']) {
-            expect(() => act[name]?.()).toThrow(/remote session/);
-        }
-    });
-
     test('leaving closes the link and the local session', () => {
         const { session, localCalls, stopped } = build();
         (session as unknown as { dispose: () => void }).dispose();
         expect(stopped()).toBe(true);
         expect(localCalls).toEqual(['dispose']);
+    });
+});
+
+describe('a refusal is not a crash', () => {
+    test('what cannot be asked returns rather than throwing', async () => {
+        // The interface calls some of these from a keystroke handler, and an
+        // exception there ends the client: double escape opened the fork
+        // selector, asked the session what it could fork from, and died.
+        const { session } = build();
+        const act = session as unknown as Record<string, () => unknown>;
+        for (const name of ['exportToJsonl', 'navigateTree', 'reload']) {
+            expect(() => act[name]?.()).not.toThrow();
+        }
+    });
+
+    test('and the reason is said where a person can read it', () => {
+        const { session, refusals } = build();
+        (session as unknown as Record<string, () => unknown>).reload?.();
+        expect(refusals[0]).toContain('reload');
+        expect(refusals[0]).toContain('another machine');
+    });
+
+    test('what the far side would fork from is answered at once', () => {
+        const { session } = build();
+        expect((session as unknown as { getUserMessagesForForking: () => unknown[] }).getUserMessagesForForking()).toEqual([
+            { entryId: 'e1', text: 'earlier' },
+        ]);
     });
 });

@@ -119,6 +119,20 @@ export class RemoteState {
         const messages = await this.link.send({ type: 'get_messages' });
         const carried = (messages.data ?? {}) as { messages?: AgentMessage[] };
         if (Array.isArray(carried.messages)) this.history = [...carried.messages];
+
+        // What the far side would fork from, fetched here because the
+        // interface asks for it from a keystroke and cannot wait.
+        const forks = await this.link
+            .send({ type: 'get_fork_messages' })
+            .catch(() => ({}) as Record<string, unknown>);
+        const points = (forks.data ?? {}) as { messages?: { entryId?: string; text?: string }[] };
+        if (Array.isArray(points.messages)) {
+            this.forkable = points.messages
+                .filter((point): point is { entryId: string; text: string } =>
+                    typeof point.entryId === 'string' && typeof point.text === 'string',
+                )
+                .map((point) => ({ entryId: point.entryId, text: point.text }));
+        }
     }
 
     get state(): Readonly<Snapshot> {
@@ -130,6 +144,22 @@ export class RemoteState {
     }
 
     private lastTrouble: string | null = null;
+    private forkable: { entryId: string; text: string }[] = [];
+    private complaint: ((what: string) => void) | null = null;
+
+    /** The user messages the far side would fork from, as it last reported them. */
+    get forkPoints(): { entryId: string; text: string }[] {
+        return this.forkable;
+    }
+
+    /** Where to say that something cannot be done from here. */
+    onRefusal(say: (what: string) => void): void {
+        this.complaint = say;
+    }
+
+    refuse(what: string): void {
+        this.complaint?.(what);
+    }
 
     /** What the far side refused with, if a turn ended in a refusal. */
     get trouble(): string | null {

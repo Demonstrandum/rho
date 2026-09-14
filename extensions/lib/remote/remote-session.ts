@@ -68,6 +68,9 @@ export function remoteSession(
         get autoCompactionEnabled() {
             return state.state.autoCompactionEnabled !== false;
         },
+        // Asked from a keystroke, and answered from what the far side last
+        // said, because the answer has to be there before the selector draws.
+        getUserMessagesForForking: () => state.forkPoints,
         get model() {
             return state.state.model ?? (local.model as unknown);
         },
@@ -127,15 +130,18 @@ export function remoteSession(
      *
      * Answering these from the local session would be answering about the
      * wrong machine: a transcript this process never wrote, a tree of sessions
-     * that is not this one's. A refusal that names the reason is the only
-     * honest answer, and it is louder than a wrong one.
+     * that is not this one's.
+     *
+     * They refuse, but they do not throw. The interface calls some of them
+     * from a keystroke handler, and an exception there takes the whole client
+     * down: double escape opens the fork selector, which asked for the
+     * messages to fork from and got an exception instead of an answer.
      */
     const unreachable = new Set([
         'exportToJsonl',
         'exportToHtml',
         'navigateTree',
         'reload',
-        'getUserMessagesForForking',
         'createReplacedSessionContext',
         'recordBashResult',
     ]);
@@ -146,8 +152,10 @@ export function remoteSession(
     return new Proxy(local, {
         get(target, property, receiver) {
             if (typeof property === 'string' && unreachable.has(property)) {
-                return () => {
-                    throw new Error(`${property} is not something a remote session can answer from here`);
+                return (...args: unknown[]) => {
+                    void args;
+                    state.refuse(`${property} is not something a session on another machine can answer from here`);
+                    return Promise.resolve(undefined);
                 };
             }
             if (property in overrides) {

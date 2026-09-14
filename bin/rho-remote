@@ -279,6 +279,10 @@ if (typeof raise === 'function') {
     });
 }
 
+// A refusal is said on the status line rather than thrown: the interface asks
+// some of these from a keystroke handler, where an exception ends the client.
+state.onRefusal((what) => process.stderr.write(`${what}\n`));
+
 const proxied = remoteSession(made.session as unknown as Record<string, unknown>, link, state, actions);
 
 const runtime = new AgentSessionRuntime(

@@ -13,10 +13,17 @@
  * them. The result is a directory pi can be pointed at by `packages`.
  */
 
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { $ } from 'bun';
+
+interface Manifest {
+    version?: string;
+    pi?: { extensions?: string[]; skills?: string[]; prompts?: string[]; themes?: string[] };
+}
+
+const manifestOf = (dir: string): Manifest => JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as Manifest;
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = process.argv[2] ?? join(root, 'build', 'remote-rho');
@@ -55,6 +62,24 @@ if (existsSync(nested)) {
     rmSync(nested, { recursive: true, force: true });
 }
 
+/**
+ * The extensions rho loads from packages, built the same way.
+ *
+ * They are declared in rho's own package.json, and two of them are typescript,
+ * so a host loading this with node needs them built as well. Each is bundled
+ * under a name that says where it came from.
+ */
+const vendored = (manifestOf(root).pi?.extensions ?? []).filter((entry) => entry !== './extensions');
+const kept: string[] = ['./extensions'];
+for (const entry of vendored) {
+    const from = join(root, entry);
+    if (!existsSync(from)) continue;
+    const name = `vendor-${entry.split('/').filter((part) => part !== '' && part !== 'node_modules').slice(0, 2).join('-').replace(/[^A-Za-z0-9._-]/g, '-')}.js`;
+    const one = await $`bun build ${from} --target=node --outfile ${join(out, 'extensions', name)} ${EXTERNAL.flatMap((external) => ['--external', external])}`.quiet().nothrow();
+    if (one.exitCode === 0) kept.push(`./extensions/${name}`);
+    else process.stderr.write(`left out ${entry}: it does not bundle\n`);
+}
+
 // Assets an extension reads by path rather than by import.
 const assets = join(root, 'extensions', 'assets');
 if (existsSync(assets)) cpSync(assets, join(out, 'extensions', 'assets'), { recursive: true });
@@ -63,17 +88,35 @@ for (const name of RESOURCES) {
     if (existsSync(from)) cpSync(from, join(out, name), { recursive: true });
 }
 
-const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
-    version?: string;
-    pi?: { skills?: string[]; prompts?: string[]; themes?: string[] };
+/**
+ * Skills and prompts that come from packages, brought along too.
+ *
+ * Nine of rho's skills live in the packages it depends on, and a remote agent
+ * without them is missing a third of what it can be asked to do. They are
+ * copied under the directory that already holds rho's own.
+ */
+const gathered = (kind: 'skills' | 'prompts' | 'themes'): void => {
+    for (const entry of manifestOf(root).pi?.[kind] ?? []) {
+        if (entry.startsWith('./')) continue;
+        const from = join(root, entry);
+        if (!existsSync(from)) continue;
+        for (const skill of readdirSync(from)) {
+            const target = join(out, kind, skill);
+            if (existsSync(target)) continue;
+            cpSync(join(from, skill), target, { recursive: true });
+        }
+    }
 };
+for (const kind of ['skills', 'prompts', 'themes'] as const) gathered(kind);
+
+
 
 writeFileSync(
     join(out, 'package.json'),
     `${JSON.stringify(
         {
             name: 'rho-remote-agent',
-            version: manifest.version ?? '0.0.0',
+            version: manifestOf(root).version ?? '0.0.0',
             type: 'module',
             private: true,
             pi: {

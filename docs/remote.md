@@ -52,7 +52,8 @@ bun-runtime.ts is left out of it: it exists to force this process to be bun, whi
 the branch comes from the far side with the directory, since a branch read here belongs to a checkout the session cannot see.
 
 **When nothing arrives.** a model request that gets no answer looks exactly like one that is thinking, because both are an absence of events.
-one request from robotics-vm, after the session had sat idle, went out over a keep-alive socket the network had already dropped and took five minutes to time out and retry, with nothing drawn in between.
+one request from robotics-vm, after the session had sat idle, went out over a keep-alive socket the network had already dropped and took exactly 300.0 seconds to time out and retry, with nothing drawn in between.
+that is pi's own `httpIdleTimeoutMs`, five minutes by default; a remote session is given thirty seconds instead, which is longer than any first token and short enough that a dead socket costs a pause.
 fifteen seconds of silence during a turn now says so, and counts: `waiting on the model, 45s without a reply`.
 escape aborts and reaches the far side in under a tenth of a second, so asking again is the way out.
 

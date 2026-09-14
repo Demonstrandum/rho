@@ -28,6 +28,7 @@ import { addressName, parseAddress, sshTarget } from './lib/remote/address';
 import { browse } from './lib/picker';
 import { shorthandFor, takeVerb } from './lib/shorthand';
 import { completeLastWord, lastWord } from './lib/complete-words';
+import { troubleWith } from './lib/remote/advice';
 import { branchSlug, parseProjectRequest, repoName, sessionName } from './lib/remote/naming';
 
 /** What /remote can be asked to do. A word is matched against these. */
@@ -1071,7 +1072,12 @@ export default function (pi: ExtensionAPI) {
                 // create's place when there is nothing to connect to: asking
                 // for a session is asking for it to exist.
                 const host = address_.includes(':') ? address_.slice(0, address_.indexOf(':')) : address_;
-                const alreadyThere = (await held(host).catch(() => [])).some((s) => s.name === session);
+                // Running, not merely known: a stopped session is one that has to
+                // be started again, and attaching to it found no socket and
+                // bounced straight back to this interface.
+                const alreadyThere = (await held(host).catch(() => [])).some(
+                    (found) => found.name === session && found.state === 'running',
+                );
                 if (!alreadyThere) {
                     // A project's session belongs in its worktree, which is the
                     // whole point of having made one.
@@ -1107,12 +1113,24 @@ export default function (pi: ExtensionAPI) {
                 });
 
                 const client = join(rhoRoot(), 'bin', 'rho-remote');
+                // Why the client left, since the screen it wrote on is redrawn
+                // by this interface the moment it returns.
+                let left = 0;
+                let said = '';
                 await ctx.ui.custom<void>(
                     (tui, _theme, _keys, done) => {
                         queueMicrotask(() => {
                             tui.stop();
                             try {
-                                spawnSync('bun', [client, host, session], { stdio: 'inherit' });
+                                // stderr is captured rather than inherited: it is
+                                // where the client says why it stopped, and this
+                                // interface redraws over it the moment it returns.
+                                const ran = spawnSync('bun', [client, host, session], {
+                                    stdio: ['inherit', 'inherit', 'pipe'],
+                                    encoding: 'utf8',
+                                });
+                                left = ran.status ?? 1;
+                                said = ran.stderr ?? '';
                             } finally {
                                 tui.start();
                                 tui.requestRender(true);
@@ -1126,7 +1144,15 @@ export default function (pi: ExtensionAPI) {
                     },
                     { overlay: true },
                 );
-                ctx.ui.notify(`back from ${session} on ${host}, which is still running`, 'info');
+                if (left === 0) {
+                    ctx.ui.notify(`back from ${session} on ${host}, which is still running`, 'info');
+                    return;
+                }
+                const trouble = troubleWith(said, session, host);
+                ctx.ui.notify(
+                    trouble.advice === null ? trouble.reason : `${trouble.reason}\n${trouble.advice}`,
+                    'error',
+                );
                 return;
             }
 

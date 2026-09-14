@@ -22,7 +22,7 @@ import { findLauncher, readLauncher } from '../extensions/lib/bun-launcher';
 
 /** the versions rho is developed against. bump with the code that needs it. */
 const MINIMUM = {
-    bun: '1.2.0',
+    bun: '1.3.0',
     node: '20.0.0',
     pi: '0.84.0',
 } as const;

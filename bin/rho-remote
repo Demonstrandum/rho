@@ -27,6 +27,7 @@ import { RpcLink } from '../extensions/lib/remote/rpc-link';
 import { RemoteActions, RemoteState } from '../extensions/lib/remote/proxy-session';
 import { remoteSession } from '../extensions/lib/remote/remote-session';
 import { TurnGate } from '../extensions/lib/remote/turn-gate';
+import { troubleWith } from '../extensions/lib/remote/advice';
 
 const [target, name, ...rest] = process.argv.slice(2);
 // A message given on the command line is submitted on attach, which is how a
@@ -151,7 +152,10 @@ const link = new RpcLink(TRANSPORT, [...SSH_FLAGS, target, `${RUNNER} attach ${n
         // The interface owns the terminal: writing over it leaves the screen
         // half drawn and the cursor wherever the last frame put it. It is
         // stopped first, and then the reason is said on a clean line.
-        farewell = `${name} on ${target}: ${why}`;
+        // The reason and the one thing worth doing about it, so a client that
+        // stops says what stopped it rather than vanishing.
+        const trouble = troubleWith(why, name, target);
+        farewell = `${name} on ${target}: ${trouble.reason}${trouble.advice === null ? '' : `\n${trouble.advice}`}`;
         if (drawing === null) {
             process.stderr.write(`\n${farewell}\n`);
             process.exit(1);

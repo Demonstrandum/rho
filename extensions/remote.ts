@@ -854,6 +854,37 @@ export default function (pi: ExtensionAPI) {
         return `$HOME/${remote}`;
     };
 
+    /**
+     * Whether this machine's rho has only just reached that host.
+     *
+     * rho is sent when a session is created, and an agent keeps the copy it
+     * started with: a session made last week is last week's rho, whatever this
+     * machine has learnt since. From the interface that is invisible, and it
+     * reads as a feature that does not work -- a machine name added since, such
+     * as origin, simply is not there.
+     *
+     * The test needs nothing new on the far side: the build is keyed by its own
+     * content, so a directory that is not there yet is a rho no running session
+     * can be using.
+     */
+    const rhoIsNew = async (host: string): Promise<boolean> => {
+        const packed = join(CACHE, 'remote-rho');
+        const made = await run('bun', [join(remoteDir(), '..', '..', '..', 'bin', 'build-remote-rho'), packed]);
+        if (made.code !== 0) return false;
+        const listing = await run('sh', ['-c', `cd ${JSON.stringify(packed)} && find . -type f | sort`]);
+        const digest = createHash('sha256');
+        for (const file of listing.out.split('\n').filter((name) => name !== '')) {
+            try {
+                digest.update(file).update(readFileSync(join(packed, file)));
+            } catch {
+                // a file that vanished between listing and reading is not sent
+            }
+        }
+        const tag = digest.digest('hex').slice(0, 12);
+        const present = await run('ssh', [...SSH_FLAGS, host, `test -d ${RHO_DIR}/${tag} && echo yes || echo no`]);
+        return present.out.trim() === 'no';
+    };
+
     /** Every session a host holds, stopped ones included. */
     const held = async (host: string): Promise<{ name: string; state: 'running' | 'stopped'; cwd: string }[]> => {
         const listed = await ask(host, 'all', () => {}).catch(() => '');
@@ -931,6 +962,29 @@ export default function (pi: ExtensionAPI) {
                     // An update that cannot be made is not a reason to refuse a
                     // session that is already running.
                 });
+
+                /**
+                 * Which rho the running agent is, against which one this is.
+                 *
+                 * rho is sent to a host when a session is created, and the
+                 * agent keeps the copy it started with: a session made last
+                 * week is last week's rho, whatever this machine has learnt
+                 * since. That is invisible from the interface, and it looks
+                 * like a feature that does not work -- a tool added since, such
+                 * as the origin machine, simply is not there.
+                 *
+                 * Restarting is not this command's business (it would end a
+                 * turn somebody may be watching), so it is said rather than
+                 * done, with the two words that fix it.
+                 */
+                const fresh = await rhoIsNew(host).catch(() => false);
+                if (fresh) {
+                    ctx.ui.notify(
+                        `${session} is running an older rho than this machine has, so anything added since is missing from it. ` +
+                            `/remote stop ${session}, then connect again: the conversation is kept.`,
+                        'info',
+                    );
+                }
 
                 const client = join(rhoRoot(), 'bin', 'rho-remote');
                 // Why the client left, since the screen it wrote on is redrawn

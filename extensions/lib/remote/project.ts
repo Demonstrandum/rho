@@ -56,11 +56,23 @@ export function projectPlan(repo: string, branch: string, projectName?: string):
         // Detaching the clone makes it what it is meant to be here, a store of
         // objects, and leaves every branch free for a worktree.
         `git -C ${checkout} checkout --quiet --detach`,
+        // A worktree whose directory has gone stays registered, and every
+        // later checkout of that branch then fails with "missing but already
+        // registered worktree". Directories do go: a node is reclaimed, a
+        // disk is cleared, somebody deletes one by hand after a failed run.
+        // Pruning first costs nothing and removes only registrations whose
+        // directory is already absent.
+        `git -C ${checkout} worktree prune`,
         // An existing worktree is reused rather than refused: asking for the
         // same branch twice should land you in it, not error.
         `if [ ! -d ${worktree} ]; then`,
         `  if git -C ${checkout} show-ref --verify --quiet refs/heads/${branch}; then`,
-        `    git -C ${checkout} worktree add ${worktree} ${branch};`,
+        // The branch may be checked out in another worktree of this clone,
+        // which git refuses rather than sharing. Sending this one to the same
+        // commit, detached, gives the files that were asked for instead of an
+        // error about a directory the person has never seen.
+        `    git -C ${checkout} worktree add ${worktree} ${branch} ||`,
+        `      git -C ${checkout} worktree add --detach ${worktree} ${branch};`,
         `  elif git -C ${checkout} show-ref --verify --quiet refs/remotes/origin/${branch}; then`,
         `    git -C ${checkout} worktree add --track -b ${branch} ${worktree} origin/${branch};`,
         `  else`,

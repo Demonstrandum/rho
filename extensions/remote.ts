@@ -75,6 +75,13 @@ const remoteDir = (): string => {
  * config prints its complaint into the output being parsed.
  */
 const SSH_FLAGS = [
+    // A node allocated a minute ago has a host key nothing has seen before,
+    // and a command run by a tool has no terminal to answer a prompt on: the
+    // prompt appeared in the person's session instead, under whatever they
+    // were reading at the time. accept-new trusts an unknown host once and
+    // still refuses one whose key has changed, which is the case that matters.
+    '-o',
+    'StrictHostKeyChecking=accept-new',
     '-o',
     'ClearAllForwardings=yes',
     '-o',
@@ -420,7 +427,20 @@ export default function (pi: ExtensionAPI) {
 
         // -A forwards the agent for the clone. Without it a private repo needs
         // a key on the host, which is the thing this avoids.
-        const done = await run('ssh', ['-A', host, script]);
+        //
+        // Not SSH_FLAGS: those clear every forwarding, which includes the
+        // agent. The two options that matter here are kept by hand, and the
+        // host key is accepted the same way as everywhere else rather than
+        // asking a question nobody is there to answer.
+        const done = await run('ssh', [
+            '-o',
+            'StrictHostKeyChecking=accept-new',
+            '-o',
+            'LogLevel=ERROR',
+            '-A',
+            host,
+            script,
+        ]);
         if (done.code !== 0) throw new Error(done.err.trim() || done.out.trim() || 'the clone failed');
         const path = done.out.trim().split('\n').pop() ?? worktree;
         return path;

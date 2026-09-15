@@ -30,7 +30,9 @@ import {
 import { completeLastWord } from './lib/complete-words';
 import { projectPlan } from './lib/remote/project';
 import { parseProjectRequest } from './lib/remote/naming';
-import { operationsFor, waitFor } from './lib/remote/client';
+import { connectOverSocket, operationsFor, waitFor } from './lib/remote/client';
+import { ORIGIN, originSocketFor } from './lib/remote/origin';
+import { existsSync } from 'node:fs';
 import type { Connection } from './lib/remote/client';
 import { deploy } from './lib/remote/deploy';
 import { addressName, parseAddress, parseLocated, sshTarget } from './lib/remote/address';
@@ -104,6 +106,41 @@ export default function (pi: ExtensionAPI) {
     };
 
     const active = (): Environment | null => (current === null ? null : (environments.get(current) ?? null));
+
+    /**
+     * The machine the interface is running on.
+     *
+     * A session held on a server is drawn by an interface somewhere else, and
+     * that interface forwards a socket back to itself while it is attached.
+     * Work that can only happen there goes through this: nodes reads the
+     * Tailscale identity of whoever opens the connection, so an allocation has
+     * to be made from the machine that has one, and no credential can stand in
+     * for that.
+     *
+     * It is deliberately not a fallback. If no interface is attached there is
+     * no origin, and a command asking for one is refused rather than run on
+     * the server, which is the machine the caller was avoiding.
+     */
+    let origin: Connection | null = null;
+    const originConnection = (): Connection => {
+        if (origin !== null && origin.alive) return origin;
+        const session = process.env.RHO_SESSION_NAME;
+        const home = process.env.HOME;
+        if (session === undefined || home === undefined) {
+            throw new Error(
+                'this session is not held by a runner, so it has no origin machine: it is already running where the interface is, and on "local" is that machine',
+            );
+        }
+        const path = originSocketFor(home, session);
+        if (!existsSync(path)) {
+            throw new Error(
+                `no interface is attached to ${session}, so there is nothing to run on. The origin machine exists only while somebody is connected to this session.`,
+            );
+        }
+        const made = connectOverSocket(ORIGIN, path);
+        origin = made;
+        return made;
+    };
 
     /**
      * Run a script on an environment and give back its last line.
@@ -491,6 +528,7 @@ export default function (pi: ExtensionAPI) {
             const chosen = async (): Promise<Connection | null> => {
                 if (on === undefined) return null;
                 if (on === 'local') return null;
+                if (on === ORIGIN) return originConnection();
                 const attached = environments.get(on);
                 if (attached !== undefined) {
                     if (!attached.connection.alive) throw new Error(`the connection to ${on} is closed`);
@@ -509,6 +547,9 @@ export default function (pi: ExtensionAPI) {
 
             const connection = await chosen();
             if (on === 'local') return run(localBash);
+            // origin is a machine like any other once it is reached; it is
+            // only the way of reaching it that differs.
+
             if (connection !== null) {
                 return run(createBashTool(process.cwd(), { operations: operationsFor(connection).bash }));
             }

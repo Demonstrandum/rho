@@ -116,7 +116,14 @@ export class Broker {
         args: readonly string[],
         readonly cwd: string,
     ) {
-        this.agent = spawn(command, [...args], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+        // The agent is told its own name so it can find the socket an
+        // attached interface forwards back to itself: that path is derived
+        // from the name, and nothing else in the process knows it.
+        this.agent = spawn(command, [...args], {
+            cwd,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: { ...process.env, RHO_SESSION_NAME: name },
+        });
 
         // pi's RPC mode is JSONL, so a line is the unit worth keeping and
         // replaying. Partial lines are held: half an event redraws nothing.

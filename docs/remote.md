@@ -95,6 +95,20 @@ cache it by hash under `~/.cache`, so reconnecting to the same node skips the co
 the executor dying must surface as a tool error naming the environment, must switch the default back to local rather than leaving the agent addressing a corpse, and must say which command was lost.
 reconnect resumes: the executor is restarted, but the agent is told the working directory and environment were reset, because pretending otherwise silently changes what a relative path means.
 
+## Detaching on this machine
+
+the same broker holds a session on the machine you are sitting at, which is what tmux was doing before.
+`/detach` asks for a name, hands the conversation to a daemon, and closes the interface.
+`/attach <name>` draws it again, in this terminal or another one, hours later.
+
+the conversation moves by its session file rather than by copying anything: pi writes every turn to that file as it happens, so the daemon starts on the same file and continues it.
+two pi processes appending to one file would interleave two conversations into it, so the daemon waits for the interface to exit before it reads anything (`serve --after-pid`).
+
+the keys follow the distinction rather than the mode.
+ctrl+d detaches and leaves the agent running; `/exit`, and ctrl+c twice, stop it.
+that holds in an interface onto a session on another machine too, so closing one no longer leaves an agent resident on the far side.
+ctrl+d is pi's own exit key, so rho takes `app.exit` out of `~/.pi/agent/keybindings.json` to claim it.
+
 ## How the two stages compose
 
 stage one's broker and stage two's executor are the same shape: a host-side process that owns something long-lived and streams to a client with lazy reads.

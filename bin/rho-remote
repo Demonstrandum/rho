@@ -63,6 +63,20 @@ const SSH_FLAGS = [
 const RUNNER_FILE = '.cache/rho/remote/session-runner.js';
 const RUNNER = process.env.RHO_REMOTE_RUNNER ?? `bun ${RUNNER_FILE}`;
 
+/**
+ * A session on this machine needs no ssh at all.
+ *
+ * Detaching locally is the same thing as a remote session with the network
+ * taken out: the agent runs behind a socket here, and the interface attaches
+ * to it. "local" as the machine means run the runner directly.
+ */
+const here = target === 'local';
+const runnerHere = `${process.env.HOME ?? ''}/${RUNNER_FILE}`;
+const speak = (verb: string): { command: string; args: string[] } =>
+    here
+        ? { command: 'bun', args: [runnerHere, ...verb.split(' ')] }
+        : { command: process.env.RHO_REMOTE_SSH ?? 'ssh', args: [...SSH_FLAGS, target, `${RUNNER} ${verb}`] };
+
 /** One ssh call, answered when it is answered. */
 const ask = (command: string, input?: string): Promise<{ code: number; out: string; err: string }> =>
     new Promise((settle) => {
@@ -86,7 +100,8 @@ const ask = (command: string, input?: string): Promise<{ code: number; out: stri
  * buried inside it, which reads as the model having nothing to say.
  */
 const relend = async (): Promise<void> => {
-    if (process.env.RHO_REMOTE_SSH !== undefined) return;
+    // A session here reads the same auth.json this process does.
+    if (process.env.RHO_REMOTE_SSH !== undefined || here) return;
     const authPath = join(homedir(), '.pi', 'agent', 'auth.json');
     if (!existsSync(authPath)) return;
     const sent = await ask(`${RUNNER} relend ${name}`, JSON.stringify({ auth: readFileSync(authPath, 'utf8'), env: {} }));
@@ -142,9 +157,9 @@ const local = (async () => {
 // RHO_REMOTE_SSH replaces the transport, so the client can be driven against a
 // stand-in daemon on this machine. Nothing else changes: same framing, same
 // proxy, same interface.
-const TRANSPORT = process.env.RHO_REMOTE_SSH ?? 'ssh';
+const attaching = speak(`attach ${name}`);
 
-const link = new RpcLink(TRANSPORT, [...SSH_FLAGS, target, `${RUNNER} attach ${name}`], {
+const link = new RpcLink(attaching.command, attaching.args, {
     // No deadline on the link: a model call takes as long as it takes, and the
     // interface shows that it is working. A link that has died says so by
     // closing, which is a different thing from an answer that is slow.
@@ -295,6 +310,10 @@ const runtime = new AgentSessionRuntime(
     [],
 );
 
+// Extensions in this process are drawing an interface onto a session that is
+// already running on its own: rho reads this to tell the two apart.
+process.env.RHO_REMOTE_CLIENT = '1';
+
 const interactive = new InteractiveMode(runtime, {
     initialMessage: opening === '' ? undefined : opening,
     verbose: false,
@@ -317,6 +336,25 @@ if (process.stdout.isTTY === true) process.stdout.write('\u001b[2J\u001b[H');
 
 drawing = interactive;
 await interactive.run();
+
+/**
+ * Leaving ends the session; detaching leaves it running.
+ *
+ * That is the distinction tmux was standing in for, and it has to hold on both
+ * sides of it: /exit and ctrl+c twice stop the agent, ctrl+d sets the flag
+ * below and the agent stays behind its socket for the next attach. Without
+ * this, every interface that was ever closed left an agent resident, which is
+ * how eight of them came to be sharing a machine with 912 MB of memory.
+ */
+const detaching = (globalThis as { __rho_detaching?: boolean }).__rho_detaching === true;
+if (!detaching) {
+    try {
+        await new RemoteActions(link).stopSession();
+    } catch {
+        // An agent that has already gone needs no stopping, and the interface
+        // is on its way out either way.
+    }
+}
 
 // The interface is done with the terminal, so this process is done too. The
 // link holds an ssh child that keeps the event loop alive on its own: leaving

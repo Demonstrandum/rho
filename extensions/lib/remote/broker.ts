@@ -90,6 +90,18 @@ function fromProcess(name: string): SessionFacts | null {
  */
 const REPLAY = 200;
 
+/**
+ * How much of the interface's own traffic is held for a client that is not there.
+ *
+ * Notifications, status lines and stack traces from a session nobody is
+ * attached to. The cap exists because a session can be left alone for days;
+ * within it, nothing is thrown away.
+ */
+const UNDRAWN = 500;
+
+/** The `ctx.ui` methods that block the extension calling them until an answer arrives. */
+const ANSWERABLE_UI: ReadonlySet<string> = new Set(['select', 'confirm', 'input', 'editor']);
+
 export interface Session {
     readonly name: string;
     readonly started: Date;
@@ -107,6 +119,18 @@ export class Broker {
     /** connections that are the far side's rho asking to reach the interface. */
     private readonly origins = new Set<Socket>();
     private readonly recent: Buffer[] = [];
+    /**
+     * What the agent asked an interface to draw while no interface was there.
+     *
+     * A notification is not part of the conversation, so it does not belong in
+     * the replay buffer: replayed history is drawn as what already happened,
+     * and a notification drawn that way is not drawn at all. These are held
+     * instead and given to the next client as live messages, which is the only
+     * reading under which a command run from a detached session is not lost.
+     */
+    private readonly undrawn: Buffer[] = [];
+    /** dialogs the agent is still waiting on, by the id it will answer to. */
+    private readonly asking = new Map<string, Buffer>();
     private server: Server | null = null;
     private ended = false;
     private readonly tagged = new Map<string, Socket>();
@@ -150,7 +174,10 @@ export class Broker {
             complaint = lines.pop() ?? '';
             for (const line of lines) {
                 if (line.trim() === '') continue;
-                this.broadcast(Buffer.from(`${JSON.stringify({ type: 'rho_stderr', text: line })}\n`));
+                // Held when nobody is attached, for the same reason a
+                // notification is: a stack trace nobody saw is a stack trace
+                // that did not happen.
+                this.notice(Buffer.from(`${JSON.stringify({ type: 'rho_stderr', text: line })}\n`));
             }
         });
         this.agent.on('close', () => {
@@ -216,13 +243,41 @@ export class Broker {
      * the tag is taken off the answer on the way out.
      */
     private deliver(line: string): void {
-        let parsed: { type?: string; id?: unknown } | null = null;
+        let parsed: { type?: string; id?: unknown; method?: unknown } | null = null;
         try {
-            parsed = JSON.parse(line) as { type?: string; id?: unknown };
+            parsed = JSON.parse(line) as { type?: string; id?: unknown; method?: unknown };
         } catch {
             parsed = null;
         }
         const id = typeof parsed?.id === 'string' ? parsed.id : null;
+        /**
+         * The agent asking for something to be drawn, or answered.
+         *
+         * rpc mode has no terminal, so `ctx.ui` on the far side is these
+         * frames: a notification is told once, and a dialog is a question the
+         * extension behind it is blocked on until an answer comes back. Both
+         * are kept rather than replayed, and a dialog is kept until it is
+         * answered, because a client can attach after it was asked -- which is
+         * exactly the case where the command that asked would otherwise wait
+         * for ever.
+         */
+        if (parsed?.type === 'extension_ui_request' && id !== null) {
+            const bytes = Buffer.from(`${line}\n`);
+            if (ANSWERABLE_UI.has(String(parsed.method))) {
+                this.asking.set(id, bytes);
+                this.broadcast(bytes);
+                return;
+            }
+            this.notice(bytes);
+            return;
+        }
+        // An extension that threw on the far side says so here and nowhere
+        // else: the report is not part of the conversation, so it is held for
+        // whoever is next to attach rather than replayed as history.
+        if (parsed?.type === 'extension_error') {
+            this.notice(Buffer.from(`${line}\n`));
+            return;
+        }
         const tagged = parsed?.type === 'response' && id !== null ? TAG.exec(id) : null;
         if (tagged === null) {
             // An event: everyone watching wants it, and a late client wants it
@@ -240,6 +295,23 @@ export class Broker {
     private remember(line: Buffer): void {
         this.recent.push(line);
         if (this.recent.length > REPLAY) this.recent.shift();
+    }
+
+    /** Shown now if anyone is watching, and held for the next client if not. */
+    private notice(bytes: Buffer): void {
+        if (this.watching > 0) {
+            this.broadcast(bytes);
+            return;
+        }
+        this.undrawn.push(bytes);
+        if (this.undrawn.length > UNDRAWN) this.undrawn.shift();
+    }
+
+    /** Interfaces, as opposed to the far side's own connections back to one. */
+    private get watching(): number {
+        let count = 0;
+        for (const client of this.clients) if (!this.origins.has(client)) count += 1;
+        return count;
     }
 
     private broadcast(bytes: Buffer): void {
@@ -267,6 +339,32 @@ export class Broker {
                 for (const line of this.recent) client.write(line);
                 client.write(`${JSON.stringify({ type: 'rho_replay_end' })}\n`);
             }
+            /**
+             * What the agent said while nobody was attached, and every dialog
+             * it is still waiting on, given to an interface once it is known to
+             * be one.
+             *
+             * Outside the replay bracket, because this is not history: a client
+             * draws replayed lines as what already happened, and a notification
+             * drawn that way is not drawn. A connection that turns out to be
+             * the far side reaching back to a laptop gets none of it, which is
+             * why the queue is not emptied at the moment of connecting: it
+             * declares itself a line later, and emptying it into a connection
+             * that cannot draw would lose exactly what this preserves.
+             */
+            let handed = false;
+            const hand = (): void => {
+                if (handed || this.origins.has(client)) return;
+                handed = true;
+                clearTimeout(settling);
+                for (const line of this.undrawn) client.write(line);
+                this.undrawn.length = 0;
+                for (const [, line] of this.asking) client.write(line);
+            };
+            // A client that says nothing at all is still an interface; an
+            // origin says what it is immediately.
+            const settling = setTimeout(hand, 250);
+            settling.unref?.();
             // Some questions are the broker's own, not the agent's: where the
             // session is, and what it is called. A client that has to ask the
             // agent for those gets an answer about a machine it cannot see.
@@ -288,6 +386,36 @@ export class Broker {
                     // to the agent's stdin, where it means nothing at all.
                     if (parsed?.type === 'rho_origin_open') {
                         this.origins.add(client);
+                        clearTimeout(settling);
+                        continue;
+                    }
+                    hand();
+                    /**
+                     * An answer to a dialog, which is the agent's own id and
+                     * must reach it untouched.
+                     *
+                     * Tagging it the way a command is tagged would make the
+                     * agent look up an id it never issued, and the extension
+                     * waiting on the dialog would wait for ever. The first
+                     * answer wins: two attached interfaces both draw the
+                     * dialog, and the agent has one question.
+                     */
+                    if (parsed?.type === 'extension_ui_response' && typeof parsed.id === 'string') {
+                        if (!this.asking.delete(parsed.id)) continue;
+                        this.agent.stdin?.write(`${line}\n`);
+                        continue;
+                    }
+                    /**
+                     * The session asking whoever is attached to leave.
+                     *
+                     * It comes from the agent's own side of the socket and is
+                     * for the interfaces, so it crosses here rather than going
+                     * to pi's stdin, where it means nothing. Everyone attached
+                     * is told: two interfaces on one session both stand in
+                     * front of the machine the session is asking to go back to.
+                     */
+                    if (parsed?.type === 'rho_leave') {
+                        this.broadcast(Buffer.from(`${JSON.stringify({ type: 'rho_leave' })}\n`));
                         continue;
                     }
                     if (parsed?.type === 'rho_origin') {
@@ -359,6 +487,7 @@ export class Broker {
                 }
             });
             const drop = () => {
+                clearTimeout(settling);
                 this.clients.delete(client);
                 this.origins.delete(client);
                 this.tagged.delete(tag);
@@ -398,6 +527,66 @@ export function existing(name: string): Promise<boolean> {
             settle(true);
         });
         socket.on('error', () => settle(false));
+    });
+}
+
+/**
+ * One question to the agent a session holds, and its answer.
+ *
+ * The broker forwards anything carrying an id to pi's rpc stdin and routes the
+ * response back to the client that asked, so a caller outside the interface
+ * can use the same protocol the interface uses. This is how the machine that
+ * is connecting reads a session's state and hands it a conversation: both are
+ * rpc commands, and neither needs a new control channel beside the socket.
+ */
+export function request(
+    name: string,
+    command: Readonly<Record<string, unknown>>,
+    timeoutMs = 30_000,
+): Promise<{ success: boolean; data?: unknown; error?: string }> {
+    return new Promise((settle, fail) => {
+        const socket = connectSocket(socketFor(name));
+        const id = `rho-${process.pid}-${Date.now()}`;
+        let held = '';
+        let finished = false;
+        const done = (answer: { success: boolean; data?: unknown; error?: string } | Error) => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            socket.destroy();
+            if (answer instanceof Error) fail(answer);
+            else settle(answer);
+        };
+        const timer = setTimeout(() => done(new Error(`${name} did not answer ${String(command.type)}`)), timeoutMs);
+        timer.unref?.();
+
+        socket.on('connect', () => {
+            // Declared before the question is asked. A plain connection is an
+            // interface, and an interface is handed everything the agent said
+            // while nobody was attached: a caller that only wants one answer
+            // would empty that queue and the person would never see it.
+            socket.write(`${JSON.stringify({ type: 'rho_origin_open' })}\n`);
+            socket.write(`${JSON.stringify({ ...command, id })}\n`);
+        });
+        socket.on('data', (chunk: Buffer) => {
+            held += chunk.toString();
+            const lines = held.split('\n');
+            held = lines.pop() ?? '';
+            for (const line of lines) {
+                if (line.trim() === '') continue;
+                let parsed: { type?: string; id?: string; success?: boolean; data?: unknown; error?: string } | null;
+                try {
+                    parsed = JSON.parse(line) as typeof parsed;
+                } catch {
+                    continue;
+                }
+                if (parsed?.type !== 'response' || parsed.id !== id) continue;
+                done({ success: parsed.success === true, data: parsed.data, error: parsed.error });
+                return;
+            }
+        });
+        socket.on('error', (error) => done(new Error(`no session called ${name}: ${error.message}`)));
+        socket.on('close', () => done(new Error(`${name} closed the connection`)));
     });
 }
 

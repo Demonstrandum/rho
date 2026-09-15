@@ -583,7 +583,10 @@ export default function (pi: ExtensionAPI) {
      * a machine being attached.
      */
     const OWN = ['environment'];
+    /** Set by the message that asked for the tool, read by the hide below. */
+    let asked = false;
     const load = (): void => {
+        asked = true;
         const active = pi.getActiveTools();
         const missing = OWN.filter((name) => !active.includes(name));
         if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
@@ -884,6 +887,11 @@ export default function (pi: ExtensionAPI) {
     pi.on('before_agent_start', async () => {
         if (hidden) return;
         hidden = true;
+        // The input handler runs first, so on the first message of a session
+        // the order was: the message asks for the tool, it is loaded, and this
+        // takes it away before the turn that asked for it can use it. A message
+        // that asked keeps what it asked for.
+        if (asked) return;
         pi.setActiveTools(pi.getActiveTools().filter((name) => !OWN.includes(name)));
     });
 

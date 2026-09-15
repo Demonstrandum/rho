@@ -32,6 +32,17 @@ export interface OriginFrame {
 export const OPEN = { type: 'rho_origin_open' } as const;
 export const GONE = 'rho_origin_gone' as const;
 
+/**
+ * The session asking the interface in front of it to leave.
+ *
+ * It travels the same way an origin frame does, for the same reason: the
+ * connection is already there, and a session that wants the person back on
+ * their own machine has no other way to say so. The interface leaves the way
+ * ctrl+d leaves, so the session stays behind its socket and whatever was said
+ * in it comes back with the person.
+ */
+export const LEAVE = { type: 'rho_leave' } as const;
+
 export const pack = (bytes: Uint8Array): OriginFrame => ({
     type: 'rho_origin',
     payload: Buffer.from(bytes).toString('base64'),

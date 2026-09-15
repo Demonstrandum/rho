@@ -1,4 +1,6 @@
 import { test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
     resolveConfig,
     DEFAULTS,
@@ -225,6 +227,15 @@ test('defaults are not aliased, so a mutated config cannot reach them', () => {
     const { config } = resolveConfig({});
     config.spinner.categories.push('mutated');
     expect(DEFAULTS.spinner.categories).not.toContain('mutated');
+});
+
+// rho.toml at the repo root is generated output, not a file anyone edits: it is
+// this schema printed with its docs. a field added here without `bun run config`
+// leaves the two disagreeing, and a hand-written line there is lost on the next
+// run, so the file is pinned to what toToml emits.
+test('the rho.toml in the repo is what toToml generates', () => {
+    const root = join(import.meta.dir, '..');
+    expect(readFileSync(join(root, 'rho.toml'), 'utf8')).toBe(toToml(DEFAULTS));
 });
 
 test('what toToml writes, resolveConfig reads back unchanged', () => {

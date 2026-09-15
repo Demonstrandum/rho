@@ -2,6 +2,11 @@
 categories = [ "chinese" ]  # which spinner sets to use (defined in extensions/assets/spinners.json)
 done = "完"  # glyph shown on the completion line when the agent finishes
 shimmer-speed = 80  # ms per frame for the shimmer color sweep on working messages
+# where the spinner and its working message are drawn. dock: the row
+# below the input field, on its own line, with the full width for a long
+# message. border: cut into the top edge of the field, which is where pi
+# 0.85 moved it
+placement = "dock"
 
 [audit]
 # which model /audit sends the last reply to for review, as
@@ -62,6 +67,16 @@ width = 60  # width in terminal cells for inline images
 # the window and text then lands on top of it. 1 removes the cap.
 max-height-fraction = 0.4
 
+[quit]
+# words that end the session, matched without regard to case. each one
+# works as a command (/exit) and, when bare-word is on, as a message
+# holding nothing else. a word pi already defines as a command (quit)
+# stays pi's, since pi matches its own commands first
+words = [ "quit", "exit" ]
+# whether one of the words alone, with no slash, exits. off leaves the
+# slash forms only, so typing quit sends the word to the model
+bare-word = true
+
 [cwd]
 # store where /cwd last pointed for this session and return there on a
 # resume, when the directory still exists
@@ -77,6 +92,34 @@ auto = true
 # store the personality for this session and restore it on a resume, in
 # the mode it was applied in
 remember = true
+
+[http]
+# how long an unused connection may be kept before it is closed rather
+# than reused. a machine behind NAT loses the record of an idle flow
+# after a few minutes and then answers nothing, so a connection older
+# than that window is a request that hangs until it times out. 0 keeps
+# whatever pi installed
+keep-alive-ms = 15000
+response-ms = 120000  # how long to wait for a response that has begun but stopped arriving
+
+[remote]
+# while attached to a session on another machine, the commands that run
+# in this interface rather than in the session. everything else goes to
+# the far side, which is where the files, the checkpoints and the
+# conversation are; a command only this machine has runs here whether it
+# is listed or not
+commands-here = [ "attach", "context", "cwd", "detach", "environment", "exit", "history", "prompt", "quit", "remote", "restart", "rho", "search", "stash", "syntax", "theme", "theme-picker", "web" ]
+# carry the conversation between this machine and a session on another
+# one. connecting to a session that has never been used hands it this
+# conversation, and leaving it brings back what was said there, so the
+# two are one thread that can be worked on from either side. a session
+# that already has a conversation of its own is left alone
+carry-context = true
+# draw the far side's notifications, status lines, widgets and dialogs in
+# this interface, and send the answers back. a session running as a
+# daemon has no terminal of its own, so without this its extensions
+# write into nothing and any dialog they open waits for ever
+relay-ui = true
 
 [rewind]
 # when pi-rewind takes a checkpoint of the working directory each turn.
@@ -115,6 +158,16 @@ save-drafts = true  # capture unsent drafts when navigating away (arrow-up) or e
 # how often to snapshot the in-progress draft while typing. a crash loses
 # at most this much typing
 debounce-ms = 750
+# the key that opens the incremental search over the log. ctrl+r, which
+# a shell uses for this, parks and restores prompts here (see [stash]),
+# so search takes the find key instead. ctrl+f is pi's second binding
+# for moving the cursor right, which the right arrow also does, so the
+# built-in loses that key and keeps the arrow. empty binds nothing
+search-key = "ctrl+f"
+# search opens carrying the editor text as its query when the text is one
+# line no longer than this. longer or multi-line text opens an empty
+# query instead of one that matches nothing
+seed-query-chars = 40
 
 [input]
 # replace the thin ─ border lines with half-block characters (▄ top, ▀
@@ -139,6 +192,27 @@ tint = 0.3
 #   { colors = ["border", "userMessageBg"], stops = [0.0, 0.35] }
 gradient-colors = [ "border", "userMessageBg" ]
 bash-colors = [ "bashMode", "userMessageBg" ]  # gradient colour stops for bash mode
+
+[hint]
+# while a slash command is being typed, show the form it is on its way
+# to at the right-hand end of the input field, under the text
+enabled = true
+# the colour the hint is drawn in, as a theme colour name or a hex
+# code, with optional HSL filters after an @ (e.g. "muted@s*0.4").
+# a theme that leaves that role empty (which means the terminal's
+# own colour, and so has no value to fade towards) falls through to
+# the first of muted, dim, border, accent, text that it does set
+color = "muted"
+# columns kept clear between the typed text and the first character of
+# the hint that is drawn at all
+gap = 2
+# over how many columns the hint comes up out of the background. a
+# character this far right of the typed text is drawn at full
+# strength, one at the text is invisible
+fade = 12
+# how far the hint rises out of the field background at its clearest.
+# 0 = invisible, 1 = the colour above, unblended
+strength = 0.55
 
 [send-now]
 # stop the running turn and send the editor text now, instead of
@@ -213,6 +287,10 @@ max-chars = 3500
 enabled = true
 git = true  # whether the block says if the working directory is a git work tree
 platform = true  # whether the block names the operating system and its release
+# whether the block names the shell bash commands are handed to. it
+# follows the machine: with an environment attached it is that
+# machine's shell, not this one's
+shell = true
 # today's date, frozen at session start. without it a model dates things
 # from its training cutoff
 date = true
@@ -253,6 +331,11 @@ tight-tool-rows = true  # drop the blank lines a tool row wraps itself in
 # drop an assistant message's leading blank line when a tool row is what
 # precedes it (the same blank line is kept after a user bubble)
 tight-after-tool-rows = true
+# pi's edit tool draws its own row, and puts the text of a failed or
+# changed result outside it, on an unpainted line after a blank one.
+# wrap that text in a box of its own, so it takes the same background
+# and the same edges as every other row
+box-tool-tails = true
 # skip pi's IdleStatus, which parks two blank rows in the dock while idle.
 # needs terminal.clearOnShrink, which clear-on-shrink.ts sets
 hide-idle-status = true
@@ -263,6 +346,14 @@ hide-idle-status = true
 preview-on-focus = true
 # write a chosen theme to pi's settings, so it survives a restart the
 # way one picked in /settings does. false keeps it for this session
+persist = true
+
+[syntax]
+# apply a syntax palette as its name passes under the cursor in the
+# /syntax completion menu, and put the old one back if nothing is chosen
+preview-on-focus = true
+# keep a chosen palette in rho's own state, so it survives a restart.
+# pi's settings hold a theme name and have nowhere to record this
 persist = true
 
 [tools]

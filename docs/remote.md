@@ -27,15 +27,97 @@ leaving the client gives the terminal back and the session carries on.
 reattaching draws the conversation as it stands, including tool calls and their output.
 ctrl+d leaves.
 
+**One conversation, either machine.** connecting to a session that has never been used hands it this conversation, and leaving it brings back everything said there.
+the unit is pi's own session file: a header line naming the session and the directory it works in, then one line per entry, which is all an agent needs to continue.
+so carrying the context is copying the file and telling the other side to open it, with no message translation and no partial history; compaction entries and abandoned branches travel because they are entries like any other.
+
+two things change on the way, in `lib/remote/transfer.ts`.
+the header names a directory on the machine that wrote it, and pi refuses a session whose cwd does not exist, so the header is rehomed to the directory the receiving session works in.
+and the destination may already hold a file of that name from an earlier crossing, so a free name is chosen rather than writing over a file another pi has open, which is what pi's own `/import` does and for the same reason.
+
+the session id is not changed, and that is what makes the whole thing decidable.
+two files with one id are one conversation held on two machines, so connect has three cases and needs no state of its own to tell them apart: a session whose id is this one is a continuation, and what was said there comes back on exit; a session with no messages at all is fresh, and is given this conversation before the terminal is handed over; a session with a conversation of its own is somebody's work and is left alone, exactly as before.
+a mid-turn session is in the last case too, for the same reason attaching does not restart one.
+
+the far side does the receiving, because it is the side that knows where its own files go: `rho-session adopt <name>` reads a session file on stdin, rehomes it, writes it beside that session's own files and sends pi `switch_session`.
+`rho-session carry <name>` is the other direction and prints the file.
+`rho-session state <name>` is what connect reads first: the id, the message count, whether a turn is running, and the directory, which only the broker knows.
+all three go through the session's socket as ordinary rpc commands, as an origin connection rather than an interface, so asking does not empty the queue of things the agent said while nobody was attached.
+`[remote] carry-context` turns it off, and then a remote session is a separate conversation as it was before.
+
 **Wire protocol.** pi already speaks it: rpc mode is jsonl over stdin and stdout, `prompt` and `steer` in, agent events out, with strict lf framing.
 so the far side is `pi --mode rpc` and the client is a consumer of that stream.
 one thing has to be rebuilt on the way in: the json protocol drops the cumulative assistant message on purpose and sends deltas, and the interface redraws the whole message on every update, so `event-shape.ts` rebuilds it from the deltas rather than asking for a round trip per token.
+
+**The agent's own two tools.** `remote_session` creates and lists; `remote_connect` attaches.
+both are described by the `remote` skill and defined only when something asks for them, since neither belongs in the prompt of a session that never leaves this machine.
+the gate used to lose the request it was answering: the `input` handler added the tools and the `before_agent_start` handler that hides them at session start ran straight after, so on the first message of a session the one turn that asked for them was the one turn without them.
+it now hides only when nothing asked.
+
+the gate reads the person's message, which is the wrong reading on the far side twice over: a session held by a runner is a remote session by construction, and what reaches it is often a carried conversation rather than a request that says the word.
+an agent there that knew about `remote_connect` from the conversation it arrived with called it and was told the tool does not exist.
+the broker names the session in the environment of the agent it holds, so a session that is itself a remote session keeps both tools without asking.
+
+`remote_connect disconnect` is the other direction, and it exists because the decision that the work is finished is made on the far side while the terminal is on the near one.
+it writes a `rho_leave` frame to the session's own socket, the broker hands it to whoever is attached, and the client leaves the way ctrl+d leaves: the agent stays behind its socket, the terminal goes back, and the interface that spawned the client carries the conversation home.
+the route is the one origin frames already use, for the same reason: the connection is there, and a session that wants the person back on their own machine has no other way to say so.
+
+`remote_connect` does not hand the terminal over itself.
+a tool call runs inside a turn, and drawing another session's interface over a turn still running here is the smaller half of the problem: replacing this session's conversation underneath a streaming agent would mean the file it is appending to stops being the file it is reading.
+so the tool records what was asked for and `agent_settled` dispatches `/remote connect <name> <host>`, which is a command handler, is the only thing that can open a different conversation here, and runs with the interface idle.
 
 **Which machine answers.** the client wraps a real local session and replaces only the members that belong to the far side.
 the settings, the editor, the theme and the session file are local; the model, the messages, the queue, and every action are the far side's.
 a member that cannot be asked at all refuses by name rather than answering about the wrong machine.
 
-**Credentials.** an oauth token lasts hours and its refresh token is single use, so the copy lent when the session started goes stale as soon as this machine refreshes its own login.
+**Where a slash command runs.** pi's interface does not dispatch extension commands: it hands the typed line to `session.prompt`, and the session runs the command before deciding the text is for the model.
+in a client, `prompt` is a call to the far side, so every command went there: `/theme` changed the colours of a process with no terminal, `/exit` reached the model as a prompt, and `/rewind` ran against the right files with nowhere to draw.
+the client now asks the far side what commands it has, at attach and after a reconnect, and routes on the answer.
+a command only one side has runs on that side; a command both sides have runs on the far side, which is where the files, the checkpoints and the conversation are, unless it is named in `[remote] commands-here`, which lists the ones this terminal owns.
+
+**The far side's interface, drawn here.** rpc mode has no terminal, so every `ctx.ui` call a far-side extension makes leaves as an `extension_ui_request` frame and is answered with an `extension_ui_response`.
+nothing read those frames, so a notification from a remote command went nowhere and a dialog waited on an answer that could never arrive: `/rewind` printed "No checkpoints available" into the void, and with checkpoints it parked the command on a picker nobody could see.
+`lib/remote/ui-relay.ts` carries them, `remote-ui.ts` draws them with this interface's own dialogs, and the answer goes back down the link.
+the broker holds what it could not deliver: a notification sent while nobody was attached is given to the next client as live, not replayed as history, and a dialog stays open until it is answered, so a command that asked a question before the last client left is answered by the next one.
+
+**What rpc mode cannot do.** `ctx.ui.custom` exists there and resolves undefined, so an extension that offers a component and falls back to a plain dialog takes the component path and is answered with nothing.
+that is the whole of why `/rewind` looked like it did nothing.
+`remote-ui.ts` takes `custom`, `onTerminalInput` and `setEditorComponent` off the rpc context, which makes those extensions take the fallback the relay can carry.
+
+a session that was already running when this went in keeps the broker it started with, and an older broker tags every frame carrying an id, including an answer, so the far side cannot match it: dialogs there stay unanswered until the session is restarted.
+`/remote connect` redeploys and a local one takes `/restart`.
+
+**Typing while it answers.** pi does not stop you: it calls prompt with a streaming behaviour taken from the steering mode, and the session steers or queues on that.
+the proxy dropped it, so every message typed mid-turn came back `Agent is already processing`, a refusal a local session never gives.
+the behaviour and any images travel with the message.
+
+**What the corner names.** the footer is drawn from the read that follows `setModel`, and the far side is a round trip away, so a chosen model did not appear until something else refreshed the state.
+the proxy now holds what was asked for as true at once and lets the far side's own answer correct it, `cycleModel` gives back the model it landed on, and `cycleThinkingLevel` is answered here from the levels the far side reported, since the interface reads it from a keystroke and has nowhere to put a promise.
+
+**Which session the extensions read.** `ctx.model` is not a read of the session the interface holds.
+pi binds it once, as a call on the session that owns the extension runner, and that is the local one the proxy wraps, so every extension in a client saw this machine's model rather than the far side's: the footer named a model the session was not running and did not move when `/model` changed it.
+the proxy defines `model` and `thinkingLevel` on the local session instance, which redirects the binding pi has already made and holds across an extension reload.
+
+**Which model a new session opens on.** a session on another machine is `pi --mode rpc` with no model named, so pi chose its own default there whatever this machine was set to.
+the interface that creates a session hands over the model and thinking level it is on, as `--model provider/id --thinking level`.
+a session that is being continued keeps what it was left on: the flags are dropped when the session has a transcript of its own, since otherwise every restart would overrule a `/model` made on the far side.
+
+**Joining a turn already running.** the rows stream, because the interface draws what it is sent.
+the extension events do not: an extension told about the end of something it never heard begin measures a turn from nothing, and one told about the middle of a turn and then nothing else never stops: the wait line counted for the rest of the session under an answer already on screen.
+a joined turn is passed on in neither direction and the run it belongs to is closed when it ends, so the turn after it is whole.
+
+**Detaching mid-turn.** a turn in flight cannot be handed over: the model call and any command it started belong to the process being left, and the daemon resumes the transcript rather than continuing them.
+it used to happen silently, and the session came back with the tool call in the transcript, no output under it, and nothing running.
+`/detach` and `/restart` now ask, and end the turn where ending it is written down.
+
+**A refusal is an answer.** pi answers a command it will not run with `success: false` and the reason beside it.
+the link settled on that as though it were a result, so every refusal the far side gave resolved a promise nobody read: a prompt refused during compaction left the text gone and the screen unchanged.
+the link now rejects with what the far side said, and the client shows it.
+
+**Credentials.** what travels is auth.json and nothing else, so the session answers as this machine answers: an oauth login, and any key stored through `/login`.
+api keys from the shell's environment used to go with it, which handed the session a second identity to choose between, and the choice was not the laptop's: a far side billing an api account while the laptop bills its subscription is two accounts for one conversation.
+
+an oauth token lasts hours and its refresh token is single use, so the copy lent when the session started goes stale as soon as this machine refreshes its own login.
 the far side then answers with an empty message carrying the refusal inside it, which reads as the model having nothing to say.
 the client hands over credentials as fresh as this machine's before every attach, and pi rereads them without restarting.
 
@@ -44,6 +126,9 @@ a host's own pi is whatever was installed there, and a host that has never had p
 it is installed rather than copied, because pi's cli is a bundle whose externals resolve only when a package manager has put them there, and it is run with node in preference to bun, because a host's bun can be older than the pi it is asked to run.
 
 rho is sent too, so the agent there is this agent: its tools, its prompt, its rules.
+the bundle's layout is pinned with `--root`, because without it bun takes the common root of the entry paths as they were written: a deploy started from `~/Git/mock` against `../../Code/rho/extensions/*.ts` wrote every extension into `_.._/_.._/Code/rho/` inside the package, pi loaded `./extensions` and found only the five vendored files, and the session ran with none of rho at all.
+what that costs is not cosmetic: without `prompt-defingerprint.ts` anthropic classifies every request from that host as third party, which routes it to extra-usage billing and answers `429 ... would exceed your account's monthly spend limit` while the plan has headroom.
+the build now counts what came out against what went in and fails rather than shipping a partial bundle.
 the extensions are built to javascript here, where bun is, because the pi on a host runs under node when that host's bun is older than this pi, and node cannot load typescript.
 `bin/build-remote-rho` makes that package, and it is sent under a name taken from its contents, so an edit here is a different directory there.
 bun-runtime.ts is left out of it: it exists to force this process to be bun, which on such a host is a crash rather than a repair.
@@ -58,6 +143,8 @@ fifteen seconds of silence during a turn now says so, and counts: `waiting on th
 escape aborts and reaches the far side in under a tenth of a second, so asking again is the way out.
 
 **Measured against dev-box**, from a host with nothing installed on it: create 5.6s, list 0.4s, attach 0.7s warm, an answer streaming 2.3s after asking.
+against a session held on this machine, with the real model and rho's own prompt: 0.3s from sending a prompt to the daemon accepting it, 1.7s to the first token, 1.8s to the turn settling, against 2.8s for the same prompt through `pi --print`.
+the link is not what makes a turn slow; a model thinking is.
 
 ## Stage two: the environment moves, the agent does not
 
@@ -99,7 +186,14 @@ reconnect resumes: the executor is restarted, but the agent is told the working 
 
 the same broker holds a session on the machine you are sitting at, which is what tmux was doing before.
 `/detach` asks for a name, hands the conversation to a daemon, and closes the interface.
-`/attach <name>` draws it again, in this terminal or another one, hours later.
+`/attach <name>` draws it again, in this terminal or another one, hours later, and `pi --attach <name>` does the same from a shell.
+rho registers that flag on pi's own command line, so coming back to a session is as short as starting one.
+
+the name is resolved against both records, not just this machine's.
+a socket here and the ledger of what was started on another host were each read by the extension that wrote them, so `pi --attach overnight` answered for a session on dev-box with "no session called overnight here".
+`extensions/lib/remote/sessions.ts` now answers the one question both need, "where is this name", and the flag dispatches on the answer: a socket here is drawn here, and a name in the ledger is handed to the connect in `remote.ts`, which is published through that module because the two extensions cannot import each other.
+a socket here wins over the ledger, then the ledger, then a transcript kept here, which orders the readings by what each costs.
+the bare `pi --attach` lists both and attaches when there is one candidate; it asks no host anything, since finding out whether a remote session is still running costs an ssh round trip per host and connecting starts a stopped one anyway.
 
 the conversation moves by its session file rather than by copying anything: pi writes every turn to that file as it happens, so the daemon starts on the same file and continues it.
 two pi processes appending to one file would interleave two conversations into it, so the daemon waits for the interface to exit before it reads anything (`serve --after-pid`).

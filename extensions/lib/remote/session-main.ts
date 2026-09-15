@@ -16,7 +16,9 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { askToStop, attach, Broker, existing, facts, named, stop } from './broker';
+import { askToStop, attach, Broker, existing, facts, named, request, stop } from './broker';
+import { entryCount, freePath, rehomed, sessionIdOf } from './transfer';
+import { withoutModelFlags } from './pi-args';
 
 const [verb, name, ...rest] = process.argv.slice(2);
 
@@ -53,7 +55,11 @@ const which = (name: string): string | null => {
     return null;
 };
 
-const die = (message: string): never => {
+// The annotation is on the name rather than only on the arrow: typescript
+// narrows after a call to a never-returning function only when the variable
+// itself is declared to return never, and without it every `if (bad) die(...)`
+// below leaves the value it just ruled out still possibly undefined.
+const die: (message: string) => never = (message: string): never => {
     process.stderr.write(`${message}\n`);
     process.exit(1);
 };
@@ -98,7 +104,102 @@ if (verb === 'all') {
     process.exit(0);
 }
 
-if (name === undefined) die('usage: rho-session <serve|attach|list|all|stop|rename|forget|relend> <name>');
+if (name === undefined) {
+    die('usage: rho-session <serve|attach|list|all|state|busy|carry|adopt|stop|rename|forget|delete|relend> <name>');
+}
+
+/** What the agent in a running session says about itself. */
+interface State {
+    readonly sessionId?: string;
+    readonly sessionFile?: string;
+    readonly messageCount?: number;
+    readonly isStreaming?: boolean;
+}
+
+const stateOf = async (name: string): Promise<State> => {
+    const answer = await request(name, { type: 'get_state' });
+    if (!answer.success) die(answer.error ?? `${name} would not say what it is doing`);
+    return (answer.data ?? {}) as State;
+};
+
+/**
+ * What this session is, for a machine deciding whether to hand it a
+ * conversation.
+ *
+ * The identity and the message count come from the agent; the directory comes
+ * from the broker, which is the only one that knows it, and the receiving side
+ * needs it to rehome a session file it is sent.
+ */
+if (verb === 'state') {
+    if (!(await existing(name))) die(`no session called ${name}`);
+    const state = await stateOf(name);
+    process.stdout.write(
+        `${JSON.stringify({
+            name,
+            cwd: facts(name)?.cwd ?? '',
+            sessionId: state.sessionId ?? null,
+            sessionFile: state.sessionFile ?? null,
+            messages: state.messageCount ?? 0,
+            streaming: state.isStreaming === true,
+        })}\n`,
+    );
+    process.exit(0);
+}
+
+/** Whether a turn is running, for anything that must not interrupt one. */
+if (verb === 'busy') {
+    if (!(await existing(name))) die(`no session called ${name}`);
+    const state = await stateOf(name);
+    process.stdout.write(state.isStreaming === true ? 'busy\n' : 'idle\n');
+    process.exit(0);
+}
+
+/** This session's conversation, as the file that holds it. */
+if (verb === 'carry') {
+    if (!(await existing(name))) die(`no session called ${name}`);
+    const state = await stateOf(name);
+    if (state.sessionFile === undefined || state.sessionFile === '') die(`${name} keeps no session file`);
+    process.stdout.write(readFileSync(state.sessionFile, 'utf8'));
+    process.exit(0);
+}
+
+/**
+ * A conversation from somewhere else, continued here.
+ *
+ * The file arrives on stdin, is rehomed to the directory this session works in
+ * and written beside the session's own files under a name nothing is using,
+ * and the agent is told to open it. From that point the two machines hold one
+ * conversation with one identity, and carrying it back is the same operation
+ * in the other direction.
+ */
+if (verb === 'adopt') {
+    if (!(await existing(name))) die(`no session called ${name}`);
+    const state = await stateOf(name);
+    if (state.isStreaming === true) die(`${name} is mid-turn`);
+    if (state.sessionFile === undefined || state.sessionFile === '') die(`${name} keeps no session file`);
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+    const carried = Buffer.concat(chunks).toString();
+    if (carried.trim() === '') die('nothing to adopt');
+
+    const cwd = facts(name)?.cwd ?? process.env.HOME ?? '/';
+    const dir = join(state.sessionFile, '..');
+    const id = sessionIdOf(carried);
+    const path = freePath(dir, `${id ?? 'carried'}.jsonl`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path, rehomed(carried, cwd));
+
+    const answer = await request(name, { type: 'switch_session', sessionPath: path });
+    if (!answer.success) die(answer.error ?? `${name} would not open ${path}`);
+    // An extension on the far side may refuse a switch; that is an answer, not
+    // an error, and the file it refused stays where it was written.
+    if ((answer.data as { cancelled?: boolean } | undefined)?.cancelled === true) {
+        die(`${name} refused the conversation it was sent`);
+    }
+    process.stdout.write(`${name} carries ${entryCount(carried)} entries from ${id ?? 'elsewhere'}\n`);
+    process.exit(0);
+}
 
 if (verb === 'attach') {
     if (!(await existing(name))) die(`no session called ${name}`);
@@ -131,33 +232,46 @@ if (verb === 'stop') {
 /**
  * Credentials for the agent, read from stdin rather than taken from argv.
  *
- * The host has no API key of its own, and it should not acquire one: a key in
- * a file on a machine is a key that outlives the session and gets backed up.
- * The laptop sends it down the ssh channel at start, it lands in the session
- * process's environment, and it dies with the session. argv is not an option
- * because `ps` shows it to every user on the box.
+ * The host has no login of its own, and it should not acquire one: a key in a
+ * file on a machine is a key that outlives the session and gets backed up. The
+ * laptop sends what it is logged in with down the ssh channel at start, the
+ * session holds it in a directory of its own, and it dies with the session.
+ * argv is not an option because `ps` shows it to every user on the box.
+ *
+ * What travels is auth.json and nothing else. Api keys from the laptop's shell
+ * used to travel beside it, which gave the session a second identity to choose
+ * from: a far side answering on an api key while the laptop answers on its
+ * subscription is two accounts for one conversation, and the one it picked was
+ * not the one paying for the rest.
  */
 interface Lent {
-    readonly env: Record<string, string>;
     /** the contents of the laptop's auth.json, for OAuth logins and stored keys. */
     readonly auth: string | null;
 }
 
+/** The environment variables a provider will answer to instead of a stored login. */
+const PROVIDER_KEYS = [
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+    'OPENAI_API_KEY',
+    'GEMINI_API_KEY',
+    'GOOGLE_API_KEY',
+    'OPENROUTER_API_KEY',
+    'GROQ_API_KEY',
+    'XAI_API_KEY',
+] as const;
+
 const readFromStdin = async (): Promise<Lent> => {
-    if (process.stdin.isTTY) return { env: {}, auth: null };
+    if (process.stdin.isTTY) return { auth: null };
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
     const text = Buffer.concat(chunks).toString().trim();
-    if (text === '') return { env: {}, auth: null };
+    if (text === '') return { auth: null };
     try {
-        const parsed = JSON.parse(text) as { env?: unknown; auth?: unknown };
-        const env: Record<string, string> = {};
-        for (const [key, value] of Object.entries((parsed.env ?? {}) as Record<string, unknown>)) {
-            if (typeof value === 'string') env[key] = value;
-        }
-        return { env, auth: typeof parsed.auth === 'string' ? parsed.auth : null };
+        const parsed = JSON.parse(text) as { auth?: unknown };
+        return { auth: typeof parsed.auth === 'string' ? parsed.auth : null };
     } catch {
-        return { env: {}, auth: null };
+        return { auth: null };
     }
 };
 
@@ -249,6 +363,30 @@ if (verb === 'rename') {
     process.exit(0);
 }
 
+/**
+ * Stop it if it is running, wait for it to go, then forget it.
+ *
+ * `stop` signals the broker and returns, so the socket still answers for a
+ * moment afterwards and a `forget` sent straight after it is refused for a
+ * session that is on its way out. Doing both here is one ssh round trip rather
+ * than a poll from the other machine, and the wait is where the race is paid.
+ */
+if (verb === 'delete') {
+    const dir = credentialDir(name);
+    if (!existsSync(dir)) die(`no session called ${name}`);
+    if (await existing(name)) {
+        if (!stop(name)) await askToStop(name);
+        const until = Date.now() + 10_000;
+        while (Date.now() < until && (await existing(name))) {
+            await new Promise((settle) => setTimeout(settle, 100));
+        }
+        if (await existing(name)) die(`${name} would not stop, so it is still here`);
+    }
+    rmSync(dir, { recursive: true, force: true });
+    process.stdout.write(`deleted ${name}\n`);
+    process.exit(0);
+}
+
 /** The transcript and the credentials, gone. This is the destructive one. */
 if (verb === 'forget') {
     if (await existing(name)) die(`${name} is running: stop it before forgetting it`);
@@ -317,11 +455,20 @@ if (verb === 'serve') {
     if (process.env.RHO_SESSION_FOREGROUND !== '1') {
         const lent = await readFromStdin();
         const credentials = lent.auth === null ? {} : { PI_CODING_AGENT_DIR: lendCredentials(lent.auth, name) };
+        // A login was lent, so it is the one this session answers with. A key
+        // sitting in the host's own environment is a second identity nobody
+        // chose, and pi picking it would bill an account the person at the
+        // interface is not looking at. Nothing is stripped when no login was
+        // lent, because then the environment is all there is.
+        const withoutHostKeys =
+            lent.auth === null
+                ? {}
+                : Object.fromEntries(PROVIDER_KEYS.map((key) => [key, undefined as unknown as string]));
         const child = spawn(process.execPath, [import.meta.filename, 'serve', name, ...rest], {
             cwd,
             detached: true,
             stdio: 'ignore',
-            env: { ...process.env, ...lent.env, ...credentials, RHO_SESSION_FOREGROUND: '1' },
+            env: { ...process.env, ...withoutHostKeys, ...credentials, RHO_SESSION_FOREGROUND: '1' },
         });
         // A spawn that cannot start says so once, in a sentence, rather than
         // as a stack trace through node's child_process.
@@ -359,6 +506,10 @@ if (verb === 'serve') {
     const kept = existsSync(join(credentialDir(name), 'sessions'));
     const resume = kept ? ['--continue'] : [];
 
+    // The model the interface handed over is for a session that has none: one
+    // being continued keeps what it was left on. See lib/remote/pi-args.ts.
+    const chosen = kept ? withoutModelFlags(piArgs) : piArgs;
+
     /**
      * The pi to run: the laptop's, when it has been sent, and the host's
      * otherwise.
@@ -385,7 +536,7 @@ if (verb === 'serve') {
             ? sentBun
             : (which('node') ?? which('bun') ?? process.execPath);
     const [command, head] = usable ? [runtime, [lentPi as string]] : ['pi', [] as string[]];
-    const broker = new Broker(name, command, [...head, '--mode', 'rpc', '--name', name, ...resume, ...piArgs], cwd);
+    const broker = new Broker(name, command, [...head, '--mode', 'rpc', '--name', name, ...resume, ...chosen], cwd);
     // The session is the agent: when it goes, this process has nothing left to
     // hold and no reason to stay resident.
     broker.onEnded = () => process.exit(0);

@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { CLAIM_HEADER, isPlanClaim } from './lib/billing';
 
 // detect when anthropic routes requests to extra-usage ("overage") billing
 // instead of plan claims, and warn once per session. detection reads the
@@ -8,8 +9,6 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 // replaces the blunt built-in startup warning (suppressed by
 // silence-extra-usage-warning.ts) with an evidence-based one.
 
-const PLAN_CLAIMS = new Set(['five_hour', 'seven_day']);
-const HEADER = 'anthropic-ratelimit-unified-representative-claim';
 const OVERAGE_UTIL = 'anthropic-ratelimit-unified-overage-utilization';
 
 export default function (pi: ExtensionAPI) {
@@ -17,12 +16,12 @@ export default function (pi: ExtensionAPI) {
     let warnedThisSession = false;
 
     pi.on('after_provider_response', (event, ctx) => {
-        const claim = event.headers[HEADER];
+        const claim = event.headers[CLAIM_HEADER];
         if (!claim) return; // not an anthropic unified-limiter response
 
         const overageUtil = parseFloat(event.headers[OVERAGE_UTIL] ?? '');
 
-        const onPlan = PLAN_CLAIMS.has(claim);
+        const onPlan = isPlanClaim(claim);
 
         // 429 while NOT on a plan claim: spend-limit hit on the overage pool
         // (skip genuine rate limits, which still show a plan claim)

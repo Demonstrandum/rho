@@ -1,5 +1,6 @@
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, test } from 'bun:test';
-import { hints, intentOf } from '../extensions/lib/picker';
+import { browse, busyRow, hints, intentOf } from '../extensions/lib/picker';
 
 /**
  * The keys these lists use, in one place.
@@ -38,6 +39,98 @@ describe('what a keystroke means in a picker', () => {
             expect(intentOf(key, action)).toBeNull();
         }
     });
+
+    test('a key of the list\'s own comes back as itself', () => {
+        const action = {
+            remove: 'stop',
+            extra: [
+                { key: 'x', label: 'forget', id: 'forget', suspends: true } as const,
+                { key: 'ctrl+d', label: 'delete', id: 'delete' } as const,
+            ],
+        };
+        expect(intentOf('x', action)).toEqual({ extra: 'forget' });
+        expect(intentOf('\u0004', action)).toEqual({ extra: 'delete' });
+    });
+});
+
+describe('a row with an action running on it', () => {
+    test('says what is being done to it, after what it already said', () => {
+        const row = busyRow({ value: 'blue', label: 'blue', description: 'running, /srv/blue' }, 'stopping');
+        expect(row.description).toBe('running, /srv/blue, stopping...');
+        expect(row.label).toBe('blue');
+    });
+
+    test('a row with nothing to say says only that', () => {
+        expect(busyRow({ value: 'blue', label: 'blue' }, 'deleting').description).toBe('deleting...');
+    });
+});
+
+/** The list as a caller drives it: the component, and the keys it is sent. */
+const harness = () => {
+    const theme = { fg: (_role: string, text: string) => text, bold: (text: string) => text };
+    const tui = { requestRender: () => {} };
+    const held: { component?: { handleInput(data: string): void } } = {};
+    const ctx = {
+        ui: {
+            notify: () => {},
+            custom: (factory: (t: unknown, th: unknown, k: unknown, done: (v: unknown) => void) => unknown) =>
+                new Promise((settle) => {
+                    held.component = factory(tui, theme, {}, settle) as { handleInput(data: string): void };
+                }),
+        },
+    } as unknown as ExtensionContext;
+    return { ctx, press: (key: string) => held.component?.handleInput(key) };
+};
+
+/** Long enough for an action and the reread of the list that follows it. */
+const settled = () => new Promise((wake) => setTimeout(wake, 25));
+
+describe('a list that runs out of rows', () => {
+    test('removing the last row closes the picker instead of drawing nothing', async () => {
+        let names = ['one', 'two'];
+        const { ctx, press } = harness();
+        const done = browse(ctx, {
+            title: 'sessions',
+            items: () => names.map((name) => ({ value: name, label: name })),
+            action: () => ({ remove: 'stop' }),
+            remove: async (value) => {
+                names = names.filter((name) => name !== value);
+                return true;
+            },
+        });
+        await settled();
+        for (const _ of names.slice()) {
+            press('d');
+            await settled();
+        }
+        expect(names).toEqual([]);
+        expect(await Promise.race([done, settled().then(() => 'still open')])).toBeNull();
+    });
+
+    test('the cursor stays where it is, so a run of removals walks the list', async () => {
+        let names = ['one', 'two', 'three'];
+        const gone: string[] = [];
+        const { ctx, press } = harness();
+        const done = browse(ctx, {
+            title: 'sessions',
+            items: () => names.map((name) => ({ value: name, label: name })),
+            action: () => ({ remove: 'stop' }),
+            remove: async (value) => {
+                gone.push(value);
+                names = names.filter((name) => name !== value);
+                return true;
+            },
+        });
+        await settled();
+        press('d');
+        await settled();
+        press('d');
+        await settled();
+        expect(gone).toEqual(['one', 'two']);
+        expect(names).toEqual(['three']);
+        press('\u001b');
+        await done;
+    });
 });
 
 describe('the hint line', () => {
@@ -54,5 +147,10 @@ describe('the hint line', () => {
 
     test('a list with no actions still says how to choose and how to leave', () => {
         expect(hints({})).toBe('up/down move, enter select, esc cancel');
+    });
+
+    test('the word a busy row uses is not the word in the hints', () => {
+        expect(hints({ remove: 'stop', removing: 'stopping' })).toContain('d stop');
+        expect(hints({ remove: 'stop', removing: 'stopping' })).not.toContain('stopping');
     });
 });

@@ -9,6 +9,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import { abbreviate, capitalise, collapseHome, oneLine, words } from './lib/text';
 import { publishFooter } from './lib/footer-mirror';
+import { billing, trackBilling } from './lib/billing';
 import { currentEnvironment } from './environment';
 
 const ARROW_IN = '▲  ';
@@ -47,7 +48,23 @@ function prettifyModelName(id: string): string {
     return version ? `${name} ${version}` : name;
 }
 
+// what the session is charged, and what it would cost at api prices.
+//
+// on a subscription the plan pays for the tokens, so the charge is zero and
+// the api-price figure goes in parentheses behind it: the reader is looking at
+// what the session would have cost, not at a bill. once anthropic meters a
+// request to extra usage, the responses from that point on are paid for, so
+// the leading figure is what they have cost and the parenthetical stays the
+// whole session at api prices.
+function formatSpend(total: number, usingSub: boolean, warn: (text: string) => string): string {
+    if (!usingSub) return `$${total.toFixed(3)}`;
+    const charged = billing().charged;
+    const head = `$${charged.toFixed(3)}`;
+    return `${charged > 0 ? warn(head) : head} ($${total.toFixed(3)})`;
+}
+
 export default function (pi: ExtensionAPI) {
+    trackBilling(pi);
     pi.on('session_start', async (_event, ctx: ExtensionContext) => {
         if (ctx.mode !== 'tui') {
             return;
@@ -118,7 +135,7 @@ export default function (pi: ExtensionAPI) {
 
                     const usingSub = model ? ctx.modelRegistry.isUsingOAuth(model as Model<never>) : false;
                     if (totalCost || usingSub) {
-                        statsParts.push(`$${totalCost.toFixed(3)}${usingSub ? ' (sub)' : ''}`);
+                        statsParts.push(formatSpend(totalCost, usingSub, (text) => theme.fg('warning', text)));
                     }
 
                     const autoIndicator = SHOW_AUTO ? ' (auto)' : '';

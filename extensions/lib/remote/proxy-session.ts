@@ -187,6 +187,11 @@ export class RemoteActions {
         return this.link.send({ type: 'abort' });
     }
 
+    /** End the session itself, rather than this interface onto it. */
+    stopSession(): Promise<unknown> {
+        return this.link.send({ type: 'rho_stop' });
+    }
+
     compact(): Promise<unknown> {
         return this.link.send({ type: 'compact' });
     }

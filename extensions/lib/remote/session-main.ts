@@ -282,6 +282,26 @@ if (verb === 'serve') {
     if (!existsSync(cwd)) die(`${cwd} does not exist on this machine`);
     const piArgs = rest.includes('--') ? rest.slice(rest.indexOf('--') + 1) : [];
 
+    /**
+     * The interface that is handing this session over, if one is.
+     *
+     * Detaching locally gives a running session to a daemon by its session
+     * file, and two pi processes appending to one file would interleave two
+     * conversations into it. The daemon waits for the interface to go before
+     * it starts, so the file has one writer throughout.
+     */
+    const afterFlag = rest.indexOf('--after-pid');
+    const afterPid = afterFlag === -1 ? undefined : Number.parseInt(rest[afterFlag + 1] ?? '', 10);
+    if (afterFlag !== -1 && (afterPid === undefined || !Number.isFinite(afterPid))) die('--after-pid needs a pid');
+    const gone = (pid: number): boolean => {
+        try {
+            process.kill(pid, 0);
+            return false;
+        } catch {
+            return true;
+        }
+    };
+
     // Detach unless asked not to: `ssh host rho-session serve` returns as soon
     // as the session is up, and the session stays.
     if (process.env.RHO_SESSION_FOREGROUND !== '1') {
@@ -297,6 +317,13 @@ if (verb === 'serve') {
         // as a stack trace through node's child_process.
         child.on('error', (trouble: Error) => die(`could not start ${name}: ${trouble.message}`));
         child.unref();
+        // A session waiting for an interface to exit cannot have a socket yet,
+        // and that interface is usually the process asking for it, so waiting
+        // here would wait for ourselves.
+        if (afterPid !== undefined) {
+            process.stdout.write(`${name} starts in ${cwd} when this interface exits\n`);
+            process.exit(0);
+        }
         // Wait for the socket rather than claiming success: a session that
         // failed to start should say so while the laptop is still listening.
         for (let waited = 0; waited < 10_000; waited += 200) {
@@ -307,6 +334,14 @@ if (verb === 'serve') {
             await new Promise((r) => setTimeout(r, 200));
         }
         die(`${name} did not start`);
+    }
+
+    // Nothing is read or written until the interface has let the file go.
+    if (afterPid !== undefined) {
+        for (let waited = 0; !gone(afterPid); waited += 100) {
+            if (waited > 120_000) die(`the interface (${afterPid}) did not exit, so ${name} was not started`);
+            await new Promise((r) => setTimeout(r, 100));
+        }
     }
 
     // A session that has been here before picks up where it stopped: its

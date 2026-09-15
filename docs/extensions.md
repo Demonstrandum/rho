@@ -122,6 +122,14 @@ mechanism borrowed from everettmorgan's `pi-agent-review`, not from ponytail, wh
 in the picker: up/down move, enter takes, `d` deletes the highlighted entry, `ctrl+c` clears the stack (no confirmation; the cleared view offers `u` to undo, closes itself after 600ms, and then names `/stash undo`), `u` undoes the last delete or clear, esc cancels.
 one level of undo is kept, and it is retired by any push, pop, or take, so an undo can never restore a stack the user has since changed.
 picker keys are compared with `matchesKey`, not raw bytes, because ctrl+c arrives as a CSI-u sequence under the kitty keyboard protocol.
+`lib/picker.ts` is that list as a component the other extensions share, and it stays on screen while an action runs: `SelectList` has no setter for its items, so a changed list is a new `SelectList` swapped into the container rather than a new overlay.
+closing and reopening the whole overlay per keystroke was what made a run of stops or deletes redraw the screen once a row.
+a row with an action in the air says so in its description (`stopping...`), the cursor does not move, and the next row can be acted on before the first one returns; a second key on the same row is ignored, since two stops of one session is one stop and an error.
+an action that has to ask a question takes the terminal for a dialog, so its key is declared `suspends: true` and for that one the picker does close and reopen at the same cursor.
+when the last row goes the picker closes rather than drawing an empty box, since a list with nothing in it has nothing to choose.
+in `/remote manage`: `d` stops, `r` renames, `x` deletes after a confirmation, and ctrl+d deletes with no question asked, which is the key for emptying a host a row at a time.
+both deletes send the runner's `delete`, which stops the session, waits for the socket to go and then removes the directory: `forget` refuses a running session, and `stop` signals the broker and returns, so a `forget` sent straight after a `stop` was refused for a session on its way out and the row stayed in the list.
+`/remote manage` updates the runner before it draws, because the keys are only as new as the code answering them.
 `ctrl+s` and `ctrl+r` are also built-in keys for picker-only actions (`app.models.save`, `app.session.toggleSort`, `app.session.rename`), and pi reports every shared key at startup even under `quietStartup`; on `session_start` the extension reads the resolved bindings (`getKeybindings().getResolvedBindings()`, via `lib/keybindings-store.ts`), finds every action holding a claimed key, and moves each to the next key of the `[stash] demote-to` pool in `rho.toml` (`f2`..`f6` by default) that nothing else uses.
 it never writes over an id already in `keybindings.json`, it runs at `session_start` because pi installs the keybindings manager during startup, and an empty pool skips the move and keeps the report.
 every binding is ctrl+letter because an alt binding never arrives on macOS unless the terminal sends option as meta.
@@ -147,15 +155,40 @@ keys come from `[send-now]` in `rho.toml`; `ctrl+enter` and `ctrl+shift+enter` c
 patches `Editor.prototype.submitValue` to capture sent prompts and `Editor.prototype.navigateHistory` to capture unsent drafts before they are overwritten.
 on first arrow-key use, stored entries are appended to pi's own history array, so they become reachable through standard navigation.
 `/history` opens a picker over the full log with delete support.
+`[history] search-key` (`ctrl+f` by default) opens the incremental search a shell puts on `ctrl+r`: typing narrows the log, the matches around the cursor are listed with the hit marked, up and down move, and enter puts the match in the editor.
+inside that overlay `ctrl+r` and the search key both step to an older match, so the shell habit works once it is open.
+the editor text comes in as the opening query when it is one line no longer than `[history] seed-query-chars` (default 40); anything longer is a draft rather than a search term, and the query opens empty.
+`ctrl+r` itself cannot be the opening key: `stash.ts` uses it to restore a parked prompt, and pi skips an extension shortcut that names one of its reserved bindings (`ctrl+t`, `ctrl+g`, `ctrl+o`, `ctrl+l`, `ctrl+p`, `ctrl+x`, `ctrl+k`, escape, enter, `ctrl+c`, `ctrl+d`), which rules out most of what is left.
+`ctrl+f` is pi's second key for `tui.editor.cursorRight`, the first being the right arrow, so `lib/keybindings-store.ts` `releaseKey` takes that one key off the built-in in `keybindings.json` and the arrow keeps working.
+without that release pi reports the overlap at every start, since the report is printed even under `quietStartup`.
 the log is stored via `lib/state-store.ts` and scoped by `[history] persist` in `rho.toml` (`project` default, like stash).
 `[history] max-entries` caps the log (default 500), `[history] save-drafts` toggles draft capture (default true), `[history] debounce-ms` controls how often the in-progress draft is snapshotted while typing (default 750ms).
-`lib/prompt-history.ts` is the testable state machine: append-only log with deduplication, capping, and search.
+`lib/prompt-history.ts` is the testable state machine: the append-only log with deduplication and capping, `ReverseSearch` (a snapshot of the log, the query, and which match is under the cursor, holding that match while it still matches so deleting a character does not jump elsewhere), and `matchWindow`, which cuts an entry to the available width around the hit rather than from the head.
 `tests/prompt-history.test.ts` pins the Editor prototype method names, so a pi-tui rename fails the test rather than silently capturing nothing.
 
 `input-field.ts` patches `CustomEditor.prototype.render` to style the input field: half-block edge characters (▄/▀) replace the thin ─ borders, content rows get a dark background derived from `userMessageBg`, and the edge rows can carry a horizontal gradient.
 all three behaviours are independently switched from `[input]` in `rho.toml`.
+under `[spinner] placement = "border"` the top edge is not replaced but spliced: `borderStatus` re-renders the working status for this width and `cutInto` puts it two cells in, covering as many cells as it prints so the row keeps its width.
+the column count comes from pi-tui's `visibleWidth` rather than `lib/text.ts`'s, because a spinner glyph out of the chinese set prints two columns and counting it as one leaves the row long enough to wrap.
 colours are sampled live from `borderColor` (tracks bash mode, thinking levels) and the theme's `userMessageBg`, so they follow theme and mode changes with no state tracking.
 falls back to pi's rows untouched in 256-colour mode.
+`lib/colour-spec.ts` holds the `"border@l+20"` spec resolver, which `command-hint.ts` reads out of the same config file.
+
+`command-hint.ts` shows the form of the command being typed at the right-hand end of the input field, in the field's own trailing padding, so it costs no row and moves nothing.
+the fading is by proximity rather than by position: a character is blended towards the colour behind it by its distance from the end of the typed line, reaching `[hint] strength` over `[hint] fade` columns, so the hint retreats ahead of the cursor and the two are never legible in the same place.
+the colour it fades towards is read back out of the rendered row, as the background in force at that column, not computed a second time from the theme.
+the field's background is a gradient this extension does not lay down, so the row is the only account of what a column carries; fading towards a colour the column is not painted with puts the character on a path to somewhere else, and the middle of that path is brighter than either end, which is what a hint approaching the cursor looked like while the background was derived rather than read.
+where the line is long enough to crowd it, the hint is clipped from the left by column and dropped once no column remains.
+clipping to a word boundary was tried first and is wrong: it drops several characters at once, so the surviving head starts further right and is drawn brighter, and the hint then dims as the line advances only to jump back up at each boundary.
+by column the leading character sits at a fixed distance from the line, so it holds one brightness, and a character half cut is one the fade has already taken to the background.
+reading the background means running after everything that paints one, so the patch goes on `CustomEditor.prototype.render` (`input-field.ts` replaces that method and calls the base itself, so a patch on the base would run inside it, before the background pass) and is installed at `session_start` rather than at load, when every extension has had its turn and whatever is on the prototype then is the whole of the rendering.
+`overlayHint` walks the row, keeps every escape where it was, and replaces only the visible characters under the hint, which is what carries those backgrounds through; each replaced character is preceded by its own foreground escape and the last is followed by `\x1b[39m`, never a full reset, since the background at that column is the row's to state.
+`lib/command-usage.ts` holds the grammar: a form is parsed into literal and value tokens, and the typed words rule forms out rather than ranking them, since a required literal contradicted means the reader is not typing that form.
+with one form left it is shown whole; with several, what is shown is the choice between them, so `/remote` offers `[connect|create|project|list|manage|stop]`, `/remote c` narrows it to `[connect|create]`, and `/remote conn` resolves to `/remote connect <name>`.
+ranking was the first attempt and answers a question nobody asked: `/remote` is not on its way to the first line of the table, it is on its way to one of six.
+forms come from the table in that file, or failing that from the usage fragments a command already writes into its own description (`/slack <app>, /slack off, /slack add <app>`), so a command that documents itself needs no entry; `declareUsage` lets an extension state its own.
+`lib/command-hint.ts` holds the placement and the overlay, apart from the patch, so both can be checked against a synthetic row without a terminal (`tests/command-hint.test.ts`).
+adding APC to `ESCAPE` in `lib/text.ts` was part of this: pi marks the hardware cursor position with `\x1b_pi:c\x07`, and counted as text it put every column measurement on a focused editor row seven out.
 
 `prompt-inspect.ts` reads what was sent to the provider.
 nothing in it reads `ctx.getSystemPrompt()`: that reports the string pi built, and the model read the payload, which is that string after the provider serialiser has placed it (a top-level `system`, a list of cacheable blocks, a `systemInstruction`, or a leading `system` or `developer` message) and after any `before_provider_request` handler has rewritten it.
@@ -186,11 +219,22 @@ the target is stored per session (`lib/state-store.ts`, `[cwd] remember`, on by 
 ## rendering
 
 `spinner.ts` sets the working indicator and shimmering message, driven by `assets/spinners.json`, `assets/maxims.txt`, and `assets/verbs.txt`; shimmer, glyphs, and completion line adapted from pi-claude-shimmer (MIT).
+`[spinner] placement` picks which surface they are drawn on, and `lib/working-status.ts` holds pi to that choice.
+pi 0.85 moved the indicator from the row below the input field into the field's top border, drawn by `CustomEditor.renderTopBorder`, which is where `input-field.ts` writes its half-block edge: the status was rendered and then overwritten every frame, so the spinner vanished on that release with nothing in rho having changed.
+`dock` (the default) clears `embedWorkingStatus`, which sends the indicator back to the status container, gives a long message the full width, and leaves the edge rho's to draw whole; `border` keeps pi's arrangement and has `input-field.ts` cut the rendered status into the edge.
 
 `startup.ts` replaces pi's built-in startup block: it persists `quietStartup=true` (idempotent global settings write) to suppress the built-in banner and the bracketed `[Prompts]`-style resource listing, then draws a compact bold-inline header via `setHeader` (logo line plus one line each for `prompts`, `skills`, `commands`, `themes`).
 resource data comes from `pi.getCommands()` (split by `source`) and `ctx.ui.getAllThemes()`; there is no API to enumerate loaded extension files, so extension-provided slash commands show under `commands` instead of an `Extensions` section.
 
 `footer.ts` replaces the built-in footer to customise the token arrow glyphs; also flips `clearOnShrink` on live for the current session.
+
+the spend field states what the session is charged and puts the api-price total in parentheses behind it, `$0.000 ($1.234)`.
+pi computes one figure, the token counts of the transcript at api list prices, and on a subscription nobody pays it: the plan does, so printing it alone shows a bill that is not owed.
+`lib/billing.ts` reads the anthropic unified rate-limit headers on `after_provider_response` (a representative claim of `five_hour` or `seven_day` is a plan window, anything else is the overage pool) and adds the cost of the following assistant message to a charged total while the mode is extra usage.
+so the leading figure is zero for as long as the plan covers the session, and rises in `warning` colour once anthropic meters requests outside it, while the parenthetical stays the whole session at api prices.
+without OAuth the field is the api-price figure alone, since there the two are the same number.
+a resumed session starts its charged total at zero: the headers of the earlier turns are gone, and only the api-price total can be recomputed from the transcript.
+`extra-usage-watch.ts` shares the claim header and the plan-claim test with it, and keeps its own hook for the warning.
 
 `clear-on-shrink.ts` persists `terminal.clearOnShrink=true` into the global pi settings so no stale blank row is left behind when the rendered content shrinks (idempotent, written once).
 the flag is required: without it stale rows pile up under the footer.
@@ -201,6 +245,7 @@ pi also reacts to it by parking a 2-line `IdleStatus` in the dock, which `halfbl
 `tight-tool-rows` drops the blank lines a tool row wraps itself in.
 `tight-after-tool-rows` drops the leading `Spacer(1)` of an assistant message when a tool row is what precedes it (the same blank line is kept after a user bubble, so it is decided by adjacency in `Container.render`).
 `hide-idle-status` skips pi's `IdleStatus`, two reserved dock rows, matched on constructor name since pi exports neither the class nor a subpath to it.
+`box-tool-tails` is in `[render]` with them but lives in `tool-rows.ts`, since it patches a renderer rather than a `render`.
 every trim skips a block holding an inline image: an image reserves its height as blank rows (after the escape sequence under kitty, before it under iterm2) and the terminal draws over them regardless, so dropping them leaves the transcript shorter than the picture and the input field and footer are drawn on top of it.
 matched on the kitty and iterm2 prefixes, since pi-tui's `isImageLine` is not re-exported through the package index; an iterm2 line also has to be recognised before OSC stripping, which would leave it looking blank.
 
@@ -209,6 +254,14 @@ a row is drawn in two slots, the call and the result.
 a tool that ships a `renderCall` writes its own name into the call slot (`read`, `bash`), and a tool that ships none gets `ToolExecutionComponent`'s fallback, which is the bare name the model calls and a JSON dump of the arguments under it (`slack_reply`, `ctx_search`, `web_search`).
 so a row's name came from as many places as there are tool authors, and half the rows said nothing about what they did.
 three behaviours, each switched by a key in `[tools]`: `titles`, `detail`, `exec-preview`.
+
+a fourth, `[render] box-tool-tails`, repairs the one row that has neither a background nor half-block edges.
+pi's edit tool is the only tool that declares `renderShell: "self"`: it draws its own row, because the row holds a diff that has to stay on screen while the arguments are still streaming and be rewritten in place when they settle.
+its call slot returns a `Box` and therefore takes the half-block patch like anything else, but its result slot (`core/tools/renderers/edit.js`) returns a bare `Container` of a `Spacer(1)` and a `Text`, which lands after that box as an unpainted blank line and an unpainted line of text.
+it is reached whenever the result differs from the preview already drawn, which in practice is every failed edit.
+the blank line survives `tight-tool-rows` because it is interior to the row, and `trimBlankEdges` takes only the leading and trailing rows.
+so the tail is trimmed and put in a `Box` of its own, coloured by `isError` from the render context (`AgentToolResult` does not carry it), which picks up the half-block edges for free and leaves pi's own streaming row untouched.
+`Box.render` returns `[]` when its children render nothing, so a result that says nothing still costs no rows, and the wrapper hands pi's renderer back the component it made rather than the wrapper around it, the way `Retitled` and `Marked` do.
 
 the patch is on the component and not on the tools: context-mode registers its exec tools itself (`mcp-bridge.js`), and `getAllRegisteredTools()` keeps first-registration-wins by extension load order, so a competing registration of the same name either loses silently or wins and then has to reimplement the MCP stdio bridge to have anything to execute.
 patching `getCallRenderer` is keyed on the running tool name instead, so it applies whoever registered the tool, the same way `halfblock-boxes.ts` patches `render`.
@@ -246,6 +299,29 @@ the transcript between them is pi's components: `UserMessageComponent`, `ToolExe
 the frame is composed to exactly the terminal height every time: the header and the question are pinned, the list, the input field and the footer sit at the bottom, and the sample transcript takes what is left, read from its end the way a session is.
 the spare rows go above the header, as head room, which is where a short session's blank space is; anywhere else they open a gap inside it.
 so nothing moves as the card animates or as a taller theme is previewed, and every line is padded to the width, since an overlay covers only where it puts characters.
+
+`syntax.ts` + `lib/syntax-palette.ts` choose the colours code is drawn in, apart from the theme that draws everything else.
+pi keeps one theme and the nine syntax colours are keys inside it, so a theme that is right for the borders and the footer also fixes the colouring of every code block, diff and file read.
+`/syntax <name>` completes over the palettes in `extensions/assets/syntax.json` and applies each one as its name passes under the cursor, the way `/theme` does; `/syntax` with no argument opens a picker with a code sample above the list; `/syntax none` goes back to the theme's own colours.
+
+a palette is laid over a theme rather than merged into its json, because a theme is not always a file: a built-in has no path to read, and `ctx.ui.theme` is a `Theme` with its colours already encoded as ansi escapes.
+so `restyle` returns `Object.create(theme)` carrying one own property, the `fgColors` map, copied from the theme with the palette's roles replaced.
+pi resolves every colour through `fg`/`getFgAnsi`, both of which read `this.fgColors`, so that one property is the whole override: the object is `instanceof Theme`, keeps the theme's name, and a colour key pi adds in a later version still resolves through the theme it was built from.
+the base theme is kept under a symbol so a second palette replaces the first instead of stacking another object on it.
+
+`ctx.ui.theme` is not a `Theme`: it is a proxy that forwards every read to the theme in force, which pi keeps under `Symbol.for("@earendil-works/pi-coding-agent:theme")`.
+so it answers every colour correctly while failing `instanceof Theme`, and `ui.setTheme` reads anything that is not a `Theme` as a theme name.
+a palette laid over the proxy is therefore applied as a name, silently, and nothing changes on screen; `restyle` resolves the instance behind the proxy first, and falls back to what it was handed when that global is absent, which is the case in a test.
+
+the picker is the bordered box every other picker in a session is, drawn in the dock where pi draws them rather than as an overlay over the transcript: the names are on the left and the code they colour is on the right, which is the comparison being made.
+`lib/side-by-side.ts` is the placement, since pi's components each render to lines for a width and a `Container` only stacks them: the left component is rendered at a fixed width and padded to it, the right lines are clipped to what is left, and below a minimum width the two stack instead.
+
+the sample is highlighted by pi's own `highlightCode` through the theme in force, so what the list previews is the colouring a code block in the transcript gets.
+it is highlighted on every frame rather than once, because the theme it is highlighted through is what the cursor is changing.
+pi caches its cli-highlight theme against the identity of the current theme object, and every `restyle` is a new object, so the cache falls out on its own.
+
+a palette outlives the theme it was chosen over, so `theme.ts` puts it back on: `withChosenPalette` wraps whatever theme is being applied, and where `[theme] persist` writes the name through pi's settings, the palette goes on again afterwards, since that path applies the theme bare.
+the choice itself is in rho's own global state (`[syntax] persist`), because pi's settings hold a theme name and have nowhere to record this.
 
 `lib/intro-card.ts` is one playing of the wordmark intro: it picks its mode, wordmark and shimmer direction from `[startup]` at construction and renders as a pure function of elapsed milliseconds.
 `startup.ts` draws one at session start and the picker builds another on every preview, which is how a theme is first seen.
@@ -352,6 +428,10 @@ an in-memory session (no uuid) gets no file and every call is a no-op.
 `lib/widget-spinner.ts` the animated widget both out-of-turn model calls wait behind (`/audit`'s review, the goal loop's judge).
 `ctx.modelRegistry` exposes `complete()` and not `stream()`, so neither call can show tokens as they generate, and `setWorkingMessage`/`setWorkingIndicator` are documented as belonging to an active agent turn, which neither a command handler nor a settled session is.
 with no UI (print or json mode) the work runs and nothing is drawn.
+
+`lib/working-status.ts` where the working indicator is drawn, and the one place that knows it.
+`embedWorkingStatus` is per editor instance and the editor is built in interactive-mode's constructor, so an extension cannot set it at construction and be sure it loaded first; interactive-mode calls `setWorkingStatusIndicator` on the default editor before every `isWorkingStatusEditor` check, so patching that method decides the placement whatever the load order was.
+the flag is declared `readonly` and the indicator `private`, so the runtime shape is named in this file and the casts stay in it.
 
 `lib/settings-store.ts` shared helper (`ensureGlobalSetting`) for the idempotent nested global-settings writes.
 it lives in a subdirectory because extension auto-discovery loads top-level `*.ts` only.

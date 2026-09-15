@@ -19,11 +19,10 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { addressName, parseAddress, sshTarget } from './lib/remote/address';
 import { browse } from './lib/picker';
 import { controlPath } from './lib/remote/agent-tag';
@@ -32,7 +31,14 @@ import { completeLastWord, lastWord } from './lib/complete-words';
 import { troubleWith } from './lib/remote/advice';
 import { agentTrouble, describeAgentTrouble } from './lib/remote/ssh-agent';
 import { branchSlug, parseProjectRequest, repoName, sessionName } from './lib/remote/naming';
+import { publishConnect, readLedger, writeLedger } from './lib/remote/sessions';
+import type { Worktree } from './lib/remote/sessions';
 import { projectPlan } from './lib/remote/project';
+import { entryCount, freePath, rehomed, sessionIdOf } from './lib/remote/transfer';
+import { askInterfaceToLeave } from './lib/remote/leave';
+import { modelFlags } from './lib/remote/pi-args';
+import type { ModelChoice } from './lib/remote/pi-args';
+import { config } from './lib/config';
 
 /** What /remote can be asked to do. A word is matched against these. */
 const VERBS = ['create', 'connect', 'project', 'list', 'manage', 'stop'] as const;
@@ -333,85 +339,62 @@ export default function (pi: ExtensionAPI) {
      * session state, because it is a fact about the machine, not about a
      * conversation.
      */
-    const ledger = join(homedir(), REMOTE_DIR, 'sessions.json');
-
-    /** A project's worktree, so connecting to it starts the session in the right directory. */
-    interface Worktree {
-        readonly host: string;
-        readonly path: string;
-    }
-
-    interface Ledger {
-        readonly sessions: Record<string, string>;
-        readonly projects: Record<string, Worktree>;
-    }
-
-    const readLedger = (): { hosts: Map<string, string>; worktrees: Map<string, Worktree> } => {
-        const empty = { hosts: new Map<string, string>(), worktrees: new Map<string, Worktree>() };
-        try {
-            const parsed: unknown = JSON.parse(readFileSync(ledger, 'utf8'));
-            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return empty;
-            const held = parsed as Partial<Ledger> & Record<string, unknown>;
-            // The first version of this file was a flat name-to-host map; it is
-            // read as the sessions it was.
-            const sessions = held.sessions ?? (held as Record<string, unknown>);
-            const hosts = new Map(
-                Object.entries(sessions).filter((pair): pair is [string, string] => typeof pair[1] === 'string'),
-            );
-            const worktrees = new Map(
-                Object.entries(held.projects ?? {}).filter(
-                    (pair): pair is [string, Worktree] =>
-                        typeof pair[1] === 'object' &&
-                        pair[1] !== null &&
-                        typeof (pair[1] as Worktree).host === 'string' &&
-                        typeof (pair[1] as Worktree).path === 'string',
-                ),
-            );
-            return { hosts, worktrees };
-        } catch {
-            return empty;
-        }
-    };
-
+    // The file itself is read and written by lib/remote/sessions.ts, which is
+    // also where `pi --attach` asks whether a name is on another machine.
     const { hosts, worktrees } = readLedger();
 
-    const rememberHosts = (): void => {
-        try {
-            mkdirSync(dirname(ledger), { recursive: true });
-            const held: Ledger = {
-                sessions: Object.fromEntries(hosts),
-                projects: Object.fromEntries(worktrees),
-            };
-            writeFileSync(ledger, `${JSON.stringify(held, null, 2)}\n`);
-        } catch {
-            // A ledger that cannot be written costs the next process a host
-            // name on the command line; it is not worth failing a session for.
-        }
+    const rememberHosts = (): void => writeLedger({ hosts, worktrees });
+
+    /**
+     * The model this interface is using, given to a session it starts.
+     *
+     * A session on another machine is `pi --mode rpc` with no model named, so
+     * pi picked its own default there: every remote session opened on the
+     * provider's default model whatever this machine was set to, and the only
+     * way back was /model on the far side. The session inherits the model of
+     * the interface that created it, the way a local session inherits the
+     * settings of the machine it starts on.
+     */
+    let modelHere: ModelChoice | null = null;
+    const noteModel = (model: { provider?: string; id?: string } | undefined, thinking: string): void => {
+        if (model?.provider === undefined || model.id === undefined) return;
+        modelHere = { provider: model.provider, id: model.id, thinking };
+    };
+    pi.on('session_start', async (_event, ctx: ExtensionContext) => {
+        noteModel(ctx.model, ctx.thinkingLevel ?? 'off');
+    });
+    pi.on('model_select', async (event, ctx: ExtensionContext) => {
+        noteModel(event.model, ctx.thinkingLevel ?? 'off');
+    });
+    pi.on('thinking_level_select', async (event, ctx: ExtensionContext) => {
+        noteModel(ctx.model, event.level ?? 'off');
+    });
+
+    /** The tail of the serve command that names the model, if there is one to name. */
+    const modelArgs = (): string => {
+        const flags = modelFlags(modelHere);
+        return flags.length === 0 ? '' : ` -- ${flags.join(' ')}`;
     };
 
     /**
-     * What this laptop is logged in with: the api keys in the environment, and
-     * auth.json for an oauth login, which no environment variable can carry.
+     * What this laptop is logged in with, and nothing else.
+     *
+     * auth.json is the whole of it: an OAuth login, and any key stored through
+     * /login. Keys from this shell's environment used to travel too, which is
+     * a second identity the session can pick over the first -- the far side
+     * then bills an api account while the laptop bills the subscription, and
+     * the two disagree about what the session costs. The session is this
+     * login, somewhere else.
      */
     const lend = (): Uint8Array => {
-        const carried: Record<string, string> = {};
-        for (const key of [
-            'ANTHROPIC_API_KEY',
-            'OPENAI_API_KEY',
-            'GEMINI_API_KEY',
-            'GOOGLE_API_KEY',
-            'OPENROUTER_API_KEY',
-        ]) {
-            const value = process.env[key];
-            if (value !== undefined && value !== '') carried[key] = value;
-        }
         let auth: string | null = null;
         try {
             auth = readFileSync(join(process.env.HOME ?? '', '.pi', 'agent', 'auth.json'), 'utf8');
         } catch {
-            // nothing stored here; the variables above may still carry a key
+            // nothing stored here, and nothing else to send: a session with no
+            // credentials says so on its first turn rather than guessing.
         }
-        return new TextEncoder().encode(JSON.stringify({ env: carried, auth }));
+        return new TextEncoder().encode(JSON.stringify({ auth }));
     };
 
     const project = async (
@@ -480,7 +463,7 @@ export default function (pi: ExtensionAPI) {
             `R=$(command -v bun || command -v node || true)`,
             `[ -n "$R" ] || exit 42`,
             `[ -s ${file} ] || exit 43`,
-            `${withPi}exec "$R" ${file} serve ${name} ${address_.path ?? '$HOME'}`,
+            `${withPi}exec "$R" ${file} serve ${name} ${address_.path ?? '$HOME'}${modelArgs()}`,
         ].join('; ');
         /**
          * The name the client attaches by.
@@ -513,36 +496,12 @@ export default function (pi: ExtensionAPI) {
 
         const runner = await place(host, say);
         say(`starting ${name} on ${host}`);
-        // The agent on the host needs a model key, and the host should not own
-        // one: a key in a file there outlives the session and ends up in
-        // backups. These go down the ssh channel into the session's
-        // environment and die with it.
-        const carried: Record<string, string> = {};
-        for (const key of [
-            'ANTHROPIC_API_KEY',
-            'OPENAI_API_KEY',
-            'GEMINI_API_KEY',
-            'GOOGLE_API_KEY',
-            'OPENROUTER_API_KEY',
-        ]) {
-            const value = process.env[key];
-            if (value !== undefined && value !== '') carried[key] = value;
-        }
-
-        // Whatever this laptop is logged in with, including OAuth, which no
-        // environment variable can carry: pi keeps it in auth.json, and the
-        // session on the far side gets a config directory of its own holding
-        // a copy for as long as it runs.
-        let auth: string | null = null;
-        try {
-            auth = readFileSync(join(process.env.HOME ?? '', '.pi', 'agent', 'auth.json'), 'utf8');
-        } catch {
-            // nothing stored here; the environment variables above may still carry a key
-        }
-
+        // The host owns no credentials of its own: what this laptop is logged
+        // in with goes down the ssh channel into a config directory the
+        // session holds for as long as it runs, and dies with it.
         const started = await run(
             'ssh',
-            [...SSH_FLAGS, host, `${withPi}${runner} serve ${name} ${address_.path ?? '$HOME'}`],
+            [...SSH_FLAGS, host, `${withPi}${runner} serve ${name} ${address_.path ?? '$HOME'}${modelArgs()}`],
             lend(),
         );
         await run('ssh', [...SSH_FLAGS, host, linkRunner]);
@@ -563,21 +522,133 @@ export default function (pi: ExtensionAPI) {
      * installed. This uses the stable link, and installs only when the far
      * side says it is not there.
      */
-    const ask = async (host: string, verb: string, say: (note: string) => void): Promise<string> => {
+    const ask = async (
+        host: string,
+        verb: string,
+        say: (note: string) => void,
+        input?: Uint8Array,
+    ): Promise<string> => {
         const quick = [
             `R=$(command -v bun || command -v node || true)`,
             `[ -n "$R" ] || exit 42`,
             `[ -s ${RUNNER_LINK} ] || exit 43`,
             `exec "$R" ${RUNNER_LINK} ${verb}`,
         ].join('; ');
-        const attempt = await run('ssh', [...SSH_FLAGS, host, quick]);
+        const attempt = await run('ssh', [...SSH_FLAGS, host, quick], input);
         if (attempt.code === 0) return attempt.out.trim();
         if (attempt.code !== 42 && attempt.code !== 43) {
             throw new Error(attempt.err.trim() || attempt.out.trim() || `${verb} failed on ${host}`);
         }
         const runner = await place(host, say);
-        const again = await run('ssh', [...SSH_FLAGS, host, `${runner} ${verb}`]);
+        const again = await run('ssh', [...SSH_FLAGS, host, `${runner} ${verb}`], input);
         return again.out.trim();
+    };
+
+    /** What a session on a host says about itself, for deciding what to carry. */
+    interface Far {
+        readonly cwd: string;
+        readonly sessionId: string | null;
+        readonly messages: number;
+        readonly streaming: boolean;
+    }
+
+    const farSide = async (host: string, session: string): Promise<Far | null> => {
+        const said = await ask(host, `state ${session}`, () => {}).catch(() => '');
+        try {
+            const parsed: unknown = JSON.parse(said.trim());
+            if (typeof parsed !== 'object' || parsed === null) return null;
+            const held = parsed as Partial<Far>;
+            return {
+                cwd: typeof held.cwd === 'string' ? held.cwd : '',
+                sessionId: typeof held.sessionId === 'string' ? held.sessionId : null,
+                messages: typeof held.messages === 'number' ? held.messages : 0,
+                streaming: held.streaming === true,
+            };
+        } catch {
+            // An older runner there has no `state` verb, so nothing is carried.
+            return null;
+        }
+    };
+
+    /**
+     * Whether this conversation and that session's are the same one.
+     *
+     * A session file carries its identity through every copy, so two files with
+     * one id are one conversation held on two machines. That is the whole test:
+     * a session that shares this id is continued rather than handed anything,
+     * and a session with a conversation of its own is left alone.
+     */
+    type Joined = 'joined' | 'sent' | 'apart';
+
+    /**
+     * Opening a carried conversation here, and speaking inside it.
+     *
+     * The second argument is not a convenience. Replacing the session
+     * invalidates the context that asked for the replacement, so anything said
+     * afterwards has to be said with the context of the session that arrived;
+     * pi refuses the stale one by name and prints the refusal as an extension
+     * error under the resumed transcript.
+     */
+    type Adopt = (path: string, then: (ctx: ExtensionCommandContext) => void) => Promise<void>;
+
+    /**
+     * Hand a fresh session on another machine this conversation.
+     *
+     * Only when it is fresh: an agent with a history of its own is somebody's
+     * work, and pushing another conversation over it would bury it. Only when
+     * it is idle, for the same reason attaching does not restart a session
+     * mid-turn.
+     */
+    const carryUp = async (ctx: ExtensionContext, host: string, session: string): Promise<Joined> => {
+        const file = ctx.sessionManager.getSessionFile();
+        if (file === undefined || !existsSync(file)) return 'apart';
+        const far = await farSide(host, session);
+        if (far === null) return 'apart';
+
+        const here = readFileSync(file, 'utf8');
+        const mine = sessionIdOf(here);
+        if (far.sessionId !== null && mine !== null && far.sessionId === mine) return 'joined';
+        if (far.messages > 0 || far.streaming) return 'apart';
+        if (entryCount(here) === 0) return 'apart';
+
+        await ask(host, `adopt ${session}`, () => {}, new TextEncoder().encode(here));
+        return 'sent';
+    };
+
+    /**
+     * Bring back what was said over there, so this machine holds it too.
+     *
+     * The file that comes back is this conversation with more in it: same id,
+     * the entries from before the connection and the entries from during it.
+     * It is rehomed to this machine's directory, written beside this session's
+     * own files, and opened here, which is what makes leaving the far side and
+     * carrying on locally one continuous conversation rather than two.
+     */
+    const carryBack = async (
+        ctx: ExtensionContext,
+        host: string,
+        session: string,
+        adopt: Adopt,
+    ): Promise<number | null> => {
+        const carried = await ask(host, `carry ${session}`, () => {});
+        if (carried.trim() === '') return null;
+        const dir = ctx.sessionManager.getSessionDir();
+        if (dir === '') return null;
+        mkdirSync(dir, { recursive: true });
+        const path = freePath(dir, `${sessionIdOf(carried) ?? session}.jsonl`);
+        writeFileSync(path, rehomed(`${carried}\n`, ctx.cwd));
+        const entries = entryCount(carried);
+        // Everything this interface has to say about the conversation is said
+        // by the interface the conversation arrives in. The ctx that opened it
+        // is stale from the moment the session is replaced, and pi reports a
+        // use of it as an extension error under the resumed transcript.
+        await adopt(path, (fresh) =>
+            fresh.ui.notify(
+                `back from ${session} on ${host}, carrying ${entries} entries. it is still running there.`,
+                'info',
+            ),
+        );
+        return entries;
     };
 
 
@@ -913,7 +984,38 @@ export default function (pi: ExtensionAPI) {
      * on its hint line, and then returned the chosen name to nobody. A label
      * for an action nothing performs is worse than no label.
      */
-    const connectTo = async (ctx: ExtensionContext, session: string, given?: string): Promise<void> => {
+    /**
+     * This interface opening a session file, as connect needs it.
+     *
+     * `switchSession` belongs to a command handler and to nothing else, so the
+     * capability travels as a function rather than being reached for from
+     * inside connect.
+     */
+    const adoptHere =
+        (ctx: ExtensionCommandContext): Adopt =>
+        async (path, then) => {
+            const { cancelled } = await ctx.switchSession(path, {
+                withSession: async (fresh) => {
+                    then(fresh);
+                },
+            });
+            if (cancelled) throw new Error('this interface would not open the conversation');
+        };
+
+    const connectTo = async (
+        ctx: ExtensionContext,
+        session: string,
+        given?: string,
+        /**
+         * How this interface opens a session file, when there is a way.
+         *
+         * Only a command handler can replace the session it is running in, so
+         * the caller supplies it: typed commands can, and a tool call cannot,
+         * which is why the tool asks for the command rather than doing the work
+         * itself.
+         */
+        adopt?: Adopt,
+    ): Promise<void> => {
                 const address_ = given ?? hosts.get(session) ?? worktrees.get(session)?.host;
                 if (address_ === undefined) {
                     ctx.ui.notify(`I do not know which host ${session} is on. /remote connect ${session} user@host`, 'error');
@@ -1008,6 +1110,30 @@ export default function (pi: ExtensionAPI) {
                     }
                 }
 
+                /**
+                 * One conversation, on whichever machine is being used.
+                 *
+                 * A fresh session there is given what has been said here before
+                 * the terminal is handed over, so the agent on the other side
+                 * starts knowing everything this one knows rather than being
+                 * told again.
+                 */
+                let joined: Joined = 'apart';
+                if (config.remote.carryContext && adopt !== undefined) {
+                    const bar = progress(ctx);
+                    bar.say(`carrying this conversation to ${session}`);
+                    try {
+                        joined = await carryUp(ctx, host, session);
+                    } catch (error) {
+                        ctx.ui.notify(
+                            `${session} did not take this conversation (${(error as Error).message}), so it starts with its own`,
+                            'info',
+                        );
+                    } finally {
+                        bar.done();
+                    }
+                }
+
                 const client = join(rhoRoot(), 'bin', 'rho-remote');
                 // Why the client left, since the screen it wrote on is redrawn
                 // by this interface the moment it returns.
@@ -1041,6 +1167,23 @@ export default function (pi: ExtensionAPI) {
                     { overlay: true },
                 );
                 if (left === 0) {
+                    // What was said there comes back, so this machine can carry
+                    // on from it: the session on the far side keeps running and
+                    // holds the same conversation, and connecting again
+                    // continues rather than duplicates it.
+                    if (joined !== 'apart' && adopt !== undefined) {
+                        try {
+                            // Says so itself, in the session it opens: this one
+                            // is gone by the time it returns.
+                            if ((await carryBack(ctx, host, session, adopt)) !== null) return;
+                        } catch (error) {
+                            ctx.ui.notify(
+                                `${session} kept the conversation (${(error as Error).message}): connect again to continue it there`,
+                                'error',
+                            );
+                            return;
+                        }
+                    }
                     ctx.ui.notify(`back from ${session} on ${host}, which is still running`, 'info');
                     return;
                 }
@@ -1051,6 +1194,17 @@ export default function (pi: ExtensionAPI) {
                 );
                 return;
     };
+
+    /**
+     * `pi --attach <name>` for a session that is not on this machine.
+     *
+     * The flag is registered by detach.ts, which knows what a socket here
+     * means and nothing about hosts. Connecting is more than a spawn -- the
+     * runner is brought up to date, a stopped session is started again, and a
+     * host running an older rho is restarted on this one's -- so the flag asks
+     * for this rather than reimplementing it.
+     */
+    publishConnect((ctx, session, host) => connectTo(ctx, session, host));
 
     pi.registerCommand('remote', {
         description:
@@ -1167,6 +1321,12 @@ export default function (pi: ExtensionAPI) {
                 }
                 // Stopping is not forgetting, so the two are different keys and
                 // only one of them destroys anything.
+                // The keys here are only as new as the runner that answers
+                // them, so it is brought up to date before the list is drawn.
+                await ensureRunner(host, () => {}).catch(() => {
+                    // An update that cannot be made leaves the runner that is
+                    // already there, which still lists and still stops.
+                });
                 let sessions = await held(host);
                 const refresh = async () => {
                     sessions = await held(host);
@@ -1185,9 +1345,14 @@ export default function (pi: ExtensionAPI) {
                     action: () => ({
                         choose: 'connect',
                         remove: 'stop',
+                        removing: 'stopping',
                         extra: [
-                            { key: 'r', label: 'rename', id: 'rename' },
-                            { key: 'x', label: 'forget (deletes the transcript)', id: 'forget' },
+                            { key: 'r', label: 'rename', id: 'rename', suspends: true },
+                            { key: 'x', label: 'forget (deletes the transcript)', id: 'forget', suspends: true },
+                            // The same destruction as x, without the question.
+                            // Clearing out a host is a run of them, and a
+                            // confirmation per row makes that unusable.
+                            { key: 'ctrl+d', label: 'delete, no question asked', id: 'delete', busy: 'deleting' },
                         ],
                     }),
                     remove: async (name) => {
@@ -1196,6 +1361,21 @@ export default function (pi: ExtensionAPI) {
                         return true;
                     },
                     extra: async (id, name) => {
+                        if (id === 'delete') {
+                            // The runner stops it and waits for it to go before
+                            // it removes anything: a forget sent straight after
+                            // a stop is refused, because the socket still
+                            // answers for a moment after the signal.
+                            await ask(host, `delete ${name}`, () => {}).catch(() => {
+                                // What it says it could not do is said by the
+                                // row, which stays when the session stays.
+                            });
+                            hosts.delete(name);
+                            worktrees.delete(name);
+                            rememberHosts();
+                            await refresh();
+                            return true;
+                        }
                         if (id === 'rename') {
                             const to = await ctx.ui.input(`rename ${name} to`, name);
                             if (to === undefined || to.trim() === '' || to.trim() === name) return true;
@@ -1223,7 +1403,7 @@ export default function (pi: ExtensionAPI) {
                             'this deletes its conversation on that machine. stopping it instead keeps everything.',
                         );
                         if (!sure) return true;
-                        const answer = await ask(host, `forget ${name}`, () => {}).catch(
+                        const answer = await ask(host, `delete ${name}`, () => {}).catch(
                             (trouble: Error) => trouble.message,
                         );
                         ctx.ui.notify(answer, 'info');
@@ -1237,14 +1417,14 @@ export default function (pi: ExtensionAPI) {
                 // What the picker chose: enter means connect, and saying so on
                 // the hint line while dropping the answer is how this came to
                 // look like a picker that does nothing.
-                if (chosen !== null) await connectTo(ctx, chosen);
+                if (chosen !== null) await connectTo(ctx, chosen, undefined, adoptHere(ctx));
                 return;
             }
 
             if (verb === 'connect') {
                 const session = first ?? (await chooseSession(ctx, 'connect'));
                 if (session === null) return;
-                await connectTo(ctx, session, second);
+                await connectTo(ctx, session, second, adoptHere(ctx));
                 return;
             }
 
@@ -1272,8 +1452,11 @@ export default function (pi: ExtensionAPI) {
 
     // Same reason as the environment tool: described by the skill, loaded when
     // something asks for it rather than carried by every session.
-    const OWN = ['remote_session'];
+    const OWN = ['remote_session', 'remote_connect'];
+    /** Set by the message that asked for these tools, read by the hide below. */
+    let asked = false;
     const load = (): void => {
+        asked = true;
         const active = pi.getActiveTools();
         const missing = OWN.filter((name) => !active.includes(name));
         if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
@@ -1284,13 +1467,117 @@ export default function (pi: ExtensionAPI) {
         return { action: 'continue' as const };
     });
 
+    /**
+     * A session that is itself a remote session keeps these tools, always.
+     *
+     * The gate exists so a session that never leaves this machine does not pay
+     * for them in its prompt, and it reads the person's message to decide. That
+     * reading is wrong on the far side twice over: the agent there is a remote
+     * session by construction, and the message that reaches it is often the
+     * carried conversation rather than a request mentioning the word. An agent
+     * that knew about `remote_connect` from the conversation it arrived with
+     * called it and was told the tool does not exist.
+     *
+     * The broker names the session in the environment of the agent it holds, so
+     * the far side can tell what it is without being told.
+     */
+    // The flag rather than load(): a tool is active from the moment it is
+    // registered, the hide below is the only thing that takes it away, and
+    // pi's action methods throw while extensions are still loading.
+    const heldByRunner = (process.env.RHO_SESSION_NAME ?? '') !== '';
+    if (heldByRunner) asked = true;
+
     // Same as environment.ts: a timer fires during extension loading, where
     // action methods throw and take the session with them.
     let hidden = false;
     pi.on('before_agent_start', async () => {
         if (hidden) return;
         hidden = true;
+        // The input handler runs before this one, so on the first message of a
+        // session the order was: the message asks for the tools, they are
+        // loaded, and this takes them away again -- the one turn that asked for
+        // them was the one turn without them, and only the message after it
+        // worked. A message that asked keeps what it asked for.
+        if (asked) return;
         pi.setActiveTools(pi.getActiveTools().filter((name) => !OWN.includes(name)));
+    });
+
+    /**
+     * A connection the agent asked for, made once its turn is over.
+     *
+     * Handing the terminal over in the middle of a tool call would draw another
+     * session's interface over a turn that is still running here, and replacing
+     * this session's conversation underneath a streaming agent is worse: the
+     * file it is appending to would stop being the file it is reading. So the
+     * tool records what was asked for and the command that can do it properly
+     * runs the moment the session is idle, with the interface free and a
+     * command handler's ability to open a different conversation.
+     */
+    let waiting: string | null = null;
+    pi.on('agent_settled', async () => {
+        const line = waiting;
+        if (line === null) return;
+        waiting = null;
+        pi.sendUserMessage(line, { expandPromptTemplates: true });
+    });
+
+    pi.registerTool({
+        name: 'remote_connect',
+        label: 'Connect to remote session',
+        description:
+            'connect puts this terminal in front of a session on another machine, starting it if it is not running; the handover happens as soon as this turn ends. disconnect is the other direction, run from inside a session that somebody is attached to: it sends them back to their own machine. A session that has never been used is given this conversation, and what is said there comes back when the person leaves it, so the two machines hold one thread.',
+        promptSnippet: 'Hand this terminal to a session on another machine, or send it back',
+        promptGuidelines: [
+            'Use remote_connect connect when the work should continue on the other machine with everything said here, rather than as a separate conversation.',
+            'Use remote_connect disconnect when the work here is done and the person should be back on their own machine with it.',
+        ],
+        parameters: Type.Object({
+            action: Type.Union([Type.Literal('connect'), Type.Literal('disconnect')], {
+                description:
+                    'connect: attach this terminal to a session elsewhere. disconnect: from inside a session somebody is attached to, send them back to their own machine',
+            }),
+            name: Type.Optional(Type.String({ description: 'the session to attach to, for connect' })),
+            host: Type.Optional(
+                Type.String({ description: 'user@host, optionally with :/path; needed only for a session this machine has not seen' }),
+            ),
+        }),
+        async execute(_id, params: { action: 'connect' | 'disconnect'; name?: string; host?: string }) {
+            const said = (text: string) => ({ content: [{ type: 'text' as const, text }], details: undefined });
+
+            if (params.action === 'disconnect') {
+                const here = process.env.RHO_SESSION_NAME ?? '';
+                const home = process.env.HOME ?? '';
+                if (here === '' || home === '') {
+                    return said(
+                        'This session is not held by a runner, so nobody is attached to it from another machine: it is already running where the interface is.',
+                    );
+                }
+                try {
+                    await askInterfaceToLeave(here, home);
+                } catch (error) {
+                    return said(`Could not send them back: ${(error as Error).message}`);
+                }
+                return said(
+                    `The interface attached to ${here} is leaving. This session keeps running, and what was said in it goes back with them.`,
+                );
+            }
+
+            if (params.name === undefined) return said('connect needs the name of a session.');
+            if ((process.env.RHO_SESSION_NAME ?? '') !== '') {
+                return said(
+                    'This session has no terminal of its own to hand over: it is drawn by an interface on another machine. Use disconnect to send that interface home, and connect from there.',
+                );
+            }
+            const where = params.host ?? hosts.get(params.name) ?? worktrees.get(params.name)?.host;
+            if (where === undefined) {
+                return said(`I do not know which host ${params.name} is on: give one as user@host.`);
+            }
+            waiting = `/remote connect ${params.name} ${where}`;
+            return said(
+                `${params.name} on ${where} takes this terminal when this turn ends. ` +
+                    'Stop here rather than starting other work: the next thing that happens is the handover.',
+            );
+        },
     });
 
     pi.registerTool({

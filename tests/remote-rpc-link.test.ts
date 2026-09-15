@@ -101,5 +101,9 @@ describe('the link to a daemon', () => {
         await new Promise((resolve) => setTimeout(resolve, 200));
         expect(afterFirst).toBeGreaterThan(0);
         expect(count).toBe(afterFirst);
-    });
+        // Two prompts, two daemon starts and a deliberate wait: alone this is
+        // under a second, but run beside fifty other files it has exceeded the
+        // default five-second budget on a loaded machine, which reads as a
+        // broken listener rather than a busy one.
+    }, 20_000);
 });

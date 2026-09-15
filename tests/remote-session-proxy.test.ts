@@ -41,6 +41,7 @@ const build = () => {
     } as unknown as Record<string, unknown>;
 
     const refusals: string[] = [];
+    let refreshes = 0;
     const state = {
         forkPoints: [{ entryId: 'e1', text: 'earlier' }],
         refuse: (what: string) => refusals.push(what),
@@ -52,6 +53,12 @@ const build = () => {
         },
         messages: [{ role: 'assistant', content: [] }],
         subscribe: () => () => {},
+        // Choosing a model reads the far side's state back, because pi tells
+        // extensions about a model change with an extension event that does
+        // not cross the link.
+        refresh: async () => {
+            refreshes += 1;
+        },
     } as unknown as RemoteState;
 
     const note =
@@ -95,7 +102,7 @@ const build = () => {
     } as unknown as RpcLink;
 
     const session = remoteSession(local, link, state, actions) as Record<string, unknown>;
-    return { session, asked, localCalls, refusals, stopped: () => stopped };
+    return { session, asked, localCalls, refreshed: () => refreshes, refusals, stopped: () => stopped };
 };
 
 describe('which machine answers', () => {
@@ -119,6 +126,20 @@ describe('which machine answers', () => {
         const { session } = build();
         expect(session.isBashRunning).toBe(false);
         expect(session.isRetrying).toBe(false);
+    });
+
+    test('choosing a model reads the far side back, so the corner names the new one', async () => {
+        const { session, refreshed } = build();
+        const act = session as unknown as Record<string, (...args: unknown[]) => unknown>;
+        act.setModel?.({ provider: 'anthropic', id: 'claude' });
+        await act.cycleModel?.();
+        act.setThinkingLevel?.('high');
+        await act.cycleThinkingLevel?.();
+        // Four changes, four reads: pi announces a model change to extensions
+        // with an event that does not cross the link, so the snapshot the
+        // footer draws from is stale until it is asked again.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(refreshed()).toBe(4);
     });
 
     test('every action goes to the machine the session is on', async () => {

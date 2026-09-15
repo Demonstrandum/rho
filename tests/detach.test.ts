@@ -45,9 +45,9 @@ describe('the commands it registers', () => {
         return { commands, shortcuts };
     };
 
-    test('detach and attach are both offered, and ctrl+d is bound', () => {
+    test('detach, attach and restart are offered, and ctrl+d is bound', () => {
         const { commands, shortcuts } = load();
-        expect(Object.keys(commands).sort()).toEqual(['attach', 'detach']);
+        expect(Object.keys(commands).sort()).toEqual(['attach', 'detach', 'restart']);
         expect(Object.keys(shortcuts)).toEqual(['ctrl+d']);
     });
 

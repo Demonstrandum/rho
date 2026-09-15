@@ -964,26 +964,48 @@ export default function (pi: ExtensionAPI) {
                 });
 
                 /**
-                 * Which rho the running agent is, against which one this is.
+                 * A session picks up this machine's rho, the way a local one
+                 * picks up an edit when it starts.
                  *
                  * rho is sent to a host when a session is created, and the
-                 * agent keeps the copy it started with: a session made last
-                 * week is last week's rho, whatever this machine has learnt
-                 * since. That is invisible from the interface, and it looks
-                 * like a feature that does not work -- a tool added since, such
-                 * as the origin machine, simply is not there.
+                 * agent keeps the copy it started with, so a session made
+                 * before a change is running the code from before it and the
+                 * change looks broken rather than absent -- the origin machine
+                 * was simply not there, with nothing on screen to say why.
                  *
-                 * Restarting is not this command's business (it would end a
-                 * turn somebody may be watching), so it is said rather than
-                 * done, with the two words that fix it.
+                 * The build is keyed by its own content, so a tag the host has
+                 * never seen is a rho no running session can be using. The
+                 * session is stopped and started again, which is not
+                 * forgetting: the transcript stays and the agent continues it.
+                 * A session mid-turn is left alone, because ending somebody's
+                 * turn to gain a newer agent is the wrong trade.
                  */
-                const fresh = await rhoIsNew(host).catch(() => false);
-                if (fresh) {
-                    ctx.ui.notify(
-                        `${session} is running an older rho than this machine has, so anything added since is missing from it. ` +
-                            `/remote stop ${session}, then connect again: the conversation is kept.`,
-                        'info',
-                    );
+                if (await rhoIsNew(host).catch(() => false)) {
+                    const busy = await ask(host, `busy ${session}`, () => {})
+                        .then((said) => said.trim() === 'busy')
+                        .catch(() => false);
+                    if (busy) {
+                        ctx.ui.notify(
+                            `${session} is mid-turn, so it keeps the rho it started with. Stopping it when the turn ends picks up this machine's.`,
+                            'info',
+                        );
+                    } else {
+                        const bar = progress(ctx);
+                        bar.say(`bringing ${session} up to date with this machine's rho`);
+                        try {
+                            await ask(host, `stop ${session}`, () => {});
+                            const tree = worktrees.get(session);
+                            const where = tree === undefined ? address_ : `${tree.host}:${tree.path}`;
+                            await create(session, where, (text) => bar.say(text));
+                        } catch (error) {
+                            ctx.ui.notify(
+                                `${session} could not be brought up to date (${(error as Error).message}), so it is the rho it started with`,
+                                'info',
+                            );
+                        } finally {
+                            bar.done();
+                        }
+                    }
                 }
 
                 const client = join(rhoRoot(), 'bin', 'rho-remote');

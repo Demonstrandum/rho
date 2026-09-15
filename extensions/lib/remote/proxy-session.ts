@@ -80,6 +80,16 @@ export class RemoteState {
             case 'agent_end':
                 this.snapshot.isStreaming = false;
                 break;
+            case 'model_select':
+                // The far side chose a model, and the footer reads this. Its
+                // own /model picker changed it there and the corner here went
+                // on naming the one before, because nothing carried the choice
+                // back: the state was only ever read at attach.
+                {
+                    const chosen = (event as { model?: { id?: string; provider?: string } }).model;
+                    if (chosen !== undefined) this.snapshot.model = { ...this.snapshot.model, ...chosen };
+                }
+                break;
             case 'compaction_start':
                 this.snapshot.isCompacting = true;
                 break;

@@ -75,7 +75,16 @@ const build = () => {
         abort: note('abort'),
         abortBash: note('abort_bash'),
         abortRetry: note('abort_retry'),
-        bash: note('bash'),
+        // The daemon answers a bash command with pi's own response envelope.
+        bash: (command: unknown) => {
+            asked.push(`bash(${String(command)})`);
+            return Promise.resolve({
+                type: 'response',
+                command: 'bash',
+                success: true,
+                data: { output: '/far/side\n', exitCode: 0, cancelled: false, truncated: false },
+            });
+        },
         compact: note('compact'),
         clearQueue: note('clear_queue'),
         cycleModel: note('cycle_model'),
@@ -126,6 +135,20 @@ describe('which machine answers', () => {
         const { session } = build();
         expect(session.isBashRunning).toBe(false);
         expect(session.isRetrying).toBe(false);
+    });
+
+    test('a shell escape gives back the far side s result, and its output', async () => {
+        const { session } = build();
+        const act = session as unknown as Record<string, (...args: unknown[]) => unknown>;
+        const chunks: string[] = [];
+        const result = (await act.executeBash?.('pwd', (chunk: string) => chunks.push(chunk))) as {
+            exitCode?: number;
+        };
+        // The interface reads exitCode off this to complete the block, and
+        // draws the body from the chunks: returning undefined failed every
+        // shell escape after the command had already run.
+        expect(result.exitCode).toBe(0);
+        expect(chunks.join('')).toBe('/far/side\n');
     });
 
     test('choosing a model reads the far side back, so the corner names the new one', async () => {

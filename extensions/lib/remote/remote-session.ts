@@ -116,7 +116,33 @@ export function remoteSession(
         abortBash: () => actions.abortBash().then(() => undefined),
         abortRetry: () => actions.abortRetry().then(() => undefined),
         abortCompaction: () => actions.abort().then(() => undefined),
-        executeBash: (command: string) => actions.bash(command).then(() => undefined),
+        /**
+         * The far side's result, not a discarded one.
+         *
+         * `!pwd` in the editor is this, and the interface reads exitCode off
+         * what comes back to decide how to draw it: returning undefined made
+         * every shell escape fail with "Bash command failed: undefined is not
+         * an object", after the command had already run on the far side.
+         *
+         * The daemon answers with pi's own response envelope, so the payload
+         * is unwrapped here rather than at every call site.
+         */
+        executeBash: async (command: string, onChunk?: (chunk: string) => void) => {
+            const answer = await actions.bash(command);
+            const result = ((answer as { data?: unknown })?.data ?? answer) as {
+                output?: string;
+                exitCode?: number;
+            };
+            // The interface draws a shell escape from the chunks it is handed
+            // and completes it from the result, so a result alone leaves the
+            // command on screen with no output under it. The far side's rpc
+            // bash answers once, when the command is done, so this arrives in
+            // one piece rather than as it is produced.
+            if (onChunk !== undefined && typeof result.output === 'string' && result.output !== '') {
+                onChunk(result.output);
+            }
+            return result;
+        },
         cycleModel: () => actions.cycleModel().then(() => state.refresh()),
         cycleThinkingLevel: () => actions.cycleThinkingLevel().then(() => state.refresh()),
         setSessionName: (name: string) => void actions.setSessionName(name),

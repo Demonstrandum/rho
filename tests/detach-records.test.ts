@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { keptHere, recall, remember } from '../extensions/detach';
+import { keptHere, recall, remember } from '../extensions/lib/remote/sessions';
 
 /**
  * The record is what makes a name outlive its socket: without it a session

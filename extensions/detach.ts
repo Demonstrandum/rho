@@ -8,24 +8,27 @@
 //
 // The conversation moves by its file rather than by copying anything: pi
 // writes every turn to a session file as it goes, so the daemon starts on that
-// same file and continues it. What cannot move is a turn in flight, so
-// detaching waits for the agent to settle.
+// same file and continues it. What cannot move is a turn in flight: the model
+// call and any command it started belong to this process, and the daemon
+// resumes the transcript rather than continuing them. So detaching mid-turn
+// asks first, and ends the turn here, where ending it is written down.
 //
 // /exit still ends the session. ctrl+d detaches, ctrl+c twice ends, which is
 // the distinction tmux was standing in for.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { completeLastWord } from './lib/complete-words';
 import { fileURLToPath } from 'node:url';
 import { rhoRoot } from './lib/rho-root';
+import { attachable, offers, publishedConnect, remember, runningHere } from './lib/remote/sessions';
+import type { Kept } from './lib/remote/sessions';
 
-/** Where the runner and its sockets live on this machine. */
+/** Where the runner lives on this machine. */
 const RUNNER = join(homedir(), '.cache', 'rho', 'remote', 'session-runner.js');
-const SOCKETS = join(homedir(), '.cache', 'rho', 'sessions');
 
 /** A name a socket file can be called, and a person can type again. */
 export function nameFor(given: string | undefined, fallback: string): string {
@@ -39,55 +42,6 @@ export function suggestedName(cwd: string, when: Date): string {
     const clock = `${String(when.getHours()).padStart(2, '0')}${String(when.getMinutes()).padStart(2, '0')}`;
     return nameFor(`${place}-${clock}`, 'session');
 }
-
-/** What a name on this machine refers to, when nothing is running under it. */
-export interface Kept {
-    readonly file: string;
-    readonly cwd: string;
-}
-
-const keptFile = (name: string): string =>
-    join(homedir(), '.local', 'state', 'rho', 'sessions', name, 'local.json');
-
-export function remember(name: string, kept: Kept): void {
-    mkdirSync(dirname(keptFile(name)), { recursive: true });
-    writeFileSync(keptFile(name), `${JSON.stringify({ version: 1, ...kept }, null, 2)}\n`);
-}
-
-export function recall(name: string): Kept | null {
-    try {
-        const parsed: unknown = JSON.parse(readFileSync(keptFile(name), 'utf8'));
-        if (typeof parsed !== 'object' || parsed === null) return null;
-        const held = parsed as Partial<Kept>;
-        if (typeof held.file !== 'string' || typeof held.cwd !== 'string') return null;
-        return { file: held.file, cwd: held.cwd };
-    } catch {
-        return null;
-    }
-}
-
-/** Names this machine has a transcript for, running or not. */
-export const keptHere = (): string[] => {
-    try {
-        return readdirSync(join(homedir(), '.local', 'state', 'rho', 'sessions')).filter(
-            (name) => recall(name) !== null,
-        );
-    } catch {
-        return [];
-    }
-};
-
-/** The sessions this machine is holding, named as they can be typed. */
-export const runningHere = (): string[] => {
-    try {
-        return readdirSync(SOCKETS)
-            .filter((file) => file.endsWith('.sock'))
-            .map((file) => file.slice(0, -'.sock'.length));
-    } catch {
-        // No directory means none have ever run here, which is not a fault.
-        return [];
-    }
-};
 
 /**
  * What pi says on the way out, plus the way back to a session that is still up.
@@ -106,13 +60,15 @@ export function resumeLines(ctx: ExtensionContext, name: string | undefined): re
     return lines;
 }
 
-/** The shell command that draws a session that is still running. */
+/**
+ * The shell command that draws a session that is still running.
+ *
+ * pi's own command line, because rho registers the flag on it. Printing a path
+ * to a script inside a checkout, to be run under bun, is neither short nor
+ * something anybody would type twice.
+ */
 export function attachCommand(name: string): string {
-    // The url, not import.meta.dir: rhoRoot takes a file and starts from its
-    // directory, so handing it a directory starts a level too high and the
-    // walk misses the checkout entirely.
-    const client = join(rhoRoot(fileURLToPath(import.meta.url)), 'bin', 'rho-remote');
-    return existsSync(client) ? `bun ${client} local ${name}` : `/attach ${name}`;
+    return `pi --attach ${name}`;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -162,10 +118,84 @@ export default function (pi: ExtensionAPI) {
         timer.unref?.();
     };
 
+    /**
+     * A turn in flight cannot be handed over.
+     *
+     * The model call and any command it started belong to this process, and
+     * what moves is the session file: the daemon resumes the transcript and
+     * does not continue the turn that was running when the file was handed to
+     * it. Detaching mid-turn used to do that silently, and the session came
+     * back with the tool call in the transcript, no output under it, and
+     * nothing running -- the streaming had not stopped so much as been left
+     * behind.
+     *
+     * So the turn is ended here, where ending it is recorded: pi writes what
+     * the assistant had written and marks the unfinished tool call aborted, so
+     * the transcript the daemon picks up is a whole one.
+     */
+    const settled = async (ctx: ExtensionContext, within: number): Promise<boolean> => {
+        const until = Date.now() + within;
+        while (!ctx.isIdle() && Date.now() < until) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        return ctx.isIdle();
+    };
+
+    /** What to do about a turn that is running when somebody asks to leave. */
+    const WAIT = 'let the turn finish, then detach';
+    const STOP = 'stop the turn and detach now';
+    const STAY = 'stay';
+
+    /**
+     * Whether the handover may go ahead now.
+     *
+     * `later` means the turn is being left to finish and the handover will run
+     * itself when it does: a command streaming its output keeps streaming, the
+     * transcript ends up whole, and reattaching finds the whole of it. Stopping
+     * is offered because a turn can be long and leaving can be urgent, and it
+     * is not the default, since what it costs is the work in flight.
+     */
+    const readyForHandover = async (
+        ctx: ExtensionContext,
+        what: string,
+    ): Promise<'now' | 'later' | 'no'> => {
+        if (ctx.isIdle()) return 'now';
+        const choice = await ctx.ui.select(
+            `A turn is running. It cannot be carried over: the model call and any command it started belong to this process, and ${what} resumes from the transcript.`,
+            [WAIT, STOP, STAY],
+        );
+        if (choice === WAIT) return 'later';
+        if (choice !== STOP) return 'no';
+        ctx.abort();
+        if (await settled(ctx, 10_000)) return 'now';
+        ctx.ui.notify('The turn has not stopped yet. Try again in a moment.', 'error');
+        return 'no';
+    };
+
+    /**
+     * A detach asked for during a turn, waiting for the turn to end.
+     *
+     * Null when nothing is waiting; a string (possibly empty) is the name the
+     * session was to be given. Typing again cancels it, because a person who
+     * has started talking to the session is not leaving it.
+     */
+    let waitingToLeave: string | null | undefined;
+
     const detach = async (ctx: ExtensionContext, asked: string | undefined): Promise<void> => {
         if (attached()) {
             (globalThis as { __rho_detaching?: boolean }).__rho_detaching = true;
             leave(ctx, 1_000, resumeLines(ctx, process.env.RHO_SESSION_NAME));
+            return;
+        }
+
+        // Before the file is looked for, because during the first turn there
+        // is not one yet: pi writes the session file as that turn happens, so
+        // ctrl+d landed in the empty-session branch and took the turn with it.
+        const when = await readyForHandover(ctx, 'the session left running here');
+        if (when === 'no') return;
+        if (when === 'later') {
+            waitingToLeave = asked ?? null;
+            ctx.ui.notify('Detaching when this turn finishes. Anything typed before then cancels it.', 'info');
             return;
         }
 
@@ -218,7 +248,7 @@ export default function (pi: ExtensionAPI) {
                 '--session',
                 file,
             ],
-            { encoding: 'utf8', input: JSON.stringify({ auth: null, env: {} }) },
+            { encoding: 'utf8', input: JSON.stringify({ auth: null }) },
         );
         if (started.status !== 0) {
             ctx.ui.notify(`Could not keep it running: ${(started.stderr ?? '').trim().split('\n').pop() ?? ''}`, 'error');
@@ -237,6 +267,66 @@ export default function (pi: ExtensionAPI) {
             ...resumeLines(ctx, name),
         ]);
     };
+
+    /**
+     * `pi --attach <name>` and `pi --attach` for the picker.
+     *
+     * A flag rather than a path to a script: the way back to a session you
+     * left running should be as short as the way into a new one, and
+     * `bun /somewhere/rho/bin/rho-remote local <name>` is neither short nor
+     * something anybody would guess. pi hands extensions its own command line,
+     * so this is a flag on the command people already type.
+     *
+     * The interface for a detached session is a separate process, as it is for
+     * a session on another machine, and this pi stands aside for it at
+     * session_start and exits with it.
+     */
+    pi.registerFlag('attach', {
+        description: 'attach to a session by name, here or on another machine (empty to be told which)',
+        type: 'string',
+    });
+
+    pi.on('session_start', async (_event, ctx: ExtensionContext) => {
+        const asked = pi.getFlag('attach');
+        if (typeof asked !== 'string') return;
+        // The bare flag when there is one candidate is that candidate: being
+        // asked to choose between one thing is being asked for nothing.
+        const only = offers();
+        const name = asked === '' ? (only.length === 1 ? only[0]!.name : undefined) : asked;
+        if (name === undefined) {
+            ctx.ui.notify(
+                only.length === 0
+                    ? 'Nothing has been left running. /detach leaves this session running here, /remote create starts one elsewhere.'
+                    : `Which one: ${only.map((offer) => `${offer.name} (${offer.detail})`).join(', ')}`,
+                'info',
+            );
+            return;
+        }
+        await attachTo(ctx, name);
+        ctx.shutdown();
+        setTimeout(() => process.exit(0), 200);
+    });
+
+    /**
+     * The turn asked to finish first has finished.
+     *
+     * agent_settled is pi's own "nothing more is coming": no retry, no
+     * compaction, no queued follow-up. Detaching here hands over a transcript
+     * with the whole turn in it, output of a long command included, which is
+     * what reattaching then shows.
+     */
+    pi.on('agent_settled', async (_event, ctx: ExtensionContext) => {
+        if (waitingToLeave === undefined) return;
+        const name = waitingToLeave;
+        waitingToLeave = undefined;
+        await detach(ctx, name ?? undefined);
+    });
+
+    // Talking to the session is staying with it.
+    pi.on('input', async () => {
+        waitingToLeave = undefined;
+        return undefined;
+    });
 
     pi.registerCommand('detach', {
         description: 'leave this session running without an interface: /detach [name]',
@@ -272,6 +362,12 @@ export default function (pi: ExtensionAPI) {
                 );
                 return;
             }
+            const ready = await readyForHandover(ctx, 'the session that starts in its place');
+            if (ready === 'later') {
+                ctx.ui.notify('A restart cannot wait in the background: ask again when the turn has finished.', 'info');
+                return;
+            }
+            if (ready === 'no') return;
             await ctx.ui.custom<void>(
                 (tui, _theme, _keys, done) => {
                     queueMicrotask(() => {
@@ -291,52 +387,38 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
-    pi.registerCommand('attach', {
-        description: 'come back to a session left running here: /attach <name>',
-        getArgumentCompletions: (text) =>
-            completeLastWord(
-                text,
-                [...new Set([...runningHere(), ...keptHere()])].map((name) => ({ value: name })),
-            ),
-        handler: async (args: string, ctx: ExtensionContext) => {
-            const name = args.trim();
-            const running = runningHere();
-            if (name === '') {
-                const idle = keptHere().filter((held) => !running.includes(held));
+    /**
+     * Draw a session that is running here, starting it again if it stopped.
+     *
+     * The half of attaching that needs no network. What it is given has already
+     * been resolved to this machine, so a name it cannot find is a session that
+     * was running a moment ago and has since gone.
+     */
+    const drawHere = async (ctx: ExtensionContext, name: string, kept: Kept | null): Promise<void> => {
+        if (!runningHere().includes(name)) {
+            // Stopping is not forgetting here either: a session retired for
+            // being idle is started again on its own transcript.
+            if (kept === null) {
+                ctx.ui.notify(`${name} is not running here any more, and left no transcript to start again.`, 'error');
+                return;
+            }
+            const started = spawnSync('bun', [RUNNER, 'serve', name, kept.cwd, '--', '--session', kept.file], {
+                encoding: 'utf8',
+                input: JSON.stringify({ auth: null }),
+            });
+            if (started.status !== 0) {
                 ctx.ui.notify(
-                    running.length === 0 && idle.length === 0
-                        ? 'Nothing is running here. /detach leaves the current session running.'
-                        : `Running here: ${running.join(', ') || 'none'}${idle.length === 0 ? '' : `. Stopped: ${idle.join(', ')}`}`,
-                    'info',
+                    `Could not start ${name} again: ${(started.stderr ?? '').trim().split('\n').pop() ?? ''}`,
+                    'error',
                 );
                 return;
             }
-            if (!running.includes(name)) {
-                // Stopping is not forgetting here either: a session retired
-                // for being idle is started again on its own transcript.
-                const kept = recall(name);
-                if (kept === null) {
-                    const known = [...new Set([...running, ...keptHere()])];
-                    ctx.ui.notify(`No session called ${name} here. Known: ${known.join(', ') || 'none'}`, 'error');
-                    return;
-                }
-                const started = spawnSync(
-                    'bun',
-                    [RUNNER, 'serve', name, kept.cwd, '--', '--session', kept.file],
-                    { encoding: 'utf8', input: JSON.stringify({ auth: null, env: {} }) },
-                );
-                if (started.status !== 0) {
-                    ctx.ui.notify(
-                        `Could not start ${name} again: ${(started.stderr ?? '').trim().split('\n').pop() ?? ''}`,
-                        'error',
-                    );
-                    return;
-                }
-            }
-            // The interface for it is a separate process, as it is for a
-            // session on another machine, and this one stands aside for it.
-            const client = join(rhoRoot(fileURLToPath(import.meta.url)), 'bin', 'rho-remote');
-            await ctx.ui.custom<void>((tui, _theme, _keys, done) => {
+        }
+        // The interface for it is a separate process, as it is for a session
+        // on another machine, and this one stands aside for it.
+        const client = join(rhoRoot(fileURLToPath(import.meta.url)), 'bin', 'rho-remote');
+        await ctx.ui.custom<void>(
+            (tui, _theme, _keys, done) => {
                 queueMicrotask(() => {
                     tui.stop();
                     try {
@@ -348,7 +430,69 @@ export default function (pi: ExtensionAPI) {
                     }
                 });
                 return { render: () => [], handleInput: () => {} } as never;
-            }, { overlay: true });
+            },
+            { overlay: true },
+        );
+    };
+
+    /**
+     * Come back to a session by name, wherever it is.
+     *
+     * Shared by /attach and by `pi --attach`, so the two cannot drift, and it
+     * dispatches rather than deciding: a name behind a socket here is drawn
+     * here, and a name in the remote ledger is handed to /remote's own connect,
+     * which knows what a session on another machine needs before it can be
+     * drawn -- the runner updated, the session started if it has stopped, and
+     * the host's rho compared with this machine's.
+     */
+    const attachTo = async (ctx: ExtensionContext, name: string): Promise<void> => {
+        const found = attachable(name);
+        if (found === null) {
+            const known = offers();
+            ctx.ui.notify(
+                `No session called ${name}. Known: ${known.map((offer) => offer.name).join(', ') || 'none'}`,
+                'error',
+            );
+            return;
+        }
+        if (found.where === 'local') {
+            await drawHere(ctx, found.name, found.kept);
+            return;
+        }
+        const connect = publishedConnect();
+        if (connect === null) {
+            // /remote is what carries the connect, and it is part of rho, so
+            // this is a session started with extensions turned off rather than
+            // a state to recover from.
+            ctx.ui.notify(
+                `${name} is on ${found.host}, and the /remote extension that connects to it is not loaded here.`,
+                'error',
+            );
+            return;
+        }
+        await connect(ctx, found.name, found.host);
+    };
+
+    pi.registerCommand('attach', {
+        description: 'come back to a session left running, here or on another machine: /attach <name>',
+        getArgumentCompletions: (text) =>
+            completeLastWord(
+                text,
+                offers().map((offer) => ({ value: offer.name, description: offer.detail })),
+            ),
+        handler: async (args: string, ctx: ExtensionContext) => {
+            const name = args.trim();
+            if (name === '') {
+                const known = offers();
+                ctx.ui.notify(
+                    known.length === 0
+                        ? 'Nothing has been left running. /detach leaves this session running here.'
+                        : known.map((offer) => `${offer.name} (${offer.detail})`).join(', '),
+                    'info',
+                );
+                return;
+            }
+            await attachTo(ctx, name);
         },
     });
 

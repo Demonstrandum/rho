@@ -20,15 +20,29 @@ interface Section {
     readonly current?: string;
 }
 
+/**
+ * subcommands collapse into the command they belong to: `/btw:clear` and
+ * `/btw:inject` are listed as `/btw`, once.
+ *
+ * the suffix is only dropped when the bare name is itself a command from the
+ * same source, so a namespaced name with no parent (`context-mode:ctx-search`)
+ * is left whole rather than turned into a command that does not exist.
+ */
 export function sortedNames(
     commands: readonly SlashCommandInfo[],
     source: SlashCommandInfo['source'],
     prefix: string,
 ): string[] {
-    return commands
-        .filter((command) => command.source === source)
-        .map((command) => `${prefix}${command.name}`)
-        .sort((a, b) => a.localeCompare(b));
+    const names = commands.filter((command) => command.source === source).map((command) => command.name);
+    const parents = new Set(names);
+    const listed = new Set(
+        names.map((name) => {
+            const colon = name.indexOf(':');
+            const base = colon === -1 ? name : name.slice(0, colon);
+            return parents.has(base) ? base : name;
+        }),
+    );
+    return [...listed].map((name) => `${prefix}${name}`).sort((a, b) => a.localeCompare(b));
 }
 
 export interface HeaderOptions {

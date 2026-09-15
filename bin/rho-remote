@@ -29,6 +29,7 @@ import { remoteSession } from '../extensions/lib/remote/remote-session';
 import { TurnGate } from '../extensions/lib/remote/turn-gate';
 import { controlPath } from '../extensions/lib/remote/agent-tag';
 import { troubleWith } from '../extensions/lib/remote/advice';
+import { forwardArgs, listenAsOrigin, originListenPath, originSocketFor } from '../extensions/lib/remote/origin';
 
 const [target, name, ...rest] = process.argv.slice(2);
 // A message given on the command line is submitted on attach, which is how a
@@ -72,10 +73,10 @@ const RUNNER = process.env.RHO_REMOTE_RUNNER ?? `bun ${RUNNER_FILE}`;
  */
 const here = target === 'local';
 const runnerHere = `${process.env.HOME ?? ''}/${RUNNER_FILE}`;
-const speak = (verb: string): { command: string; args: string[] } =>
+const speak = (verb: string, extra: readonly string[] = []): { command: string; args: string[] } =>
     here
         ? { command: 'bun', args: [runnerHere, ...verb.split(' ')] }
-        : { command: process.env.RHO_REMOTE_SSH ?? 'ssh', args: [...SSH_FLAGS, target, `${RUNNER} ${verb}`] };
+        : { command: process.env.RHO_REMOTE_SSH ?? 'ssh', args: [...SSH_FLAGS, ...extra, target, `${RUNNER} ${verb}`] };
 
 /** One ssh call, answered when it is answered. */
 const ask = (command: string, input?: string): Promise<{ code: number; out: string; err: string }> =>
@@ -154,10 +155,32 @@ const local = (async () => {
     return services;
 })();
 
+/**
+ * This machine, offered to the session for as long as this interface lasts.
+ *
+ * Some work can only happen where the person is: symba reads the Tailscale
+ * identity of whoever opens the connection, so an allocation made from a
+ * server is refused however good its credentials are. The executor listens
+ * here and the socket is forwarded to the far side, where `on: "origin"`
+ * reaches it.
+ *
+ * A session held on this machine already is its own origin, so it needs no
+ * forward.
+ */
+const originListening = here ? null : listenAsOrigin(originListenPath(process.env.HOME ?? '/tmp', name));
+// The far side's home, asked once over the connection that is already open,
+// because ssh needs an absolute path for its end of the forward and a home
+// directory is /home/x on one machine and /Users/x on another.
+const remoteHome = originListening === null ? '' : (await ask('echo $HOME')).out.trim();
+const originForward =
+    originListening === null || remoteHome === ''
+        ? []
+        : forwardArgs(originSocketFor(remoteHome, name), originListenPath(process.env.HOME ?? '/tmp', name));
+
 // RHO_REMOTE_SSH replaces the transport, so the client can be driven against a
 // stand-in daemon on this machine. Nothing else changes: same framing, same
 // proxy, same interface.
-const attaching = speak(`attach ${name}`);
+const attaching = speak(`attach ${name}`, originForward);
 
 const link = new RpcLink(attaching.command, attaching.args, {
     // No deadline on the link: a model call takes as long as it takes, and the
@@ -360,6 +383,7 @@ if (!detaching) {
 // link holds an ssh child that keeps the event loop alive on its own: leaving
 // it means the interface says goodbye and the shell never comes back.
 link.stop();
+originListening?.close();
 if (farewell !== null) {
     process.stderr.write(`${farewell}\n`);
     process.exit(1);

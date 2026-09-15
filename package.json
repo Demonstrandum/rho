@@ -11,7 +11,8 @@
       "node_modules/pi-web-access/index.ts",
       "node_modules/@ayulab/pi-rewind/index.js",
       "node_modules/context-mode/build/adapters/pi/extension.js",
-      "node_modules/token-rate-pi/token-rate.ts"
+      "node_modules/token-rate-pi/token-rate.ts",
+      "node_modules/pi-btw/extensions/btw.ts"
     ],
     "skills": [
       "./skills",
@@ -45,6 +46,7 @@
     "@ayulab/pi-rewind": "^0.4.6",
     "context-mode": "^1.0.169",
     "env-paths": "^4.0.0",
+    "pi-btw": "^0.4.1",
     "pi-web-access": "^0.13.0",
     "smol-toml": "^1.8.0",
     "token-rate-pi": "^1.0.5"

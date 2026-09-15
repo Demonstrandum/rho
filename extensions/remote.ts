@@ -32,6 +32,7 @@ import { completeLastWord, lastWord } from './lib/complete-words';
 import { troubleWith } from './lib/remote/advice';
 import { branchSlug, parseProjectRequest, repoName, sessionName } from './lib/remote/naming';
 import { projectPlan } from './lib/remote/project';
+import { posix, shQuote } from './lib/remote/shell';
 
 /** What /remote can be asked to do. A word is matched against these. */
 const VERBS = ['create', 'connect', 'project', 'list', 'manage', 'stop'] as const;
@@ -195,7 +196,11 @@ async function bundle(): Promise<{ path: string; hash: string }> {
 export const RUNNER_LINK = `${REMOTE_DIR}/session-runner.js`;
 
 async function place(host: string, say: (note: string) => void): Promise<string> {
-    const probe = await run('ssh', [...SSH_FLAGS, host, 'command -v bun || command -v node || true; echo ---; uname -m']);
+    const probe = await run('ssh', [
+        ...SSH_FLAGS,
+        host,
+        posix('command -v bun || command -v node || true; echo ---; uname -m'),
+    ]);
     if (probe.code !== 0) throw new Error(`cannot reach ${host}: ${probe.err.trim() || 'ssh failed'}`);
     const [runtimeLine = '', machineLine = ''] = probe.out.split('---');
     const runtime = runtimeLine.trim().split('\n')[0]?.trim();
@@ -205,12 +210,12 @@ async function place(host: string, say: (note: string) => void): Promise<string>
         say(`compiling the session runner for ${host}, which has no runtime`);
         const { path, hash } = await compile(arm ? 'linux-arm64' : 'linux-x64');
         const remote = `${REMOTE_DIR}/session-${hash}`;
-        const present = await run('ssh', [...SSH_FLAGS, host, `test -x ${remote} && echo yes || echo no`]);
+        const present = await run('ssh', [...SSH_FLAGS, host, posix(`test -x ${remote} && echo yes || echo no`)]);
         if (present.out.trim() !== 'yes') {
             say(`copying the session runner to ${host}`);
             const sent = await run(
                 'ssh',
-                [host, `mkdir -p ${REMOTE_DIR} && cat > ${remote}.part && chmod +x ${remote}.part && mv ${remote}.part ${remote}`],
+                [host, posix(`mkdir -p ${REMOTE_DIR} && cat > ${remote}.part && chmod +x ${remote}.part && mv ${remote}.part ${remote}`)],
                 readFileSync(path),
             );
             if (sent.code !== 0) throw new Error(`could not copy the session runner: ${sent.err.trim()}`);
@@ -220,12 +225,12 @@ async function place(host: string, say: (note: string) => void): Promise<string>
 
     const { path, hash } = await bundle();
     const remote = `${REMOTE_DIR}/session-${hash}.js`;
-    const present = await run('ssh', [...SSH_FLAGS, host, `test -s ${remote} && echo yes || echo no`]);
+    const present = await run('ssh', [...SSH_FLAGS, host, posix(`test -s ${remote} && echo yes || echo no`)]);
     if (present.out.trim() !== 'yes') {
         say(`copying the session runner to ${host}`);
         const sent = await run(
             'ssh',
-            [host, `mkdir -p ${REMOTE_DIR} && cat > ${remote}.part && mv ${remote}.part ${remote}`],
+            [host, posix(`mkdir -p ${REMOTE_DIR} && cat > ${remote}.part && mv ${remote}.part ${remote}`)],
             readFileSync(path),
         );
         if (sent.code !== 0) throw new Error(`could not copy the session runner: ${sent.err.trim()}`);
@@ -439,7 +444,7 @@ export default function (pi: ExtensionAPI) {
             'LogLevel=ERROR',
             '-A',
             host,
-            script,
+            posix(script),
         ]);
         if (done.code !== 0) throw new Error(done.err.trim() || done.out.trim() || 'the clone failed');
         const path = done.out.trim().split('\n').pop() ?? worktree;
@@ -484,7 +489,7 @@ export default function (pi: ExtensionAPI) {
          */
         const linkRunner = `ln -sf $(basename ${file}) ${RUNNER_LINK}`;
 
-        const attempt = await run('ssh', [...SSH_FLAGS, host, quick], lend());
+        const attempt = await run('ssh', [...SSH_FLAGS, host, posix(quick)], lend());
         // A session that is already up is the outcome asked for, not an error:
         // create is how you get one, and one exists.
         if (/already running/.test(attempt.out) || /already running/.test(attempt.err)) {
@@ -495,7 +500,7 @@ export default function (pi: ExtensionAPI) {
         if (attempt.code === 0) {
             hosts.set(name, host);
             rememberHosts();
-            await run('ssh', [...SSH_FLAGS, host, linkRunner]);
+            await run('ssh', [...SSH_FLAGS, host, posix(linkRunner)]);
             return attempt.out.trim();
         }
         if (attempt.code !== 42 && attempt.code !== 43) {
@@ -533,10 +538,10 @@ export default function (pi: ExtensionAPI) {
 
         const started = await run(
             'ssh',
-            [...SSH_FLAGS, host, `${withPi}${runner} serve ${name} ${address_.path ?? '$HOME'}`],
+            [...SSH_FLAGS, host, posix(`${withPi}${runner} serve ${name} ${address_.path ?? '$HOME'}`)],
             lend(),
         );
-        await run('ssh', [...SSH_FLAGS, host, linkRunner]);
+        await run('ssh', [...SSH_FLAGS, host, posix(linkRunner)]);
         if (started.code !== 0) {
             throw new Error(started.err.trim() || started.out.trim() || `could not start ${name}`);
         }
@@ -561,13 +566,13 @@ export default function (pi: ExtensionAPI) {
             `[ -s ${RUNNER_LINK} ] || exit 43`,
             `exec "$R" ${RUNNER_LINK} ${verb}`,
         ].join('; ');
-        const attempt = await run('ssh', [...SSH_FLAGS, host, quick]);
+        const attempt = await run('ssh', [...SSH_FLAGS, host, posix(quick)]);
         if (attempt.code === 0) return attempt.out.trim();
         if (attempt.code !== 42 && attempt.code !== 43) {
             throw new Error(attempt.err.trim() || attempt.out.trim() || `${verb} failed on ${host}`);
         }
         const runner = await place(host, say);
-        const again = await run('ssh', [...SSH_FLAGS, host, `${runner} ${verb}`]);
+        const again = await run('ssh', [...SSH_FLAGS, host, posix(`${runner} ${verb}`)]);
         return again.out.trim();
     };
 
@@ -696,7 +701,7 @@ export default function (pi: ExtensionAPI) {
         const { path, hash } = await bundle();
         const file = `${REMOTE_DIR}/session-${hash}.js`;
         const quick = [`[ -s ${file} ] || exit 43`, `ln -sf session-${hash}.js ${RUNNER_LINK}`].join('; ');
-        const attempt = await run('ssh', [...SSH_FLAGS, host, quick]);
+        const attempt = await run('ssh', [...SSH_FLAGS, host, posix(quick)]);
         if (attempt.code === 0) return;
         if (attempt.code !== 43) throw new Error(attempt.err.trim() || `could not reach ${host}`);
 
@@ -706,7 +711,9 @@ export default function (pi: ExtensionAPI) {
             [
                 ...SSH_FLAGS,
                 host,
-                `mkdir -p ${REMOTE_DIR} && cat > ${file}.part && mv ${file}.part ${file} && ln -sf session-${hash}.js ${RUNNER_LINK}`,
+                posix(
+                    `mkdir -p ${REMOTE_DIR} && cat > ${file}.part && mv ${file}.part ${file} && ln -sf session-${hash}.js ${RUNNER_LINK}`,
+                ),
             ],
             readFileSync(path),
         );
@@ -729,7 +736,7 @@ export default function (pi: ExtensionAPI) {
      * once, kept here, and sent.
      */
     const ensureBun = async (host: string, say: (note: string) => void): Promise<string> => {
-        const asked = await run('ssh', [...SSH_FLAGS, host, 'bun --version 2>/dev/null; echo ---; uname -m']);
+        const asked = await run('ssh', [...SSH_FLAGS, host, posix('bun --version 2>/dev/null; echo ---; uname -m')]);
         const [version = '', machine = ''] = asked.out.split('---');
         if (version.trim() !== '' && newEnough(version)) return 'bun';
 
@@ -737,7 +744,7 @@ export default function (pi: ExtensionAPI) {
         const arm = machine.trim().startsWith('aarch64') || machine.trim().startsWith('arm64');
         const build = arm ? 'bun-linux-aarch64' : 'bun-linux-x64';
         const remote = `${BUN_DIR}/${mine}/bun`;
-        const present = await run('ssh', [...SSH_FLAGS, host, `test -x ${remote} && echo yes || echo no`]);
+        const present = await run('ssh', [...SSH_FLAGS, host, posix(`test -x ${remote} && echo yes || echo no`)]);
         if (present.out.trim() === 'yes') return `$HOME/${remote}`;
 
         const zip = join(CACHE, `${build}-${mine}.zip`);
@@ -754,9 +761,11 @@ export default function (pi: ExtensionAPI) {
             [
                 ...SSH_FLAGS,
                 host,
-                `mkdir -p $HOME/${BUN_DIR}/${mine} && cat > /tmp/bun-${mine}.zip && ` +
-                    `cd $HOME/${BUN_DIR}/${mine} && unzip -oq /tmp/bun-${mine}.zip && ` +
-                    `mv ${build}/bun bun && chmod +x bun && rm -rf ${build} /tmp/bun-${mine}.zip`,
+                posix(
+                    `mkdir -p $HOME/${BUN_DIR}/${mine} && cat > /tmp/bun-${mine}.zip && ` +
+                        `cd $HOME/${BUN_DIR}/${mine} && unzip -oq /tmp/bun-${mine}.zip && ` +
+                        `mv ${build}/bun bun && chmod +x bun && rm -rf ${build} /tmp/bun-${mine}.zip`,
+                ),
             ],
             readFileSync(zip),
         );
@@ -775,7 +784,7 @@ export default function (pi: ExtensionAPI) {
         // not enough for node. The package manager already knows how to put
         // exactly this version somewhere.
         const check = `[ -s ${cli} ] && echo yes || echo no`;
-        const present = await run('ssh', [...SSH_FLAGS, host, check]);
+        const present = await run('ssh', [...SSH_FLAGS, host, posix(check)]);
         if (present.out.trim() === 'yes') return cli;
 
         say(`installing pi ${version} on ${host}`);
@@ -787,7 +796,7 @@ export default function (pi: ExtensionAPI) {
             `case "$I" in *bun) "$I" add @earendil-works/pi-coding-agent@${version} ;;`,
             `                *) "$I" install --no-fund --no-audit @earendil-works/pi-coding-agent@${version} ;; esac`,
         ].join('; ');
-        const made = await run('ssh', [...SSH_FLAGS, host, install]);
+        const made = await run('ssh', [...SSH_FLAGS, host, posix(install)]);
         if (made.code !== 0) throw new Error(`could not install pi ${version} on ${host}: ${made.err.trim()}`);
         return cli;
     };
@@ -825,12 +834,12 @@ export default function (pi: ExtensionAPI) {
         }
         const tag = digest.digest('hex').slice(0, 12);
         const remote = `${RHO_DIR}/${tag}`;
-        const present = await run('ssh', [...SSH_FLAGS, host, `test -d ${remote}/extensions && echo yes || echo no`]);
+        const present = await run('ssh', [...SSH_FLAGS, host, posix(`test -d ${remote}/extensions && echo yes || echo no`)]);
         // The link is remade either way: it points at the pi this session runs,
         // and that pi's directory is where the bundles' externals resolve from.
         const link = `ln -sfn ${piRoot.replace(/\/dist\/bundle\/cli\.js$/, '')}/../.. ${remote}/node_modules`;
         if (present.out.trim() === 'yes') {
-            await run('ssh', [...SSH_FLAGS, host, link]);
+            await run('ssh', [...SSH_FLAGS, host, posix(link)]);
             return `$HOME/${remote}`;
         }
 
@@ -838,8 +847,12 @@ export default function (pi: ExtensionAPI) {
         const sent = await run('sh', [
             '-c',
             `tar czf - -C ${JSON.stringify(packed)} . | ssh ${SSH_FLAGS.join(' ')} ${host} ` +
-                `'rm -rf ${remote}.part && mkdir -p ${remote}.part && tar xzf - -C ${remote}.part && ` +
-                `rm -rf ${remote} && mv ${remote}.part ${remote} && ${link}'`,
+                shQuote(
+                    posix(
+                        `rm -rf ${remote}.part && mkdir -p ${remote}.part && tar xzf - -C ${remote}.part && ` +
+                            `rm -rf ${remote} && mv ${remote}.part ${remote} && ${link}`,
+                    ),
+                ),
         ]);
         if (sent.code !== 0) throw new Error(`could not send rho to ${host}: ${sent.err.trim()}`);
         return `$HOME/${remote}`;

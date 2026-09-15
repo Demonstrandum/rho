@@ -169,6 +169,7 @@ export default function (pi: ExtensionAPI) {
         if (current === name) {
             dead = { name, why };
             published[PUBLISHED] = undefined;
+            (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = undefined;
             // A machine that went away is still where this session was working,
             // so a resume offers it rather than forgetting it happened.
             memory?.write({ version: 1, host: environments.get(name)?.host ?? name, name, cwd: null });
@@ -217,6 +218,10 @@ export default function (pi: ExtensionAPI) {
                 facts.push(`shell: ${shell || 'unknown'}`);
                 facts.push(`platform: ${platform || 'unknown'}`);
                 facts.push(`git repo: ${repo.trim() === 'true' ? 'yes' : 'no'}`);
+                // The shell goes with the marker: a command that wants to run a
+                // script where the tools act should not care whether the
+                // machine was attached by a command or by the tool.
+                publishShell();
                 published[PUBLISHED] = {
                     name: environment.name,
                     host: environment.host,
@@ -606,6 +611,7 @@ export default function (pi: ExtensionAPI) {
                     current = null;
                     dead = null;
                     published[PUBLISHED] = undefined;
+                    (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = undefined;
                     remember();
                     await announce(null);
                     return said('Working locally.');
@@ -669,6 +675,7 @@ export default function (pi: ExtensionAPI) {
                 current = null;
                 dead = null;
                 published[PUBLISHED] = undefined;
+                (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = undefined;
                 remember();
                 await announce(null);
                 (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = undefined;
@@ -689,6 +696,7 @@ export default function (pi: ExtensionAPI) {
                     current = null;
                     dead = null;
                     published[PUBLISHED] = undefined;
+                    (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = undefined;
                     remember();
                     await announce(null);
                 }
@@ -738,6 +746,7 @@ export default function (pi: ExtensionAPI) {
                     dead = { name, why: (error as Error).message };
                     current = null;
                     published[PUBLISHED] = undefined;
+                    (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = undefined;
                     remember();
                     ctx.ui.notify(
                         `Could not attach ${name}: ${(error as Error).message}. ` +
@@ -754,6 +763,7 @@ export default function (pi: ExtensionAPI) {
                     current = null;
                     dead = null;
                     published[PUBLISHED] = undefined;
+                    (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = undefined;
                     remember();
                     await announce(null);
                     ctx.ui.notify('Working locally.', 'info');
@@ -788,7 +798,6 @@ export default function (pi: ExtensionAPI) {
                 const name = addressName(parsedRest);
                 try {
                     await attach(name, rest, (note) => ctx.ui.notify(note, 'info'));
-                    publishShell();
                     ctx.ui.notify(`Attached ${name}. Tools now act there; /environment default local comes back.`, 'info');
                 } catch (error) {
                     // Refused, not quietly left here. Asking to work on another
@@ -799,6 +808,7 @@ export default function (pi: ExtensionAPI) {
                     dead = { name, why: (error as Error).message };
                     current = null;
                     published[PUBLISHED] = undefined;
+                    (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = undefined;
                     remember();
                     ctx.ui.notify(
                         `Could not attach ${name}: ${(error as Error).message}. ` +
@@ -915,6 +925,7 @@ export default function (pi: ExtensionAPI) {
         current = null;
         dead = null;
         published[PUBLISHED] = undefined;
+        (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = undefined;
         remember();
         await announce(null);
     });
@@ -924,5 +935,6 @@ export default function (pi: ExtensionAPI) {
         environments.clear();
         current = null;
         published[PUBLISHED] = undefined;
+        (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = undefined;
     });
 }

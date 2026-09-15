@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { currentEnvironment } from './environment';
 import { parseProjectRequest } from './lib/remote/naming';
 import { projectPlan } from './lib/remote/project';
+import { agentTrouble, describeAgentTrouble } from './lib/remote/ssh-agent';
 import { completeLastWord } from './lib/complete-words';
 import { Type } from 'typebox';
 
@@ -62,7 +63,21 @@ async function checkout(
               ? { last: null, said: 'the environment cannot run a script' }
               : await shell(plan.script);
 
-    if (done.last === null) return { ok: false, text: `could not check out ${asked.repo}: ${done.said}` };
+    if (done.last === null) {
+        // git's refusal names the key it was offered, which is none, so it
+        // reads as a GitHub problem. The agent is the usual cause and it is
+        // cheap to check here, where the repository and the machine are both
+        // known.
+        const denied = /permission denied|could not read from remote repository|authentication failed/i.test(done.said);
+        const trouble = denied ? agentTrouble() : null;
+        const because =
+            trouble !== null
+                ? `\n${describeAgentTrouble(trouble, `${asked.repo}${where === null ? '' : ` on ${where.name}`}`)}`
+                : denied && where !== null
+                  ? '\nthis machine has an agent with keys, so the one the far side sees is the forwarded one: reconnect the environment, which forwards it afresh.'
+                  : '';
+        return { ok: false, text: `could not check out ${asked.repo}: ${done.said}${because}` };
+    }
     if (where === null) return { ok: true, text: `${done.last} on this machine` };
     await where.chdir(done.last);
     return { ok: true, text: `${where.name}:${done.last} is the working directory now` };

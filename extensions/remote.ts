@@ -30,6 +30,7 @@ import { controlPath } from './lib/remote/agent-tag';
 import { shorthandFor, takeVerb } from './lib/shorthand';
 import { completeLastWord, lastWord } from './lib/complete-words';
 import { troubleWith } from './lib/remote/advice';
+import { agentTrouble, describeAgentTrouble } from './lib/remote/ssh-agent';
 import { branchSlug, parseProjectRequest, repoName, sessionName } from './lib/remote/naming';
 import { projectPlan } from './lib/remote/project';
 
@@ -423,6 +424,14 @@ export default function (pi: ExtensionAPI) {
         // The layout is one definition, shared with the checkout the agent
         // asks for on whatever machine it is attached to. See lib/remote/project.ts.
         const { script, worktree } = projectPlan(repo, branch, projectName);
+
+        // Asked before the clone rather than discovered as GitHub's refusal:
+        // -A with no agent forwards nothing, and the far side reports a
+        // permission denied that sends people to look at their keys and the
+        // host's authorized_keys, neither of which is the fault.
+        const trouble = agentTrouble();
+        if (trouble !== null) throw new Error(describeAgentTrouble(trouble, `${repoName(repo)} on ${host}`));
+
         say(`cloning ${repoName(repo)} on ${host}`);
 
         // -A forwards the agent for the clone. Without it a private repo needs

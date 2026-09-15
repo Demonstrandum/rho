@@ -49,6 +49,13 @@ export function projectPlan(repo: string, branch: string, projectName?: string):
         // worktree on an existing project is one command.
         `if [ -d ${checkout}/.git ]; then git -C ${checkout} fetch --all --prune;`,
         `else git clone ${JSON.stringify(repo)} ${checkout}; fi`,
+        // The clone holds a branch checked out, and git refuses a worktree for
+        // a branch that is already checked out somewhere: asking for the
+        // repository's default branch failed with "'main' is already used by
+        // worktree at <checkout>", which is the first thing anybody asks for.
+        // Detaching the clone makes it what it is meant to be here, a store of
+        // objects, and leaves every branch free for a worktree.
+        `git -C ${checkout} checkout --quiet --detach`,
         // An existing worktree is reused rather than refused: asking for the
         // same branch twice should land you in it, not error.
         `if [ ! -d ${worktree} ]; then`,

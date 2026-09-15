@@ -6,6 +6,11 @@
 // verbs.txt) is shown when the agent settles. both the maxim and the spinner
 // are re-picked each turn.
 //
+// `[spinner] placement` decides which surface the indicator and the message are
+// drawn on, the input field's top border or the row below it. lib/working-status.ts
+// holds the editor to that choice and tells input-field.ts what it must not
+// paint over.
+//
 // the shimmer sweep, glyphs, and completion line are adapted from
 // pi-claude-shimmer by ouzhenkun (MIT), https://github.com/ouzhenkun/pi-claude-shimmer
 
@@ -17,7 +22,10 @@ import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
 import { themeRgb, blend, ansiFg, RESET, type Rgb } from './lib/utils';
 import { evalTemplates } from './lib/template';
 import { duration as formatDuration } from './lib/text';
+import { installPlacement } from './lib/working-status';
 import { config } from './lib/config';
+
+installPlacement();
 
 
 

@@ -47,6 +47,14 @@ describe('the link to a daemon', () => {
         expect(event.message.content[0]?.text).toBe('a\u2028b');
     });
 
+    test('a refusal is an answer, and it reaches the caller', async () => {
+        // pi answers a command it will not run with success false and the
+        // reason beside it. Treating that as a result settled a promise with
+        // a refusal inside it, which every caller then ignored.
+        const link = open();
+        await expect(link.send({ type: 'decline' })).rejects.toThrow(/no such model/);
+    });
+
     test('a command nobody answers fails by its deadline, and says which command', async () => {
         const link = open({ timeoutMs: 200 });
         await expect(link.send({ type: 'slow' })).rejects.toThrow(/slow went unanswered/);

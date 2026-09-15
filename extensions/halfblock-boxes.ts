@@ -32,8 +32,11 @@ import {
     type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
 import { Box, Container, type Component } from '@earendil-works/pi-tui';
+import { holdsImage, trimBlankEdges } from './lib/box-edges';
 import { config } from './lib/config';
 import { isBlank as isBlankText, OSC } from './lib/text';
+
+export { trimBlankEdges };
 
 // paddingY and bgFn are `private` in Box's declaration, so reaching them needs a
 // cast. naming exactly what is reached keeps it to those two members instead of
@@ -47,34 +50,6 @@ const LOWER_HALF = '\u2584';
 const UPPER_HALF = '\u2580';
 
 const isBlank = isBlankText;
-
-/**
- * an inline image reserves its height as blank lines: after the escape sequence
- * under the kitty protocol, before it under iterm2. the terminal draws the
- * picture over that many rows whatever the transcript does, so dropping the
- * blanks makes the block shorter than the picture and the rows after it are
- * drawn on top. a block holding an image is therefore left alone.
- *
- * pi-tui has this predicate as isImageLine, but does not re-export it through
- * the package index, so the two prefixes are matched here. an iterm2 line also
- * has to be recognised before OSC stripping, which would leave it looking
- * blank.
- */
-const KITTY_PREFIX = '\x1b_G';
-const ITERM2_PREFIX = '\x1b]1337;File=';
-
-function holdsImage(lines: readonly string[]): boolean {
-    return lines.some((line) => line.includes(KITTY_PREFIX) || line.includes(ITERM2_PREFIX));
-}
-
-/** the blank leading and trailing rows removed, unless an image needs them. */
-export function trimBlankEdges(lines: readonly string[]): string[] {
-    if (holdsImage(lines)) return [...lines];
-    const out = [...lines];
-    while (out.length > 0 && isBlank(out[0]!)) out.shift();
-    while (out.length > 0 && isBlank(out[out.length - 1]!)) out.pop();
-    return out;
-}
 
 // an OSC133 zone marker rides on an assistant message's first line, so it has
 // to survive onto the line that replaces a dropped one.

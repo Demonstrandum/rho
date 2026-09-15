@@ -6,7 +6,8 @@ paste what breaks rather than working around it: the interesting failures so far
 ## before anything
 
 nothing.
-`/remote create` lends the session whatever this laptop is logged in with: the api keys in the environment, and the contents of auth.json for an oauth login, which no environment variable can carry.
+`/remote create` lends the session what this laptop is logged in with, which is auth.json and nothing else: an oauth login, and any key stored through `/login`.
+keys from the shell's environment used to travel beside it, giving the session a second identity to pick from, and a far side answering on an api key while the laptop answers on its subscription is two accounts for one conversation.
 the far side gets a config directory of its own, mode 0700, with the rest of the config symlinked in, and pi is pointed at it with PI_CODING_AGENT_DIR.
 nothing is written into the host's own home, so the credentials die with the session.
 
@@ -26,14 +27,12 @@ all of it should happen on dev-box while the session stays on the laptop.
 what is worth checking, in order of how likely it is to be wrong:
 
 - `cd /srv/web` in one command, `pwd` in the next; the directory must persist.
-  this is the thing ssh-per-command cannot do, and the reason an executor
-  exists at all.
+  this is the thing ssh-per-command cannot do, and the reason an executor exists at all.
 - A large output, say `journalctl -n 5000`; you should get a head, a tail and.
   an exact byte count rather than the whole thing.
 - an edit against a file that has the same text twice; it must refuse rather.
   than guess.
-- `/environment list`, then `/environment default local`, then a command: back
-  on the laptop.
+- `/environment list`, then `/environment default local`, then a command: back on the laptop.
 
 ## /remote: the session runs elsewhere
 
@@ -47,7 +46,7 @@ what is worth checking, in order of how likely it is to be wrong:
 what you see is pi, streaming as it always does, reading the events of a session that is somewhere else.
 
 ctrl+d leaves the client and gives the terminal back, with the session still running.
-ctrl+c twice also leaves; `/exit` does not, because the client has no such command and the text goes to the model as a prompt.
+ctrl+c twice also leaves, and `/exit` ends the session: a command is now run on the side that owns it rather than always on the far side.
 `/remote list nix@dev-box` shows what is running there, and `/remote stop mock` ends one.
 
 what to check while you are in there, in order of how likely it is to be wrong:
@@ -58,6 +57,10 @@ what to check while you are in there, in order of how likely it is to be wrong:
 - leave with ctrl+d and connect again: the conversation is drawn as it stands, tool calls and their output included.
 - a turn that goes quiet for fifteen seconds says `waiting on the model, 45s without a reply` and counts until something arrives.
 - `/remote stop mock` from another window while you are attached: the client says which session on which host closed, gives the terminal back, and exits.
+- `/theme` and `/stash` open here, against this terminal; `/rewind` runs on the far side and its checkpoint list is drawn here as a select.
+- `/rewind` in a directory with no checkpoints says "No checkpoints available" rather than nothing at all.
+- detach with ctrl+d while a far-side dialog is open, then connect again: the question is put again rather than left parked.
+- name a model that does not exist there: the refusal is shown rather than swallowed.
 
 measured against dev-box with nothing installed on it beforehand: create 3.0s, list 0.3s, attach 0.4s, abort reaching the far side in 94ms, an answer streamed about 2s after asking.
 eight attach and detach cycles leave no relays behind and settle at 370ms per attach, because the ssh connection is shared.

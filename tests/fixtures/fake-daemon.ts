@@ -37,6 +37,11 @@ process.stdin.on('data', (chunk: Buffer) => {
             case 'slow':
                 // Answered by nobody: the caller's deadline is the test.
                 break;
+            case 'decline':
+                // pi says no the way it says yes: a response, with success
+                // false and the reason beside it.
+                say({ type: 'response', id: command.id, command: 'decline', success: false, error: 'no such model' });
+                break;
             case 'prompt':
                 say({ type: 'response', id: command.id, data: { accepted: true } });
                 if (command.message === 'slow') {
@@ -119,6 +124,29 @@ process.stdin.on('data', (chunk: Buffer) => {
                     say({ type: 'agent_end' });
                     say({ type: 'agent_settled' });
                 }, 25000);
+                break;
+            case 'get_commands':
+                say({
+                    type: 'response',
+                    id: command.id,
+                    data: {
+                        commands: [
+                            { name: 'rewind', source: 'extension' },
+                            { name: 'theme', source: 'extension' },
+                        ],
+                    },
+                });
+                break;
+            case 'get_fork_messages':
+                // Refused, as a session with nothing to fork from would: the
+                // rest of the refresh still has to happen.
+                say({
+                    type: 'response',
+                    id: command.id,
+                    command: 'get_fork_messages',
+                    success: false,
+                    error: 'nothing to fork from',
+                });
                 break;
             case 'die':
                 process.stderr.write('the daemon fell over\n');

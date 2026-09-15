@@ -37,6 +37,7 @@ import { headerLines } from './lib/startup-header';
 import { lastFooter } from './lib/footer-mirror';
 import { previewHold, type PreviewHold } from './lib/preview-hold';
 import { watchAutocompleteFocus } from './lib/autocomplete-focus';
+import { withChosenPalette } from './lib/syntax-palette';
 import { FRAME_MS } from './lib/pi-logo';
 import { sampleSession } from './lib/theme-sample';
 
@@ -109,7 +110,9 @@ export default function (pi: ExtensionAPI) {
             ctx.ui.notify(`no theme named ${name}`, 'error');
             return false;
         }
-        return ctx.ui.setTheme(theme).success;
+        // a chosen syntax palette outlives the theme it was chosen over, so it
+        // goes back on here rather than being lost to the next theme change.
+        return ctx.ui.setTheme(withChosenPalette(theme)).success;
     };
 
     /** what a preview replaced, for as long as the preview is on screen. */
@@ -118,7 +121,9 @@ export default function (pi: ExtensionAPI) {
 
     /** the choice: applied, and saved unless [theme] persist says otherwise. */
     const keep = (ctx: ExtensionContext, name: string, preview: PreviewHold<string>): void => {
-        const applied = config.theme.persist ? ctx.ui.setTheme(name).success : show(ctx, name);
+        // setTheme by name is what writes pi's settings, and it applies the
+        // theme bare, so the palette goes back over it afterwards.
+        const applied = config.theme.persist ? ctx.ui.setTheme(name).success && show(ctx, name) : show(ctx, name);
         if (!applied) {
             ctx.ui.notify(`theme ${name}: not applied`, 'error');
             return;

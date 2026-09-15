@@ -23,8 +23,13 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 export const SGR = /\x1b\[[0-9;]*m/g;
 /** operating system commands: shell integration markers, image protocols. */
 export const OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
-/** every escape sequence, of any kind, that occupies no columns. */
-export const ESCAPE = /\x1b\[[0-9;:?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+/**
+ * every escape sequence, of any kind, that occupies no columns. the third
+ * alternative is APC, which is what pi marks the hardware cursor position
+ * with: counted as text it adds seven columns to every focused editor row.
+ */
+export const ESCAPE =
+    /\x1b\[[0-9;:?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b_[^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
 /** the line as the reader sees it: escapes removed, characters kept. */
 export function plain(text: string): string {

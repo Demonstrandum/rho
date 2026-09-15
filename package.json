@@ -37,6 +37,7 @@
     "unshitty": "bun tools/unshitty.ts",
     "unshitty:head": "bun tools/unshitty.ts --head",
     "init": "bun tools/init-config.ts",
+    "config": "bun tools/init-config.ts ./rho.toml --force",
     "smoke": "bun ci/smoke.ts",
     "smoke:docker": "docker build -f ci/Dockerfile -t rho-smoke . && docker run --rm rho-smoke",
     "link": "pi install -l $(pwd)",

@@ -33,6 +33,7 @@ describe('the commands it registers', () => {
     const load = () => {
         const commands: Record<string, { handler: (args: string, ctx: unknown) => Promise<void> }> = {};
         const shortcuts: Record<string, unknown> = {};
+        const handlers: Record<string, (event: unknown, ctx: unknown) => Promise<unknown>> = {};
         const pi = {
             registerCommand: (name: string, spec: unknown) => {
                 commands[name] = spec as { handler: (args: string, ctx: unknown) => Promise<void> };
@@ -42,10 +43,12 @@ describe('the commands it registers', () => {
             },
             registerFlag: () => {},
             getFlag: () => undefined,
-            on: () => {},
+            on: (event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+                handlers[event] = handler;
+            },
         };
         detach(pi as never);
-        return { commands, shortcuts };
+        return { commands, shortcuts, handlers };
     };
 
     test('detach, attach and restart are offered, and ctrl+d is bound', () => {
@@ -98,6 +101,68 @@ describe('the commands it registers', () => {
         expect(asked[0]).toContain('cannot be carried over');
         // Declined: the turn goes on and this interface stays with it.
         expect(aborted).toBe(false);
+        expect(left).toBe(false);
+    });
+
+    test('a turn left to finish hands over when it has, and not before', async () => {
+        // The turn cannot move, and killing it throws away whatever it was
+        // doing: a command streaming its output loses the rest of that output
+        // and the transcript keeps a tool call with nothing under it. Waiting
+        // costs nothing and leaves the whole turn to reattach to.
+        const { commands, handlers } = load();
+        const said: string[] = [];
+        let idle = false;
+        let left = false;
+        const ctx = {
+            ui: {
+                notify: (message: string) => said.push(message),
+                select: async (_title: string, options: string[]) => options[0],
+                input: async () => 'overnight',
+            },
+            isIdle: () => idle,
+            abort: () => {},
+            sessionManager: {
+                getSessionFile: () => undefined,
+                getCwd: () => '/tmp',
+                getSessionId: () => '01a0-test',
+            },
+            shutdown: () => {
+                left = true;
+            },
+        };
+        await commands.detach!.handler('overnight', ctx);
+        expect(said[0]).toContain('when this turn finishes');
+        expect(left).toBe(false);
+
+        // The turn ends, and the handover runs itself. This session has no
+        // file, so leaving is all there is to do, which is what shutdown is.
+        idle = true;
+        await handlers.agent_settled?.({}, ctx);
+        expect(left).toBe(true);
+    });
+
+    test('talking to the session again cancels a detach that was waiting', async () => {
+        const { commands, handlers } = load();
+        let left = false;
+        const ctx = {
+            ui: {
+                notify: () => {},
+                select: async (_title: string, options: string[]) => options[0],
+            },
+            isIdle: () => false,
+            abort: () => {},
+            sessionManager: {
+                getSessionFile: () => undefined,
+                getCwd: () => '/tmp',
+                getSessionId: () => '01a0-test',
+            },
+            shutdown: () => {
+                left = true;
+            },
+        };
+        await commands.detach!.handler('overnight', ctx);
+        await handlers.input?.({}, ctx);
+        await handlers.agent_settled?.({}, ctx);
         expect(left).toBe(false);
     });
 

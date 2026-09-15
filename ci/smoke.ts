@@ -344,6 +344,10 @@ async function main(): Promise<number> {
             { afterSeconds: 2, text: '/prompt view system\\r' },
             { afterSeconds: 3, text: '\\033' },
             { afterSeconds: 2, text: '/prompt dump\\r' },
+            // the history search: the prompt sent above is in the log, so ctrl+f
+            // opens over something. escape leaves the editor as it was.
+            { afterSeconds: 3, text: '\\006' },
+            { afterSeconds: 3, text: '\\033' },
             // the theme picker: open it, let one frame of the card draw, leave
             // it without choosing.
             { afterSeconds: 3, text: '/theme-picker\\r' },
@@ -362,6 +366,9 @@ async function main(): Promise<number> {
         tail(screen, 60));
     check('the reply rendered', screen.includes(REPLY_SWAPPED), tail(screen, 60));
     check('the theme picker opened', screen.includes('enter keep'), tail(screen, 60));
+    check('the history search opened on ctrl+f',
+        screen.includes('search history') && screen.includes('enter take'),
+        tail(screen, 60));
     // the ordinal depends on how many requests the turn took (one per tool
     // round), so the check is on the viewer's own chrome and the payload keys.
     check('the payload viewer listed the request',

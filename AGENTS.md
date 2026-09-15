@@ -27,12 +27,13 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `goal.ts` `/goal <condition>` keeps the session working until a second model judges the condition met, `[goal]`
   - `stash.ts` `ctrl+s` parks the editor text, `ctrl+r` pops, `/stash` opens the picker, `[stash]`
   - `send-now.ts` `ctrl+enter` cuts into a running turn, `ctrl+shift+enter` sends the newest queued message alone, `[send-now]`
-  - `prompt-history.ts` prompt history that survives a restart, `/history`, `[history]`
+  - `prompt-history.ts` prompt history that survives a restart, `/history`, incremental search on `ctrl+f`, `[history]`
   - `cwd.ts` `/cwd [path]` changes the agent's working directory mid-session, `[cwd]`
   - `quit.ts` `/exit`, and the bare words `quit` / `exit`, end the session, `[quit]`
   - `prompt-inspect.ts` `/prompt` browses the provider payloads and the system prompt, and dumps either to disk.
   - `input-field.ts` styles the input field: half-block edges, background, gradient, `[input]`
-  - `spinner.ts` working indicator and shimmering message, from `assets/spinners.json`, `maxims.txt`, `verbs.txt`
+  - `command-hint.ts` shows the form of the command being typed at the right of the field, fading out as the typed line approaches it, `[hint]`
+  - `spinner.ts` working indicator and shimmering message, from `assets/spinners.json`, `maxims.txt`, `verbs.txt`; `[spinner] placement` puts it on its own row below the input field or in the field's border.
   - `startup.ts` replaces pi's startup block with a compact header.
   - `footer.ts` replaces the footer: custom token arrow glyphs, and spend as what is charged with the api price beside it.
   - `halfblock-boxes.ts` four render patches (half-block padding, tighter tool rows, no idle status), `[render]`
@@ -47,6 +48,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `search.ts` `/search` and a `pi_search` tool over pi's commands and docs, `[search]`
   - `slack.ts` `/slack <app>` puts a Slack DM in front of this session: socket in-session, read mark, typing status, `[slack]`
   - `context.ts` `/context` context-window readout.
+  - `syntax.ts` `/syntax [name]` sets the colours code is drawn in, over any theme; `/syntax none` restores the theme's own, `[syntax]`
   - `theme.ts` `/theme [name]` previews each theme as the completion menu passes over it; `/theme-picker` picks one against a sample session, `[theme]`
   - `web.ts` `/web` runs the pi-web UI as a background service.
   - `rho.ts` `/rho config` shows and writes the live `rho.toml`
@@ -65,9 +67,12 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `prose-style.md` `p` rules, for the `prose` register: British spelling with the `-ise`/`-ize` split stated by etymology, the diaeresis, exact numbers in digits and inexact ones spelled out, collective plurals, and close punctuation with the comma outside the closing quote.
   - `vocabulary.md` sub-template for the word/pattern swap list (`{{WORDS}}`, `{{PATTERNS}}`)
 - `docs/extensions.md` why each extension is built the way it is; read it before changing one.
+- `extensions/assets/syntax.json` syntax palettes for `/syntax`, keyed by name (`origin`, `colors` by role).
 - `extensions/assets/spinners.json` spinner definitions keyed by name (`category`, `interval`, `frames`); enabled categories live in `spinner.ts` (`chinese` by default).
 - `extensions/assets/maxims.txt` working messages, one per line, `;` comments, picked at random each turn.
 - `extensions/assets/verbs.txt` completion verbs, one per line, `;` comments, picked at random for the settle line (`完 <verb> for <duration>`)
+- `rho.toml` generated output, never hand-edited: the schema in `extensions/lib/config.ts` printed with its docs.
+  change the schema, then run `bun run config`; `tests/config.test.ts` fails while the two disagree.
 - `package.json` the `pi` manifest declaring resource paths.
 - bundled third-party packages (in `dependencies` + `bundledDependencies`, referenced via `node_modules/...` in the `pi` manifest): `pi-web-access`, `@ayulab/pi-rewind`, `context-mode`, `token-rate-pi` (shows average output tokens/sec in the footer status line).
   they install and load automatically with rho.
@@ -80,6 +85,7 @@ one line each; the detail is in `docs/extensions.md`.
 - `ci/smoke.ts` (`bun run smoke`) end-to-end check in a temporary tree: no api key, no network, nothing written outside it.
 - `ci/Dockerfile` (`bun run smoke:docker`) node 24 slim plus bun, rho installed as a user package so the install path is covered.
 - `.github/workflows/ci.yml` `checks` (typecheck + `bun test`) and `smoke`, on push, pull request, dispatch, and daily.
+- `tools/init-config.ts` (`bun run config`, `bun run init`) writes `rho.toml` from the schema; the repo copy is regenerated, never edited.
 - `tools/version-gate.mjs`, `tools/preflight.ts` (`bun run doctor`), `tools/pi-location.ts` install-time checks and pi discovery.
 - `tools/bun-shebang.ts` (`bun run bun-shebang`) points pi's launcher at bun; runs from `postinstall`, since `pi update` restores the node shebang.
 - `tools/prompt-explorer.ts` (`bun run prompt`, `prompt:cli`, `prompt:preview`, `prompt:plain`) shows the assembled prompt.
@@ -98,6 +104,8 @@ see `system/README.md` for the injection order.
 ## working here
 
 - `bun install` then `bun run typecheck`.
+- never edit `rho.toml`.
+  it is generated from `extensions/lib/config.ts` by `bun run config`, which is what to run after adding or changing a field.
 - `/reload` in a session picks up changes without a restart.
 - after editing any markdown here, run `bun tools/reflow.ts --write <files>`.
 - when documenting a change, put it in the file's header comment or `docs/extensions.md`, not here.

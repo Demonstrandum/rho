@@ -2,20 +2,20 @@
   "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
   "name": "plan9-dark",
   "vars": {
-    "darkYellowBg": "#26260D",
-    "darkCyanBg": "#0D2626",
-    "darkGreenBg": "#0D260D",
-    "darkRedBg": "#260D0D",
-    "highlight": "#3A3A22",
-    "yellow": "#D9C34A",
-    "olive": "#BDBD7A",
-    "dimOlive": "#7A7A55",
-    "medBlue": "#7AA2FF",
-    "greyBlue": "#5FA8E8",
-    "blueGreen": "#3BBFBF",
-    "green": "#6FCF8E",
-    "red": "#E06666",
-    "purple": "#C98BD6"
+    "darkYellowBg": "#24230F",
+    "darkCyanBg": "#132422",
+    "darkGreenBg": "#15230F",
+    "darkRedBg": "#2A1816",
+    "highlight": "#33321D",
+    "yellow": "#B8A455",
+    "olive": "#93906A",
+    "dimOlive": "#6B694F",
+    "medBlue": "#8494CC",
+    "greyBlue": "#6E9BC0",
+    "blueGreen": "#4C9A9A",
+    "green": "#71A87F",
+    "red": "#BE6E6B",
+    "purple": "#A57FB0"
   },
   "colors": {
     "accent": "blueGreen",
@@ -73,7 +73,7 @@
   },
   "export": {
     "pageBg": "#16160F",
-    "cardBg": "#0D2626",
-    "infoBg": "#3A3A22"
+    "cardBg": "#132422",
+    "infoBg": "#33321D"
   }
 }

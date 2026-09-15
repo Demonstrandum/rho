@@ -243,6 +243,54 @@ export default function (pi: ExtensionAPI) {
         handler: async (args: string, ctx: ExtensionContext) => detach(ctx, args.trim() === '' ? undefined : args.trim()),
     });
 
+    /**
+     * Start this session again on the code that is on disk now.
+     *
+     * pi loads its extensions once, and it is itself a version: a session left
+     * open across an edit, an upgrade or a package install goes on running
+     * what it started with, and the change looks broken rather than absent.
+     * pi's own /reload rebinds extensions in place, which covers an edit to
+     * one of them and does not cover a new pi, a new dependency, or an
+     * extension added since the session began.
+     *
+     * The conversation is not at risk: it is on disk after every turn, and
+     * this hands the same file to the new process, so what comes back is this
+     * session rather than a copy of it.
+     */
+    pi.registerCommand('restart', {
+        description: 'start this session again on the current pi and rho, keeping the conversation',
+        handler: async (_args: string, ctx: ExtensionContext) => {
+            const file = ctx.sessionManager.getSessionFile();
+            if (file === undefined || !existsSync(file)) {
+                ctx.ui.notify('Nothing has been said in this session yet, so there is nothing to carry over.', 'info');
+                return;
+            }
+            if (attached()) {
+                ctx.ui.notify(
+                    'This interface draws a session on another machine: /remote connect brings that one up to date, and this one is already the current rho.',
+                    'info',
+                );
+                return;
+            }
+            await ctx.ui.custom<void>(
+                (tui, _theme, _keys, done) => {
+                    queueMicrotask(() => {
+                        tui.stop();
+                        // The replacement owns the terminal while it runs, and
+                        // this process is finished either way: a restart that
+                        // returned here would leave two pi processes holding
+                        // one session file.
+                        const ran = spawnSync('pi', ['--session', file], { stdio: 'inherit', cwd: ctx.sessionManager.getCwd() });
+                        done();
+                        process.exit(ran.status ?? 0);
+                    });
+                    return { render: () => [], handleInput: () => {} } as never;
+                },
+                { overlay: true },
+            );
+        },
+    });
+
     pi.registerCommand('attach', {
         description: 'come back to a session left running here: /attach <name>',
         getArgumentCompletions: (text) =>

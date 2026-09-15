@@ -94,9 +94,19 @@ export function remoteSession(
         followUp: (text: string) => actions.followUp(text).then(() => undefined),
         compact: () => actions.compact(),
         clearQueue: () => actions.clearQueue(),
-        setThinkingLevel: (level: string) => void actions.setThinkingLevel(level),
+        /**
+         * Ask, then read back what the far side now says it is.
+         *
+         * The corner of the screen reads this snapshot, and a change the far
+         * side accepted never reached it: pi tells extensions about a model
+         * change with model_select, which is an extension event and does not
+         * cross the link, so the footer went on naming the model from the
+         * moment of attaching. The same holds for the thinking level, which is
+         * drawn beside it.
+         */
+        setThinkingLevel: (level: string) => void actions.setThinkingLevel(level).then(() => state.refresh()),
         setModel: (model: { provider?: string; id?: string }) =>
-            void actions.setModel(model.provider ?? '', model.id ?? ''),
+            void actions.setModel(model.provider ?? '', model.id ?? '').then(() => state.refresh()),
 
         // Everything the interface can ask for, asked of the machine the
             // session is on. Escape aborting a local session that is not
@@ -107,8 +117,8 @@ export function remoteSession(
         abortRetry: () => actions.abortRetry().then(() => undefined),
         abortCompaction: () => actions.abort().then(() => undefined),
         executeBash: (command: string) => actions.bash(command).then(() => undefined),
-        cycleModel: () => actions.cycleModel(),
-        cycleThinkingLevel: () => actions.cycleThinkingLevel(),
+        cycleModel: () => actions.cycleModel().then(() => state.refresh()),
+        cycleThinkingLevel: () => actions.cycleThinkingLevel().then(() => state.refresh()),
         setSessionName: (name: string) => void actions.setSessionName(name),
         setSteeringMode: (mode: string) => void actions.setSteeringMode(mode),
         setFollowUpMode: (mode: string) => void actions.setFollowUpMode(mode),

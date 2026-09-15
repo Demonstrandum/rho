@@ -104,6 +104,8 @@ export interface Session {
 export class Broker {
     private readonly agent: ChildProcess;
     private readonly clients = new Set<Socket>();
+    /** connections that are the far side's rho asking to reach the interface. */
+    private readonly origins = new Set<Socket>();
     private readonly recent: Buffer[] = [];
     private server: Server | null = null;
     private ended = false;
@@ -241,7 +243,9 @@ export class Broker {
     }
 
     private broadcast(bytes: Buffer): void {
-        for (const client of this.clients) client.write(bytes);
+        for (const client of this.clients) {
+            if (!this.origins.has(client)) client.write(bytes);
+        }
     }
 
     listen(): void {
@@ -279,12 +283,43 @@ export class Broker {
                     } catch {
                         parsed = null;
                     }
+                    // Before the tagged path below: an origin frame carries an
+                    // id like any other message, and the id check would hand it
+                    // to the agent's stdin, where it means nothing at all.
+                    if (parsed?.type === 'rho_origin_open') {
+                        this.origins.add(client);
+                        continue;
+                    }
+                    if (parsed?.type === 'rho_origin') {
+                        const going = this.origins.has(client) ? this.clients : this.origins;
+                        for (const other of going) {
+                            if (other !== client) other.write(`${line}\n`);
+                        }
+                        continue;
+                    }
                     if (parsed !== null && typeof parsed.id === 'string' && parsed.type !== 'rho_info') {
                         // Tagged with the client, so the answer can find its
                         // way back to it rather than to everyone.
                         this.agent.stdin?.write(`${JSON.stringify({ ...parsed, id: `${tag}|${parsed.id}` })}\n`);
                         continue;
                     }
+                    /**
+                     * The machine the interface is on, reached down the link
+                     * that is already there.
+                     *
+                     * An ssh forward was the obvious way and does not work: on
+                     * OpenSSH 10.5 a forwarded unix socket is created root-owned
+                     * with mode 0600 whatever StreamLocalBindMask says, so the
+                     * account running the session cannot open it, and a
+                     * loopback port would be open to every account on the host.
+                     *
+                     * There is no need for either. Messages already travel from
+                     * the laptop to the agent and events back, so origin is
+                     * another kind of frame on the same connection: the far
+                     * side's rho opens a channel on this socket -- its own
+                     * account's socket -- and the broker pairs it with whoever
+                     * is attached. Nothing new is listening anywhere.
+                     */
                     if (parsed?.type === 'rho_stop') {
                         // Asked through the socket, because the pid file is not
                         // always there: four sessions on dev-box had lost
@@ -325,7 +360,14 @@ export class Broker {
             });
             const drop = () => {
                 this.clients.delete(client);
+                this.origins.delete(client);
                 this.tagged.delete(tag);
+                // An interface that leaves takes the origin machine with it:
+                // the far side is told, so a command aimed at a laptop that is
+                // no longer attached is refused rather than waiting.
+                if (this.clients.size === 0) {
+                    for (const origin of this.origins) origin.write(`${JSON.stringify({ type: 'rho_origin_gone' })}\n`);
+                }
             };
             client.on('close', drop);
             client.on('error', drop);

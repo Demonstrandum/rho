@@ -112,6 +112,19 @@ export default function (pi: ExtensionAPI) {
      * reading that rather than assuming it means a clone that chose a
      * different path still leaves the agent in the right directory.
      */
+    /**
+     * Published beside the environment itself, so a command that wants to run
+     * a script where the tools are acting does not have to reimplement the
+     * protocol to do it. /project is the caller.
+     */
+    const publishShell = (): void => {
+        (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = (script: string) => {
+            const here = active();
+            if (here === null) return Promise.resolve({ last: null, said: 'nothing is attached' });
+            return shellOut(here.connection, script);
+        };
+    };
+
     const shellOut = (connection: Connection, script: string): Promise<{ last: string | null; said: string }> =>
         new Promise((settle) => {
             void (async () => {
@@ -658,46 +671,8 @@ export default function (pi: ExtensionAPI) {
                 published[PUBLISHED] = undefined;
                 remember();
                 await announce(null);
+                (globalThis as { __rho_shell_out?: unknown }).__rho_shell_out = undefined;
                 ctx.ui.notify('Working locally.', 'info');
-                return;
-            }
-
-            /**
-             * A repository and branch on the machine the agent is working on.
-             *
-             * The same layout `/remote project` makes, because it is the same
-             * question asked without a session: one clone under
-             * ~/projects/<project>/checkout and a worktree per branch beside
-             * it. A plain clone into a directory of its own was what the first
-             * demo did, and it left two shapes for the same thing.
-             */
-            if (verb === 'project') {
-                // The whole line, not the second word: `rest` stops at two, and a
-                // checkout takes a repository, a branch and sometimes a name.
-                const asked = parseProjectRequest(args.trim().split(/\s+/).filter(Boolean).slice(1));
-                if (asked === null) {
-                    ctx.ui.notify('Usage: /environment project <repo> [branch] [as <name>]', 'error');
-                    return;
-                }
-                const here = active();
-                const place = published[PUBLISHED];
-                if (here === null || place === undefined) {
-                    ctx.ui.notify('No environment attached: /environment connect user@host first', 'error');
-                    return;
-                }
-                const plan = projectPlan(asked.repo, asked.branch, asked.name ?? undefined);
-                ctx.ui.notify(`checking out ${asked.branch} of ${asked.repo} on ${here.name}`, 'info');
-                try {
-                    const { last: landed, said } = await shellOut(here.connection, plan.script);
-                    if (landed === null) {
-                        ctx.ui.notify(`Could not check out ${asked.repo} on ${here.name}: ${said}`, 'error');
-                        return;
-                    }
-                    await place.chdir(landed);
-                    ctx.ui.notify(`${here.name}:${landed} is the working directory now.`, 'info');
-                } catch (error) {
-                    ctx.ui.notify(`Could not check it out: ${(error as Error).message}`, 'error');
-                }
                 return;
             }
 
@@ -813,6 +788,7 @@ export default function (pi: ExtensionAPI) {
                 const name = addressName(parsedRest);
                 try {
                     await attach(name, rest, (note) => ctx.ui.notify(note, 'info'));
+                    publishShell();
                     ctx.ui.notify(`Attached ${name}. Tools now act there; /environment default local comes back.`, 'info');
                 } catch (error) {
                     // Refused, not quietly left here. Asking to work on another

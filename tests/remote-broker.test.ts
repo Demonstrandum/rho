@@ -177,4 +177,26 @@ describe('broker', () => {
         first.end();
         second.end();
     });
+
+    test('a session nobody is attached to lets its agent go', async () => {
+        // An idle pi holds forty to a hundred and fifty megabytes, and eight of
+        // them on a small machine put three quarters of a gigabyte into swap:
+        // the next turn then waits for the agent to be read back from disk.
+        const broker = start('idle');
+        const ended = new Promise<void>((resolve) => {
+            broker.onEnded = () => resolve();
+        });
+        broker.retireAfter(150);
+        await ended;
+        expect(broker.state.alive).toBe(false);
+    }, 10_000);
+
+    test('and one with somebody attached is left alone', async () => {
+        const broker = start('busy');
+        const watcher = await client('busy');
+        broker.retireAfter(150);
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        expect(broker.state.alive).toBe(true);
+        watcher.end();
+    }, 10_000);
 });

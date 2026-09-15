@@ -11,6 +11,7 @@
 
 import { spawn } from 'node:child_process';
 import { connect as netConnect } from 'node:net';
+import { GONE as ORIGIN_GONE, OPEN as ORIGIN_OPEN, pack as packOrigin, readLines as readOriginLines, unpack as unpackOrigin } from './origin-channel';
 import type { ChildProcess } from 'node:child_process';
 import { Decoder, encode } from './protocol';
 import type { Event, Frame, ProcessId, Reply, Request } from './protocol';
@@ -367,3 +368,39 @@ export function waitFor(
 }
 
 export { Failed };
+
+/**
+ * A connection to the interface's machine, over the session's own socket.
+ *
+ * The broker pairs this channel with whoever is attached, so the executor at
+ * the far end of it is running in the interface's process: what this carries is
+ * the same protocol as every other connection, wrapped one frame deeper because
+ * the session socket is line-delimited JSON and this protocol is binary.
+ */
+export function connectOverOriginChannel(name: string, socketPath: string): Connection {
+    const socket = netConnect(socketPath);
+    let gone: ((why: string) => void) | undefined;
+    socket.on('connect', () => socket.write(`${JSON.stringify(ORIGIN_OPEN)}\n`));
+    return connectOver(name, {
+        describe: `${socketPath} (the attached interface)`,
+        write: (bytes) => void socket.write(`${JSON.stringify(packOrigin(bytes))}\n`),
+        listen: ({ data, ended }) => {
+            gone = ended;
+            readOriginLines(socket, (message) => {
+                if (message.type === ORIGIN_GONE) {
+                    ended('nobody is attached to this session, so there is no machine to run on');
+                    return;
+                }
+                if (message.type !== 'rho_origin') return;
+                const bytes = unpackOrigin(message);
+                if (bytes !== null) data(bytes);
+            });
+            socket.on('close', () => ended('the session socket closed'));
+            socket.on('error', (trouble: Error) => ended(trouble.message));
+        },
+        close: () => {
+            gone = undefined;
+            socket.destroy();
+        },
+    });
+}

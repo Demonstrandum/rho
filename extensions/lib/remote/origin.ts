@@ -36,8 +36,8 @@ export const ORIGIN = 'origin' as const;
  * shell on the laptop; under a home directory the enclosing directory is the
  * thing that refuses them.
  */
-export const originSocketFor = (home: string, session: string): string =>
-    join(home, '.cache', 'rho', 'sessions', `${session}.origin.sock`);
+export const sessionSocketFor = (home: string, session: string): string =>
+    join(home, '.cache', 'rho', 'sessions', `${session}.sock`);
 
 /** Where the executor listens on the machine drawing the session. */
 export const originListenPath = (home: string, session: string): string =>

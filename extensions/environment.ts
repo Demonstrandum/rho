@@ -30,8 +30,8 @@ import {
 import { completeLastWord } from './lib/complete-words';
 import { projectPlan } from './lib/remote/project';
 import { parseProjectRequest } from './lib/remote/naming';
-import { connectOverSocket, operationsFor, waitFor } from './lib/remote/client';
-import { ORIGIN, originSocketFor } from './lib/remote/origin';
+import { connectOverOriginChannel, operationsFor, waitFor } from './lib/remote/client';
+import { ORIGIN, sessionSocketFor } from './lib/remote/origin';
 import { existsSync } from 'node:fs';
 import type { Connection } from './lib/remote/client';
 import { deploy } from './lib/remote/deploy';
@@ -131,13 +131,15 @@ export default function (pi: ExtensionAPI) {
                 'this session is not held by a runner, so it has no origin machine: it is already running where the interface is, and on "local" is that machine',
             );
         }
-        const path = originSocketFor(home, session);
+        // The session's own socket, on this machine, under this account: the
+        // broker pairs this channel with whatever interface is attached and
+        // passes the executor's bytes between the two. Nothing is forwarded and
+        // nothing new listens.
+        const path = sessionSocketFor(home, session);
         if (!existsSync(path)) {
-            throw new Error(
-                `no interface is attached to ${session}, so there is nothing to run on. The origin machine exists only while somebody is connected to this session.`,
-            );
+            throw new Error(`${session} is not being held by a runner here, so it has no interface to reach`);
         }
-        const made = connectOverSocket(ORIGIN, path);
+        const made = connectOverOriginChannel(ORIGIN, path);
         origin = made;
         return made;
     };

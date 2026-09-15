@@ -41,6 +41,17 @@ const EXTERNAL = ['@earendil-works/*', '@mariozechner/*'];
  */
 const WITHOUT = ['bun-runtime'];
 
+/**
+ * Nothing is left out for size.
+ *
+ * Measuring one package on top of a bare pi suggested pi-rewind cost 46 MB and
+ * pi-web-access 39 MB, so leaving one out should have paid. Taking pi-rewind
+ * out of the whole set moved a session from 165 MB to 167 MB: they share their
+ * dependencies, and what each costs alone is not what it costs alongside the
+ * others. The code is loaded either way.
+ */
+const VENDOR_WITHOUT: readonly string[] = [];
+
 /** what an extension reads at runtime, beside the code that reads it. */
 const RESOURCES = ['skills', 'prompts', 'themes', 'system', 'rho.toml', 'maxims.txt'];
 
@@ -95,6 +106,7 @@ const kept: string[] = ['./extensions'];
 for (const entry of vendored) {
     const from = join(root, entry);
     if (!existsSync(from)) continue;
+    if (VENDOR_WITHOUT.some((name) => entry.includes(name))) continue;
     const name = `vendor-${entry.split('/').filter((part) => part !== '' && part !== 'node_modules').slice(0, 2).join('-').replace(/[^A-Za-z0-9._-]/g, '-')}.js`;
     const one = await $`bun build ${from} --target=node --outfile ${join(out, 'extensions', name)} ${EXTERNAL.flatMap((external) => ['--external', external])}`.quiet().nothrow();
     if (one.exitCode === 0) kept.push(`./extensions/${name}`);

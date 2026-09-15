@@ -16,7 +16,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { attach, Broker, existing, facts, named, stop } from './broker';
+import { askToStop, attach, Broker, existing, facts, named, stop } from './broker';
 
 const [verb, name, ...rest] = process.argv.slice(2);
 
@@ -110,7 +110,11 @@ if (verb === 'stop') {
     // Signals the broker, which ends the agent, drops every attached client
     // and removes the socket: its own close path, rather than a second way of
     // tearing a session down that could disagree with the first.
-    process.stdout.write(stop(name) ? `stopped ${name}\n` : `no session called ${name}\n`);
+    // The pid file first, and the socket when there is no pid file: a session
+    // whose note went missing is still a session, and it still answers.
+    const bypid = stop(name);
+    const asked = bypid ? true : await askToStop(name);
+    process.stdout.write(asked ? `stopped ${name}\n` : `no session called ${name}\n`);
     process.exit(0);
 }
 
@@ -340,6 +344,10 @@ if (verb === 'serve') {
     // The session is the agent: when it goes, this process has nothing left to
     // hold and no reason to stay resident.
     broker.onEnded = () => process.exit(0);
+    // Hours rather than minutes: a session is meant to be left and come back
+    // to, and the cost of starting one again is seconds.
+    const idleHours = Number.parseFloat(process.env.RHO_SESSION_IDLE_HOURS ?? '6');
+    if (Number.isFinite(idleHours) && idleHours > 0) broker.retireAfter(idleHours * 3_600_000);
     broker.listen();
     for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => broker.stop());
     // Nothing else to do: the broker owns the process and the socket.

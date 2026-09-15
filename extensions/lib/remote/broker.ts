@@ -168,6 +168,33 @@ export class Broker {
     onEnded: (() => void) | undefined;
 
     /**
+     * A session nobody has attached to for a long time lets its agent go.
+     *
+     * An idle pi holds forty to a hundred and fifty megabytes, and eight of
+     * them on a machine with less than a gigabyte put three quarters of a
+     * gigabyte into swap: the next turn then waits for the agent to be read
+     * back from disk, which is the stall it looks like. Stopping is not
+     * forgetting -- the transcript stays and connecting again continues it --
+     * so an idle session costing memory is a session that should not be
+     * resident.
+     */
+    retireAfter(idleMs: number): void {
+        if (idleMs <= 0) return;
+        const check = setInterval(() => {
+            if (this.clients.size > 0) {
+                this.lastLeft = Date.now();
+                return;
+            }
+            if (Date.now() - this.lastLeft < idleMs) return;
+            clearInterval(check);
+            this.stop();
+        }, Math.min(idleMs, 60_000));
+        check.unref?.();
+    }
+
+    private lastLeft = Date.now();
+
+    /**
      * An answer goes to whoever asked; an event goes to everyone.
      *
      * The agent speaks to one stdout and the broker has several clients, all
@@ -251,6 +278,17 @@ export class Broker {
                         this.agent.stdin?.write(`${JSON.stringify({ ...parsed, id: `${tag}|${parsed.id}` })}\n`);
                         continue;
                     }
+                    if (parsed?.type === 'rho_stop') {
+                        // Asked through the socket, because the pid file is not
+                        // always there: four sessions on robotics-vm had lost
+                        // theirs and could not be stopped at all, while their
+                        // sockets answered perfectly well.
+                        client.write(
+                            `${JSON.stringify({ type: 'response', id: parsed.id, command: 'rho_stop', success: true })}\n`,
+                        );
+                        setTimeout(() => this.stop(), 50).unref?.();
+                        continue;
+                    }
                     if (parsed?.type === 'rho_info') {
                         // The branch travels with the directory: the interface
                         // shows one, and a branch read on the laptop belongs to
@@ -317,6 +355,22 @@ export function existing(name: string): Promise<boolean> {
 /**
  * End a session by name. Returns false if nothing was running under it.
  */
+/** Ask a session to stop through its own socket, for when the pid file is gone. */
+export function askToStop(name: string): Promise<boolean> {
+    return new Promise((settle) => {
+        const socket = connectSocket(socketFor(name));
+        const give = (answer: boolean) => {
+            socket.destroy();
+            settle(answer);
+        };
+        socket.on('connect', () => {
+            socket.write(`${JSON.stringify({ type: 'rho_stop', id: 'stop' })}\n`);
+            setTimeout(() => give(true), 300);
+        });
+        socket.on('error', () => give(false));
+    });
+}
+
 export function stop(name: string): boolean {
     let pid: number;
     try {

@@ -65,6 +65,7 @@ type Method =
     | 'apps.connections.open'
     | 'auth.test'
     | 'chat.postMessage'
+    | 'chat.scheduleMessage'
     | 'conversations.history'
     | 'conversations.replies'
     | 'users.conversations'
@@ -158,6 +159,25 @@ export class SlackWeb {
             ...(threadTs === null ? {} : { thread_ts: threadTs }),
         });
         return sent.ok ? ok(sent.value.ts ?? '') : sent;
+    }
+
+    /**
+     * Send later, by Slack's clock rather than by a process left waiting.
+     *
+     * A message for someone's morning should not depend on this machine being
+     * awake at the time, and `at` or a launch agent would put the text in a
+     * file on disk for hours. Slack holds it and sends it whether or not
+     * anything here is running. `when` is seconds since the epoch, up to 120
+     * days out.
+     */
+    async postLater(channel: ChannelId, text: string, when: number): Promise<Result<string>> {
+        const body = text.length > SlackWeb.LIMIT ? `${text.slice(0, SlackWeb.LIMIT)}\n[...truncated]` : text;
+        const sent = await this.call<{ scheduled_message_id?: string }>('chat.scheduleMessage', {
+            channel,
+            text: body,
+            post_at: Math.floor(when),
+        });
+        return sent.ok ? ok(sent.value.scheduled_message_id ?? '') : sent;
     }
 
     /** who the app is. The mention guard needs it, and it is the one call that proves the token works. */

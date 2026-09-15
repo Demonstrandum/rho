@@ -93,17 +93,18 @@ describe('the link to a daemon', () => {
         const off = link.onEvent(() => {
             count += 1;
         });
+        // Listening starts before the prompt: send resolves on the daemon's
+        // response, which it writes before the turn's events, so a listener
+        // registered afterwards can miss a settle that has already happened
+        // and then wait for one that will not come again.
+        const done = settled(link, 'agent_settled');
         await link.send({ type: 'prompt', message: 'one' });
-        await settled(link, 'agent_settled');
+        await done;
         const afterFirst = count;
         off();
         await link.send({ type: 'prompt', message: 'two' });
         await new Promise((resolve) => setTimeout(resolve, 200));
         expect(afterFirst).toBeGreaterThan(0);
         expect(count).toBe(afterFirst);
-        // Two prompts, two daemon starts and a deliberate wait: alone this is
-        // under a second, but run beside fifty other files it has exceeded the
-        // default five-second budget on a loaded machine, which reads as a
-        // broken listener rather than a busy one.
-    }, 20_000);
+    });
 });

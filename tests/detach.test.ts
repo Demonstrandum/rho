@@ -59,16 +59,20 @@ describe('the commands it registers', () => {
         expect(said[0]).toContain('No session called nothing-by-this-name here');
     });
 
-    test('detaching a session with no file on disk is reported as having nothing to leave', async () => {
+    test('a session with nothing in it is left, not reported as undetachable', async () => {
         const { commands } = load();
-        const said: { message: string; kind: string }[] = [];
+        const said: string[] = [];
+        let asked = false;
         const ctx = {
-            ui: { notify: (message: string, kind: string) => said.push({ message, kind }) },
+            ui: { notify: (message: string) => said.push(message) },
             sessionManager: { getSessionFile: () => undefined, getCwd: () => '/tmp' },
+            shutdown: () => {
+                asked = true;
+            },
         };
         await commands.detach!.handler('', ctx);
-        expect(said[0]?.message).toContain('Nothing has been said in this session yet');
-        // Not an error: a session nobody has spoken to is an ordinary state.
-        expect(said[0]?.kind).toBe('info');
+        // ctrl+d in an empty session means what it means in any terminal.
+        expect(asked).toBe(true);
+        expect(said).toEqual([]);
     });
 });

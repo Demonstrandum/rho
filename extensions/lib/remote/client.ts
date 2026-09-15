@@ -10,6 +10,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { connect as netConnect } from 'node:net';
 import type { ChildProcess } from 'node:child_process';
 import { Decoder, encode } from './protocol';
 import type { Event, Frame, ProcessId, Reply, Request } from './protocol';
@@ -46,13 +47,61 @@ const expect = <K extends Reply['kind']>(reply: Reply, kind: K): Extract<Reply, 
 };
 
 /**
- * A connection over a child process's stdio.
+ * What a transport has to provide, and nothing more.
  *
- * The transport is a command, so the same code carries a local executor for
- * tests and `ssh host executor` for a rented node: the difference is argv.
+ * A child process's stdio is one; a unix socket is another, and that is how a
+ * session reaches back to the machine its interface is running on. The framing,
+ * the request table and the death handling are the same either way, so they are
+ * written once and the transport is these four members.
  */
+export interface Carrier {
+    readonly describe: string;
+    write(bytes: Uint8Array): void;
+    /** Called with each chunk, with the complaint stream, and once when it ends. */
+    listen(handlers: { data: (chunk: Uint8Array) => void; complaint: (text: string) => void; ended: (why: string) => void }): void;
+    close(): void;
+}
+
+/** A connection over a child process's stdio. */
 export function connectOverProcess(name: string, command: string, args: readonly string[]): Connection {
     const child: ChildProcess = spawn(command, [...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+    return connectOver(name, {
+        describe: `${command} ${args.join(' ')}`,
+        write: (bytes) => void child.stdin?.write(bytes),
+        listen: ({ data, complaint, ended }) => {
+            child.stdout?.on('data', (chunk: Buffer) => data(new Uint8Array(chunk)));
+            child.stderr?.on('data', (chunk: Buffer) => complaint(chunk.toString()));
+            child.on('close', (code) => ended(`exit ${code}`));
+            child.on('error', (error) => ended(error.message));
+        },
+        close: () => void child.kill('SIGTERM'),
+    });
+}
+
+/**
+ * A connection over a unix socket.
+ *
+ * ssh can carry a unix socket in either direction, so a session on a server can
+ * hold one of these onto the machine somebody is sitting at: the socket is
+ * forwarded when the interface attaches and goes when it leaves, which is what
+ * a laptop is -- reachable while you are there.
+ */
+export function connectOverSocket(name: string, path: string): Connection {
+    const socket = netConnect(path);
+    return connectOver(name, {
+        describe: path,
+        write: (bytes) => void socket.write(bytes),
+        listen: ({ data, ended }) => {
+            socket.on('data', (chunk: Buffer) => data(new Uint8Array(chunk)));
+            socket.on('close', () => ended('the socket closed'));
+            socket.on('error', (error: Error) => ended(error.message));
+        },
+        close: () => socket.destroy(),
+    });
+}
+
+/** The framing and the request table, over whichever transport carries bytes. */
+function connectOver(name: string, carrier: Carrier): Connection {
     const decoder = new Decoder();
     const waiting = new Map<number, (reply: Reply) => void>();
     const listeners = new Set<(event: Event) => void>();
@@ -66,17 +115,10 @@ export function connectOverProcess(name: string, command: string, args: readonly
     let drained = false;
     let why = '';
 
-    // stderr is the transport's own complaint -- ssh saying the host is
-    // unreachable, the binary saying it will not run -- and it is the only
-    // useful thing to quote when a connection dies before it starts.
-    child.stderr?.on('data', (chunk: Buffer) => {
-        why += chunk.toString();
-    });
-
-    child.stdout?.on('data', (chunk: Buffer) => {
+    const arrived = (chunk: Uint8Array) => {
         let frames: Frame[];
         try {
-            frames = decoder.push(new Uint8Array(chunk));
+            frames = decoder.push(chunk);
         } catch (error) {
             why += (error as Error).message;
             return;
@@ -95,7 +137,7 @@ export function connectOverProcess(name: string, command: string, args: readonly
                 for (const listener of listeners) listener(frame.body);
             }
         }
-    });
+    };
 
     const die = (reason: string) => {
         if (drained) return;
@@ -110,12 +152,20 @@ export function connectOverProcess(name: string, command: string, args: readonly
         for (const listener of listeners) listener({ kind: 'gone', why: message });
     };
 
-    child.on('close', (code) => die(why.trim() || `exit ${code}`));
-    child.on('error', (error) => die(error.message));
+    carrier.listen({
+        data: arrived,
+        // The transport's own complaint -- ssh saying the host is unreachable,
+        // the binary saying it will not run -- is the only useful thing to
+        // quote when a connection dies before it starts.
+        complaint: (said) => {
+            why += said;
+        },
+        ended: (reason) => die(why.trim() || reason),
+    });
 
     return {
         name,
-        describe: `${command} ${args.join(' ')}`,
+        describe: carrier.describe,
         get alive() {
             return alive;
         },
@@ -152,7 +202,7 @@ export function connectOverProcess(name: string, command: string, args: readonly
                     settle({ kind: 'error', message: 'cancelled', code: 'ABORT' });
                 };
                 signal?.addEventListener('abort', abort, { once: true });
-                child.stdin?.write(encode({ type: 'request', id, body }));
+                carrier.write(encode({ type: 'request', id, body }));
             });
         },
         onEvent(handler) {
@@ -164,7 +214,7 @@ export function connectOverProcess(name: string, command: string, args: readonly
         },
         close() {
             alive = false;
-            child.kill('SIGTERM');
+            carrier.close();
         },
     };
 }

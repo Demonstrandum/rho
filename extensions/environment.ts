@@ -28,6 +28,8 @@ import {
     createWriteTool,
 } from '@earendil-works/pi-coding-agent';
 import { completeLastWord } from './lib/complete-words';
+import { projectPlan } from './lib/remote/project';
+import { parseProjectRequest } from './lib/remote/naming';
 import { operationsFor, waitFor } from './lib/remote/client';
 import type { Connection } from './lib/remote/client';
 import { deploy } from './lib/remote/deploy';
@@ -102,6 +104,45 @@ export default function (pi: ExtensionAPI) {
     };
 
     const active = (): Environment | null => (current === null ? null : (environments.get(current) ?? null));
+
+    /**
+     * Run a script on an environment and give back its last line.
+     *
+     * Used by the checkout, which ends by printing where the worktree landed:
+     * reading that rather than assuming it means a clone that chose a
+     * different path still leaves the agent in the right directory.
+     */
+    const shellOut = (connection: Connection, script: string): Promise<{ last: string | null; said: string }> =>
+        new Promise((settle) => {
+            void (async () => {
+                const started = await connection.request({ kind: 'spawn', command: script });
+                if (started.kind !== 'spawned') {
+                    settle({ last: null, said: 'the machine would not start it' });
+                    return;
+                }
+                let text = '';
+                const done = (code: number | null) => {
+                    stop();
+                    const lines = text.trim().split('\n').filter((line) => line.trim() !== '');
+                    // What it said last is what went wrong, and saying nothing
+                    // about a failure is how a checkout looks like a mystery.
+                    if (code !== 0) {
+                        settle({ last: null, said: lines[lines.length - 1] ?? `it exited ${code}` });
+                        return;
+                    }
+                    settle({ last: lines[lines.length - 1] ?? null, said: '' });
+                };
+                const stop = connection.onEvent((event) => {
+                    if (event.kind === 'output' && event.process === started.process) {
+                        text += new TextDecoder().decode(event.data);
+                    }
+                    if (event.kind === 'exited' && event.process === started.process) done(event.code);
+                });
+                // An exit that happened before the listener was attached.
+                const already = connection.exited(started.process);
+                if (already !== undefined) done(already.code);
+            })();
+        });
 
     /**
      * A dead connection is refused, not replaced by the laptop.
@@ -618,6 +659,45 @@ export default function (pi: ExtensionAPI) {
                 remember();
                 await announce(null);
                 ctx.ui.notify('Working locally.', 'info');
+                return;
+            }
+
+            /**
+             * A repository and branch on the machine the agent is working on.
+             *
+             * The same layout `/remote project` makes, because it is the same
+             * question asked without a session: one clone under
+             * ~/projects/<project>/checkout and a worktree per branch beside
+             * it. A plain clone into a directory of its own was what the first
+             * demo did, and it left two shapes for the same thing.
+             */
+            if (verb === 'project') {
+                // The whole line, not the second word: `rest` stops at two, and a
+                // checkout takes a repository, a branch and sometimes a name.
+                const asked = parseProjectRequest(args.trim().split(/\s+/).filter(Boolean).slice(1));
+                if (asked === null) {
+                    ctx.ui.notify('Usage: /environment project <repo> [branch] [as <name>]', 'error');
+                    return;
+                }
+                const here = active();
+                const place = published[PUBLISHED];
+                if (here === null || place === undefined) {
+                    ctx.ui.notify('No environment attached: /environment connect user@host first', 'error');
+                    return;
+                }
+                const plan = projectPlan(asked.repo, asked.branch, asked.name ?? undefined);
+                ctx.ui.notify(`checking out ${asked.branch} of ${asked.repo} on ${here.name}`, 'info');
+                try {
+                    const { last: landed, said } = await shellOut(here.connection, plan.script);
+                    if (landed === null) {
+                        ctx.ui.notify(`Could not check out ${asked.repo} on ${here.name}: ${said}`, 'error');
+                        return;
+                    }
+                    await place.chdir(landed);
+                    ctx.ui.notify(`${here.name}:${landed} is the working directory now.`, 'info');
+                } catch (error) {
+                    ctx.ui.notify(`Could not check it out: ${(error as Error).message}`, 'error');
+                }
                 return;
             }
 

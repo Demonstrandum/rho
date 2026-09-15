@@ -31,6 +31,7 @@ import { shorthandFor, takeVerb } from './lib/shorthand';
 import { completeLastWord, lastWord } from './lib/complete-words';
 import { troubleWith } from './lib/remote/advice';
 import { branchSlug, parseProjectRequest, repoName, sessionName } from './lib/remote/naming';
+import { projectPlan } from './lib/remote/project';
 
 /** What /remote can be asked to do. A word is matched against these. */
 const VERBS = ['create', 'connect', 'project', 'list', 'manage', 'stop'] as const;
@@ -412,42 +413,10 @@ export default function (pi: ExtensionAPI) {
         branch: string,
         say: (note: string) => void,
     ): Promise<string> => {
-        const name = repoName(repo);
-        const root = `$HOME/${PROJECTS}/${projectName}`;
-        const checkout = `${root}/checkout/${name}`;
-        // The branch as a directory name, not as a path: `feature/remote` is
-        // one branch, and a directory of that name would nest it under a
-        // directory called feature that no other branch could share.
-        const worktree = `${root}/worktrees/${branchSlug(branch)}`;
-
-        say(`cloning ${name} on ${host}`);
-        const script = [
-            `set -e`,
-            // The host may never have spoken to this forge before, and a first
-            // clone otherwise dies on "Host key verification failed" with no
-            // way to answer the prompt: there is no terminal on this side of
-            // the ssh call. accept-new trusts an unknown host once and still
-            // refuses a host whose key has changed, which is the case that
-            // matters.
-            `export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new"`,
-            `mkdir -p ${root}/checkout ${root}/worktrees`,
-            // Idempotent: running it twice fetches rather than failing, so a
-            // second worktree on an existing project is one command.
-            `if [ -d ${checkout}/.git ]; then git -C ${checkout} fetch --all --prune;`,
-            `else git clone ${JSON.stringify(repo)} ${checkout}; fi`,
-            // An existing worktree is reused rather than refused: asking for
-            // the same branch twice should land you in it, not error.
-            `if [ ! -d ${worktree} ]; then`,
-            `  if git -C ${checkout} show-ref --verify --quiet refs/heads/${branch}; then`,
-            `    git -C ${checkout} worktree add ${worktree} ${branch};`,
-            `  elif git -C ${checkout} show-ref --verify --quiet refs/remotes/origin/${branch}; then`,
-            `    git -C ${checkout} worktree add --track -b ${branch} ${worktree} origin/${branch};`,
-            `  else`,
-            `    git -C ${checkout} worktree add -b ${branch} ${worktree};`,
-            `  fi;`,
-            `fi`,
-            `echo ${worktree}`,
-        ].join('\n');
+        // The layout is one definition, shared with the checkout the agent
+        // asks for on whatever machine it is attached to. See lib/remote/project.ts.
+        const { script, worktree } = projectPlan(repo, branch, projectName);
+        say(`cloning ${repoName(repo)} on ${host}`);
 
         // -A forwards the agent for the clone. Without it a private repo needs
         // a key on the host, which is the thing this avoids.

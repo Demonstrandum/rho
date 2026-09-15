@@ -47,19 +47,40 @@ const RESOURCES = ['skills', 'prompts', 'themes', 'system', 'rho.toml', 'maxims.
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'extensions'), { recursive: true });
 
-const built = await $`bun build ${join(root, 'extensions')}/*.ts --target=node --outdir ${join(out, 'extensions')} ${EXTERNAL.flatMap((name) => ['--external', name])}`.quiet();
+/**
+ * Split, so the forty extensions share one copy of what they share.
+ *
+ * Bundled one at a time they each carry their own copy of pi-tui, typebox and
+ * every library rho uses: nine megabytes of javascript that a session parses
+ * forty times over. Measured on robotics-vm, pi with rho held 177 MB against a
+ * bare pi's 91 MB, and that difference is mostly the duplication.
+ *
+ * The entry points land in extensions/ and the shared chunks beside them in the
+ * package root, which pi does not scan, so it loads the extensions and they
+ * pull in what they need.
+ */
+const built = await $`bun build ${join(root, 'extensions')}/*.ts --target=node --outdir ${out} --splitting ${EXTERNAL.flatMap((name) => ['--external', name])}`.quiet();
 if (built.exitCode !== 0) {
     process.stderr.write(built.stderr.toString());
     process.exit(1);
 }
 
-for (const name of WITHOUT) rmSync(join(out, 'extensions', 'extensions', `${name}.js`), { force: true });
-
-// bun keeps the entry points' directory, so the files land one level in.
+// bun keeps the entry points' directory, so they land under extensions/
+// whichever way the build is shaped; a nested copy from an older layout is
+// flattened first.
 const nested = join(out, 'extensions', 'extensions');
 if (existsSync(nested)) {
     cpSync(nested, join(out, 'extensions'), { recursive: true });
     rmSync(nested, { recursive: true, force: true });
+}
+
+// Removed after the build, not before, and from wherever they landed: this
+// used to name one layout, and the split build put the files somewhere else,
+// so the bun relauncher survived and took pi with it.
+for (const name of WITHOUT) {
+    for (const place of [join(out, 'extensions', `${name}.js`), join(out, 'extensions', 'extensions', `${name}.js`)]) {
+        rmSync(place, { force: true });
+    }
 }
 
 /**
@@ -81,8 +102,14 @@ for (const entry of vendored) {
 }
 
 // Assets an extension reads by path rather than by import.
+// Assets go beside the extensions and beside the shared chunks: a split build
+// resolves a path relative to whichever file is asking, and the chunks sit a
+// directory above the extensions.
 const assets = join(root, 'extensions', 'assets');
-if (existsSync(assets)) cpSync(assets, join(out, 'extensions', 'assets'), { recursive: true });
+if (existsSync(assets)) {
+    cpSync(assets, join(out, 'extensions', 'assets'), { recursive: true });
+    cpSync(assets, join(out, 'assets'), { recursive: true });
+}
 for (const name of RESOURCES) {
     const from = join(root, name);
     if (existsSync(from)) cpSync(from, join(out, name), { recursive: true });

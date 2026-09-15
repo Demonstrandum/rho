@@ -71,11 +71,14 @@ export default function (pi: ExtensionAPI) {
         }
 
         // pi writes the session file as the first turn happens, so a session
-        // nobody has spoken to has nothing on disk to hand over. That is not a
-        // failure, and saying it as one sends people looking for a fault.
+        // nobody has spoken to has nothing to hand over -- and nothing worth
+        // keeping alive either. There ctrl+d means what it means everywhere
+        // else in a terminal: leave. Reporting it as an obstacle turns the
+        // usual way out of an empty session into a message about detaching.
         const file = ctx.sessionManager.getSessionFile();
         if (file === undefined || !existsSync(file)) {
-            ctx.ui.notify('Nothing has been said in this session yet, so there is nothing to leave running.', 'info');
+            ctx.shutdown();
+            setTimeout(() => process.exit(0), 1_500);
             return;
         }
         if (!existsSync(RUNNER)) {

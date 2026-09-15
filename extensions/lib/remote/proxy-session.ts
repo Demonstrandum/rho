@@ -75,6 +75,12 @@ export class RemoteState {
         switch (event.type) {
             case 'agent_start':
                 this.snapshot.isStreaming = true;
+                // A turn is about to be drawn, and the corner is drawn with it:
+                // whatever the far side has been told since the last one --
+                // its own /model, a second interface onto the same session --
+                // is asked for here, where a round trip costs nothing because
+                // the answer is not being waited on.
+                void this.syncState();
                 break;
             case 'agent_settled':
             case 'agent_end':
@@ -99,6 +105,7 @@ export class RemoteState {
             case 'message_end': {
                 const message = (event as { message?: AgentMessage }).message;
                 if (message !== undefined) this.history.push(message);
+                this.noticeModelDrift(message);
                 // An assistant message that carries a refusal instead of an
                 // answer reads as the model having nothing to say: the token
                 // expiring on the far side looked exactly like silence. The
@@ -116,25 +123,95 @@ export class RemoteState {
         }
     }
 
+    /**
+     * A model chosen on the far side, noticed from what it answered with.
+     *
+     * pi reports a model change to its extensions and not to its session
+     * subscribers, so `model_select` is raised inside the daemon and never
+     * reaches the wire: `/model` run in another interface onto the same
+     * session left this one naming the model from the moment it attached. An
+     * assistant message carries the provider and model that produced it, so a
+     * turn answered by something else is the change arriving, one turn late.
+     * The state is asked for again rather than patched, because the footer
+     * reads the context window and the reasoning levels off the whole model.
+     */
+    private noticeModelDrift(message: AgentMessage | undefined): void {
+        if (message === undefined || (message as { role?: string }).role !== 'assistant') return;
+        const answered = message as unknown as { provider?: string; model?: string };
+        if (typeof answered.model !== 'string') return;
+        const named = this.snapshot.model;
+        if (named?.id === answered.model && named.provider === answered.provider) return;
+        void this.syncState();
+    }
+
+    /**
+     * The far side's state and nothing else.
+     *
+     * `refresh` asks five questions, which is what attaching costs; this is
+     * the one of them that goes stale on its own.
+     */
+    async syncState(): Promise<void> {
+        const state = await this.asked('get_state');
+        const data = (state.data ?? {}) as Snapshot;
+        this.snapshot = { ...this.snapshot, ...data };
+    }
+
     subscribe(listener: Listener): () => void {
         this.listeners.add(listener);
         return () => this.listeners.delete(listener);
     }
 
+    /**
+     * One question, answered with what came back or with nothing.
+     *
+     * A refusal from the far side rejects, and a refusal to one of these is
+     * not a reason to abandon the rest: the interface still has to draw, with
+     * whatever the session did answer. What the refusal said is not swallowed
+     * -- it is reported through `refuse`, which the client shows.
+     */
+    private async asked(type: string): Promise<Record<string, unknown>> {
+        try {
+            return await this.link.send({ type });
+        } catch (error) {
+            this.refuse(`${type}: ${(error as Error).message}`);
+            return {};
+        }
+    }
+
     /** Ask the far side for everything at once: done on attach, and after a reconnect. */
     async refresh(): Promise<void> {
-        const state = await this.link.send({ type: 'get_state' });
+        // What the far side can run, so a slash command typed here goes to the
+        // side that owns it rather than always to the session.
+        const commands = await this.asked('get_commands');
+        const listed = (commands.data ?? {}) as { commands?: { name?: string }[] };
+        if (Array.isArray(listed.commands)) {
+            this.known = new Set(
+                listed.commands
+                    .map((command) => command.name)
+                    .filter((name): name is string => typeof name === 'string'),
+            );
+        }
+
+        const state = await this.asked('get_state');
         const data = (state.data ?? {}) as Snapshot;
         this.snapshot = { ...this.snapshot, ...data };
-        const messages = await this.link.send({ type: 'get_messages' });
+
+        // The levels this model has, because cycling through them is answered
+        // from a keystroke: the interface reads the level it is given back and
+        // has nowhere to put a promise.
+        const levels = await this.asked('get_available_thinking_levels');
+        const offered = (levels.data ?? {}) as { levels?: unknown };
+        if (Array.isArray(offered.levels)) {
+            this.levels = offered.levels.filter((level): level is string => typeof level === 'string');
+        }
+
+        const messages = await this.asked('get_messages');
         const carried = (messages.data ?? {}) as { messages?: AgentMessage[] };
         if (Array.isArray(carried.messages)) this.history = [...carried.messages];
 
         // What the far side would fork from, fetched here because the
         // interface asks for it from a keystroke and cannot wait.
-        const forks = await this.link
-            .send({ type: 'get_fork_messages' })
-            .catch(() => ({}) as Record<string, unknown>);
+        const forks = await this.asked('get_fork_messages');
         const points = (forks.data ?? {}) as { messages?: { entryId?: string; text?: string }[] };
         if (Array.isArray(points.messages)) {
             this.forkable = points.messages
@@ -153,9 +230,36 @@ export class RemoteState {
         return this.history;
     }
 
+    private known = new Set<string>();
+    private levels: readonly string[] = [];
+
+    /** The thinking levels the far side's model offers, as it last reported them. */
+    get thinkingLevels(): readonly string[] {
+        return this.levels;
+    }
+
+    /**
+     * What this interface has just asked for, held until the far side confirms.
+     *
+     * pi reads the model back the moment it has set it -- the footer is drawn
+     * from that read -- and the answer from another machine is a round trip
+     * away. Without this the corner went on naming the model chosen before,
+     * until something else caused a refresh.
+     */
+    assume(change: Partial<Snapshot>): void {
+        this.snapshot = { ...this.snapshot, ...change };
+    }
+
+    /** The commands the far side reported: its extensions, prompt templates and skills. */
+    get commandsThere(): ReadonlySet<string> {
+        return this.known;
+    }
+
     private lastTrouble: string | null = null;
     private forkable: { entryId: string; text: string }[] = [];
     private complaint: ((what: string) => void) | null = null;
+    /** refusals from before anything was listening for them. */
+    private readonly unsaid: string[] = [];
 
     /** The user messages the far side would fork from, as it last reported them. */
     get forkPoints(): { entryId: string; text: string }[] {
@@ -165,10 +269,18 @@ export class RemoteState {
     /** Where to say that something cannot be done from here. */
     onRefusal(say: (what: string) => void): void {
         this.complaint = say;
+        // Attaching asks the far side four questions before anything is
+        // listening, and a refusal to one of those is the most interesting
+        // thing that can happen at a connection: it was being dropped.
+        while (this.unsaid.length > 0) say(this.unsaid.shift() as string);
     }
 
     refuse(what: string): void {
-        this.complaint?.(what);
+        if (this.complaint === null) {
+            this.unsaid.push(what);
+            return;
+        }
+        this.complaint(what);
     }
 
     /** What the far side refused with, if a turn ended in a refusal. */
@@ -177,20 +289,40 @@ export class RemoteState {
     }
 }
 
+/** What the interface says about a prompt beyond its text. */
+export interface PromptOptions {
+    readonly streamingBehavior?: 'steer' | 'followUp';
+    readonly images?: readonly unknown[];
+}
+
 /** The actions the interface can take, each one a command to the far side. */
 export class RemoteActions {
     constructor(private readonly link: RpcLink) {}
 
-    prompt(message: string): Promise<unknown> {
-        return this.link.send({ type: 'prompt', message });
+    /**
+     * A prompt, with what the interface said to do about a turn in progress.
+     *
+     * pi's interface does not stop you typing while the agent is answering: it
+     * calls prompt with a streaming behaviour taken from the steering mode, and
+     * the session queues or steers accordingly. Dropping that on the way across
+     * turned every message typed mid-turn into `Agent is already processing`,
+     * which is a refusal a local session never gives.
+     */
+    prompt(message: string, options: PromptOptions = {}): Promise<unknown> {
+        return this.link.send({
+            type: 'prompt',
+            message,
+            ...(options.streamingBehavior === undefined ? {} : { streamingBehavior: options.streamingBehavior }),
+            ...(options.images === undefined ? {} : { images: options.images }),
+        });
     }
 
-    steer(message: string): Promise<unknown> {
-        return this.link.send({ type: 'steer', message });
+    steer(message: string, images?: readonly unknown[]): Promise<unknown> {
+        return this.link.send({ type: 'steer', message, ...(images === undefined ? {} : { images }) });
     }
 
-    followUp(message: string): Promise<unknown> {
-        return this.link.send({ type: 'follow_up', message });
+    followUp(message: string, images?: readonly unknown[]): Promise<unknown> {
+        return this.link.send({ type: 'follow_up', message, ...(images === undefined ? {} : { images }) });
     }
 
     abort(): Promise<unknown> {

@@ -13,11 +13,22 @@ import type { RpcLink } from '../extensions/lib/remote/rpc-link';
  * looked as though it had simply failed.
  */
 
-const build = () => {
+const build = (
+    options: { keepHere?: string[]; commandsHere?: string[]; commandsThere?: string[]; refusing?: string } = {},
+) => {
     const asked: string[] = [];
     const localCalls: string[] = [];
+    const said: string[] = [];
 
     const local = {
+        extensionRunner: {
+            getRegisteredCommands: () =>
+                (options.commandsHere ?? []).map((invocationName) => ({ invocationName })),
+        },
+        prompt: (text: string) => {
+            localCalls.push(`prompt(${text})`);
+            return Promise.resolve();
+        },
         sessionId: 'local-id',
         sessionFile: '/local/session.jsonl',
         isStreaming: true,
@@ -42,15 +53,20 @@ const build = () => {
 
     const refusals: string[] = [];
     let refreshes = 0;
+    const snapshot = {
+        model: { id: 'remote-model', provider: 'anthropic' },
+        isStreaming: false,
+        sessionId: 'remote-id',
+        pendingMessageCount: 2,
+        thinkingLevel: 'off',
+    };
     const state = {
+        commandsThere: new Set(options.commandsThere ?? []),
+        thinkingLevels: ['off', 'medium', 'high'],
+        assume: (change: Record<string, unknown>) => Object.assign(snapshot, change),
         forkPoints: [{ entryId: 'e1', text: 'earlier' }],
         refuse: (what: string) => refusals.push(what),
-        state: {
-            model: { id: 'remote-model', provider: 'anthropic' },
-            isStreaming: false,
-            sessionId: 'remote-id',
-            pendingMessageCount: 2,
-        },
+        state: snapshot,
         messages: [{ role: 'assistant', content: [] }],
         subscribe: () => () => {},
         // Choosing a model reads the far side's state back, because pi tells
@@ -69,7 +85,13 @@ const build = () => {
         };
 
     const actions = {
-        prompt: note('prompt'),
+        prompt: (text: string, sending?: { streamingBehavior?: string }) => {
+            const how = sending?.streamingBehavior === undefined ? '' : `, ${sending.streamingBehavior}`;
+            asked.push(`prompt(${text}${how})`);
+            return options.refusing === undefined
+                ? Promise.resolve()
+                : Promise.reject(new Error(options.refusing));
+        },
         steer: note('steer'),
         followUp: note('follow_up'),
         abort: note('abort'),
@@ -110,8 +132,18 @@ const build = () => {
         },
     } as unknown as RpcLink;
 
-    const session = remoteSession(local, link, state, actions) as Record<string, unknown>;
-    return { session, asked, localCalls, refreshed: () => refreshes, refusals, stopped: () => stopped };
+    // What pi does before anything wraps the session: bindCore closes over the
+    // session that owns the extension runner, and ctx.model calls the closure.
+    const bound = {
+        getModel: () => local.model,
+        getThinkingLevel: () => local.thinkingLevel,
+    };
+
+    const session = remoteSession(local, link, state, actions, {
+        say: (message: string) => said.push(message),
+        keepHere: new Set(options.keepHere ?? []),
+    }) as Record<string, unknown>;
+    return { session, local, bound, asked, localCalls, said, refreshed: () => refreshes, refusals, stopped: () => stopped };
 };
 
 describe('which machine answers', () => {
@@ -124,6 +156,19 @@ describe('which machine answers', () => {
         expect(session.pendingMessageCount).toBe(2);
         expect(session.messages).toHaveLength(1);
         expect((session.messages as unknown as { role: string }[])[0]?.role).toBe('assistant');
+    });
+
+    test('the session pi bound its extensions to reports the far side s model', () => {
+        // ctx.model is not a read of the session the interface holds: pi binds
+        // it as a call on the session that owns the extension runner, which is
+        // the local one. The footer read that, so it named this machine's
+        // model for the whole of a remote session.
+        const { session, bound } = build();
+        expect((bound.getModel() as { id?: string }).id).toBe('remote-model');
+        expect(bound.getThinkingLevel()).toBe('off');
+        const act = session as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+        void act.setModel?.({ provider: 'openai', id: 'gpt-9' });
+        expect((bound.getModel() as { id?: string }).id).toBe('gpt-9');
     });
 
     test('what belongs to this terminal stays here', () => {
@@ -198,6 +243,68 @@ describe('which machine answers', () => {
     });
 });
 
+describe('a command runs on the machine it is about', () => {
+    test('a command about this terminal runs here and is not sent', async () => {
+        const { session, asked, localCalls } = build({
+            commandsHere: ['theme'],
+            commandsThere: ['theme'],
+            keepHere: ['theme'],
+        });
+        await (session as unknown as Record<string, (text: string) => Promise<void>>).prompt?.('/theme gruvbox');
+        expect(localCalls).toEqual(['prompt(/theme gruvbox)']);
+        expect(asked).toEqual([]);
+    });
+
+    test('a command about the session goes to the session', async () => {
+        const { session, asked, localCalls } = build({
+            commandsHere: ['rewind', 'theme'],
+            commandsThere: ['rewind'],
+            keepHere: ['theme'],
+        });
+        await (session as unknown as Record<string, (text: string) => Promise<void>>).prompt?.('/rewind');
+        expect(asked).toEqual(['prompt(/rewind)']);
+        expect(localCalls).toEqual([]);
+    });
+
+    test('the model the corner names changes as soon as it is chosen', async () => {
+        // The footer is drawn from the read that follows setModel, and the far
+        // side is a round trip away: the corner went on naming the model
+        // before until something else refreshed it.
+        const { session } = build();
+        const act = session as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+        const chosen = act.setModel?.({ provider: 'openai', id: 'gpt-9' });
+        expect((session.model as { id?: string }).id).toBe('gpt-9');
+        await chosen;
+    });
+
+    test('cycling the thinking level answers at once, because a keystroke cannot wait', () => {
+        const { session, asked } = build();
+        const act = session as unknown as Record<string, () => unknown>;
+        expect(act.cycleThinkingLevel?.()).toBe('medium');
+        expect(session.thinkingLevel).toBe('medium');
+        expect(asked).toEqual(['set_thinking_level(medium)']);
+    });
+
+    test('what the interface says about a turn in progress goes with the message', async () => {
+        // pi does not stop you typing while the agent is answering: it calls
+        // prompt with a steering behaviour, and a session given none answers
+        // `Agent is already processing`, which a local session never does.
+        const { session, asked } = build();
+        await (session as unknown as Record<string, (text: string, options: unknown) => Promise<void>>).prompt?.(
+            'and another thing',
+            { streamingBehavior: 'steer' },
+        );
+        expect(asked).toEqual(['prompt(and another thing, steer)']);
+    });
+
+    test('a prompt is a prompt, whatever commands exist', async () => {
+        const { session, asked, localCalls } = build({ commandsHere: ['theme'], keepHere: ['theme'] });
+        await (session as unknown as Record<string, (text: string) => Promise<void>>).prompt?.('what is here');
+        expect(asked).toEqual(['prompt(what is here)']);
+        expect(localCalls).toEqual([]);
+    });
+});
+
 describe('a refusal is not a crash', () => {
     test('what cannot be asked returns rather than throwing', async () => {
         // The interface calls some of these from a keystroke handler, and an
@@ -215,6 +322,16 @@ describe('a refusal is not a crash', () => {
         (session as unknown as Record<string, () => unknown>).reload?.();
         expect(refusals[0]).toContain('reload');
         expect(refusals[0]).toContain('another machine');
+    });
+
+    test('a prompt the far side would not take is said, not swallowed', async () => {
+        // The interface reads nothing off these promises, so a rejection was
+        // the whole of the feedback and it went nowhere: a prompt refused
+        // during compaction left the text gone and the screen unchanged.
+        const { session, said } = build({ refusing: 'compaction is in progress' });
+        await (session as unknown as Record<string, (text: string) => Promise<void>>).prompt?.('hello');
+        expect(said).toHaveLength(1);
+        expect(said[0]).toContain('compaction is in progress');
     });
 
     test('what the far side would fork from is answered at once', () => {

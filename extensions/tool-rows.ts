@@ -44,7 +44,8 @@ import {
     type Theme,
     type ToolRenderResultOptions,
 } from '@earendil-works/pi-coding-agent';
-import type { Component, TuiMouseEvent, TuiMouseEventResult } from '@earendil-works/pi-tui';
+import { Box, type Component, type TuiMouseEvent, type TuiMouseEventResult } from '@earendil-works/pi-tui';
+import { trimBlankEdges } from './lib/box-edges';
 import { config } from './lib/config';
 import {
     collapseCall,
@@ -62,6 +63,43 @@ import type { RowColor, RowTheme } from './lib/tool-row/theme';
 import { retitle, toolTitle } from './lib/tool-row/title';
 
 const { titles, detail, execPreview, names } = config.tools;
+const { boxToolTails } = config.render;
+
+// pi calls render(width) on every layout pass, including a resize, without
+// rebuilding the component, so anything that depends on the width has to
+// happen there and not at construction.
+class Lines implements Component {
+    constructor(private readonly build: (width: number) => string[]) {}
+    render(width: number): string[] {
+        return this.build(width);
+    }
+    invalidate(): void {}
+}
+
+// ToolRenderContext is not exported from the package root; this names only
+// the fields read here.
+interface RenderCtx {
+    args: unknown;
+    expanded: boolean;
+    lastComponent?: Component;
+    /** set on a result context only; AgentToolResult does not carry it. */
+    isError?: boolean;
+}
+
+type RenderCallFn = (args: unknown, theme: Theme, context: RenderCtx) => Component;
+type RenderResultFn = (
+    result: AgentToolResult<unknown>,
+    options: ToolRenderResultOptions,
+    theme: Theme,
+    context: RenderCtx,
+) => Component;
+
+interface ToolExecutionInternals {
+    toolName: string;
+    getCallRenderer(): RenderCallFn | undefined;
+    getResultRenderer(): RenderResultFn | undefined;
+    formatToolExecution(): string;
+}
 
 if (titles || detail || execPreview) {
     const titleOf = (name: string): string => (titles ? toolTitle(name, names) : name);
@@ -73,17 +111,6 @@ if (titles || detail || execPreview) {
         bold: (text: string) => theme.bold(text),
         highlight: (code: string, language: string) => highlightCode(code, language),
     });
-
-    // pi calls render(width) on every layout pass, including a resize, without
-    // rebuilding the component, so anything that depends on the width has to
-    // happen there and not at construction.
-    class Lines implements Component {
-        constructor(private readonly build: (width: number) => string[]) {}
-        render(width: number): string[] {
-            return this.build(width);
-        }
-        invalidate(): void {}
-    }
 
     /**
      * a tool's own call component, with the machine it acted on on the right.
@@ -145,29 +172,6 @@ if (titles || detail || execPreview) {
         handleInput(data: string): void {
             this.inner.handleInput?.(data);
         }
-    }
-
-    // ToolRenderContext is not exported from the package root; this names only
-    // the fields read here.
-    interface RenderCtx {
-        args: unknown;
-        expanded: boolean;
-        lastComponent?: Component;
-    }
-
-    type RenderCallFn = (args: unknown, theme: Theme, context: RenderCtx) => Component;
-    type RenderResultFn = (
-        result: AgentToolResult<unknown>,
-        options: ToolRenderResultOptions,
-        theme: Theme,
-        context: RenderCtx,
-    ) => Component;
-
-    interface ToolExecutionInternals {
-        toolName: string;
-        getCallRenderer(): RenderCallFn | undefined;
-        getResultRenderer(): RenderResultFn | undefined;
-        formatToolExecution(): string;
     }
 
     const proto = ToolExecutionComponent.prototype as unknown as ToolExecutionInternals;
@@ -336,6 +340,61 @@ if (titles || detail || execPreview) {
             return [retitle(first, this.toolName, titleOf(this.toolName)), ...rest].join('\n');
         };
     }
+}
+
+if (boxToolTails) {
+    // pi's edit tool is the only one that declares renderShell "self": it draws
+    // its own row rather than letting ToolExecutionComponent wrap its output in
+    // the usual Box, because the row has to keep a diff on screen while the
+    // arguments are still streaming and rewrite it in place when they settle.
+    // that is its call slot. its result slot (core/tools/renderers/edit.js)
+    // returns a bare Container of a Spacer and a Text, which lands after the
+    // box it drew: an unpainted blank line and an unpainted line of text, the
+    // one row in a transcript with neither a background nor half-block edges.
+    // it is reached whenever the result differs from what the preview already
+    // showed, which in practice is every failed edit.
+    //
+    // the fix is a Box around that tail, not a change to the row pi draws: a
+    // Box picks up halfblock-boxes.ts's patch on Box.prototype.render for free,
+    // and the blank line goes because the tail is trimmed before it is boxed.
+    const proto = ToolExecutionComponent.prototype as unknown as ToolExecutionInternals;
+
+    /** a self-rendered tool's trailing output, in a box of its own. */
+    class Tail extends Box {
+        constructor(readonly inner: Component, bg: (text: string) => string) {
+            super(0, 1, bg);
+            // Box.render returns [] when its children render nothing, so a tool
+            // that says nothing here still costs no rows.
+            this.addChild(new Lines((width) => trimBlankEdges(inner.render(width))));
+        }
+        // Box.invalidate walks its children, and Lines holds the real component
+        // in a closure rather than as one.
+        invalidate(): void {
+            super.invalidate();
+            this.inner.invalidate?.();
+        }
+    }
+
+    const origGetResultRenderer = proto.getResultRenderer;
+    proto.getResultRenderer = function (this: ToolExecutionInternals): RenderResultFn | undefined {
+        const inner = origGetResultRenderer.call(this);
+        if (inner === undefined || this.toolName !== 'edit') return inner;
+
+        return (result, options, theme, context) => {
+            // pi hands a renderer the component it returned last time for its
+            // own incremental state, and edit's clears and refills it, so it
+            // gets the component it made rather than the wrapper around it.
+            const last = context.lastComponent;
+            const prior = last instanceof Tail ? last.inner : last;
+            const component = inner(result, options, theme, { ...context, lastComponent: prior });
+            const bg = (text: string) => theme.bg(context.isError ? 'toolErrorBg' : 'toolSuccessBg', text);
+            if (last instanceof Tail && last.inner === component) {
+                last.setBgFn(bg);
+                return last;
+            }
+            return new Tail(component, bg);
+        };
+    };
 }
 
 export default function (_pi: ExtensionAPI) {}

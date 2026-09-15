@@ -4,6 +4,12 @@
 //   bun run init              -> writes to XDG config path
 //   bun run init ./rho.toml   -> writes to the given path
 //   bun run init -            -> prints to stdout
+//   bun run config            -> rewrites the repo's rho.toml, which is generated
+//
+// the rho.toml at the repo root is output, never a source: it is the schema in
+// extensions/lib/config.ts printed with its docs. change the schema, then run
+// `bun run config`. editing it by hand puts the file and the schema at odds,
+// and tests/config.test.ts fails while they are.
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { configPath, DEFAULTS, toToml, save } from '../extensions/lib/config';

@@ -1,7 +1,7 @@
 // unit tests for the prompt history state machine
 
 import { describe, expect, it, beforeEach } from 'bun:test';
-import { HistoryLog, parseHistoryState, HISTORY_STATE_VERSION, type HistoryState, type HistoryEntry, type HistoryEntryId } from '../extensions/lib/prompt-history';
+import { HistoryLog, matchWindow, parseHistoryState, ReverseSearch, HISTORY_STATE_VERSION, type HistoryState, type HistoryEntry, type HistoryEntryId } from '../extensions/lib/prompt-history';
 
 describe('HistoryLog', () => {
     let log: HistoryLog;
@@ -162,6 +162,120 @@ describe('parseHistoryState', () => {
         };
         const parsed = parseHistoryState(raw);
         expect(parsed!.nextId).toBe(11);
+    });
+});
+
+const id = (n: number): HistoryEntryId => n as HistoryEntryId;
+
+function entry(n: number, text: string, sent = true, at = n * 1000): HistoryEntry {
+    return { id: id(n), text, at, sent };
+}
+
+// newest first, as the log stores them
+const LOG: readonly HistoryEntry[] = [
+    entry(5, 'deploy the staging cluster'),
+    entry(4, 'run the tests again', false),
+    entry(3, 'deploy the staging cluster', false),
+    entry(2, 'what does the parser do with an empty file'),
+    entry(1, 'run the tests'),
+];
+
+describe('ReverseSearch', () => {
+    it('opens on the newest entry with every candidate matching', () => {
+        const view = new ReverseSearch(LOG).view;
+        expect(view.index).toBe(0);
+        expect(view.current!.id).toBe(id(5));
+        expect(view.matches.length).toBe(4); // the repeated text collapses
+    });
+
+    it('keeps the newest of two entries with the same text', () => {
+        const search = new ReverseSearch(LOG);
+        const ids = search.view.matches.map((e) => e.id);
+        expect(ids).toContain(id(5));
+        expect(ids).not.toContain(id(3));
+    });
+
+    it('narrows on a substring, ignoring case', () => {
+        const view = new ReverseSearch(LOG).setQuery('TESTS');
+        expect(view.matches.map((e) => e.id)).toEqual([id(4), id(1)]);
+        expect(view.index).toBe(0);
+    });
+
+    it('reports no current entry when nothing matches', () => {
+        const view = new ReverseSearch(LOG).setQuery('nothing here');
+        expect(view.matches).toEqual([]);
+        expect(view.index).toBe(-1);
+        expect(view.current).toBeNull();
+    });
+
+    it('steps to older matches and stops at the oldest', () => {
+        const search = new ReverseSearch(LOG);
+        search.setQuery('tests');
+        expect(search.older().current!.id).toBe(id(1));
+        expect(search.older().current!.id).toBe(id(1));
+    });
+
+    it('steps back to newer matches and stops at the newest', () => {
+        const search = new ReverseSearch(LOG);
+        search.setQuery('tests');
+        search.older();
+        expect(search.newer().current!.id).toBe(id(4));
+        expect(search.newer().current!.id).toBe(id(4));
+    });
+
+    it('holds the entry under the cursor while the query still matches it', () => {
+        const search = new ReverseSearch(LOG);
+        search.setQuery('tests');
+        search.older(); // entry 1, "run the tests"
+        expect(search.setQuery('test').current!.id).toBe(id(1));
+        expect(search.setQuery('').current!.id).toBe(id(1));
+    });
+
+    it('returns to the newest match when the held entry drops out', () => {
+        const search = new ReverseSearch(LOG);
+        search.setQuery('tests');
+        search.older();
+        expect(search.setQuery('tests again').current!.id).toBe(id(4));
+    });
+
+    it('ignores a selection outside the matches', () => {
+        const search = new ReverseSearch(LOG);
+        expect(search.select(99).index).toBe(0);
+        expect(search.select(2).current!.id).toBe(id(2));
+    });
+});
+
+describe('matchWindow', () => {
+    it('flattens a multi-line entry to one line', () => {
+        const window = matchWindow('first\n\nsecond', 'second', 40);
+        expect(window.text).toBe('first second');
+        expect(window.text.slice(window.start, window.start + window.length)).toBe('second');
+    });
+
+    it('reports no position for an absent or empty query', () => {
+        expect(matchWindow('hello', '', 40).start).toBe(-1);
+        expect(matchWindow('hello', 'zz', 40).start).toBe(-1);
+    });
+
+    it('cuts from the head when the match is early', () => {
+        const window = matchWindow(`deploy ${'x'.repeat(200)}`, 'deploy', 40);
+        expect(window.text.length).toBe(40);
+        expect(window.text.startsWith('deploy')).toBe(true);
+        expect(window.text.endsWith('...')).toBe(true);
+    });
+
+    it('keeps a late match inside the window, with context before it', () => {
+        const window = matchWindow(`${'x'.repeat(200)} needle tail`, 'needle', 40);
+        expect(window.text.length).toBeLessThanOrEqual(40);
+        expect(window.text.startsWith('...')).toBe(true);
+        expect(window.start).toBeGreaterThan(0);
+        expect(window.text.slice(window.start, window.start + window.length)).toBe('needle');
+    });
+
+    it('leaves a short line whole', () => {
+        const window = matchWindow('short one', 'one', 40);
+        expect(window.text).toBe('short one');
+        expect(window.start).toBe(6);
     });
 });
 

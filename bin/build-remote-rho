@@ -69,8 +69,17 @@ mkdirSync(join(out, 'extensions'), { recursive: true });
  * The entry points land in extensions/ and the shared chunks beside them in the
  * package root, which pi does not scan, so it loads the extensions and they
  * pull in what they need.
+ *
+ * --root is what decides that, and leaving it out makes the layout depend on
+ * the directory the build was started from: bun takes the common root of the
+ * entry paths as written, so a build run from ~/Git/mock against
+ * ../../Code/rho/extensions/*.ts wrote every extension to _.._/_.._/Code/rho/
+ * inside the package. pi loads ./extensions, found the five vendored files
+ * that are copied in separately, and ran without rho at all -- no system
+ * prompt, and no prompt-defingerprint.ts, so every request on that host was
+ * classified third party and answered 429 against the spend cap.
  */
-const built = await $`bun build ${join(root, 'extensions')}/*.ts --target=node --outdir ${out} --splitting ${EXTERNAL.flatMap((name) => ['--external', name])}`.quiet();
+const built = await $`bun build ${join(root, 'extensions')}/*.ts --target=node --root ${root} --outdir ${out} --splitting ${EXTERNAL.flatMap((name) => ['--external', name])}`.quiet();
 if (built.exitCode !== 0) {
     process.stderr.write(built.stderr.toString());
     process.exit(1);
@@ -83,6 +92,26 @@ const nested = join(out, 'extensions', 'extensions');
 if (existsSync(nested)) {
     cpSync(nested, join(out, 'extensions'), { recursive: true });
     rmSync(nested, { recursive: true, force: true });
+}
+
+/**
+ * Every extension that went in came out, under the name pi will look for.
+ *
+ * A bundle missing rho's own extensions is not a smaller rho: it is pi with
+ * five vendored files, and the session it runs bills against the wrong pool
+ * and answers with none of the rules. It shipped that way once, so the count
+ * is checked rather than assumed.
+ */
+const asked = readdirSync(join(root, 'extensions')).filter(
+    (entry) => entry.endsWith('.ts') && !WITHOUT.includes(entry.replace(/\.ts$/, '')),
+);
+const arrived = new Set(readdirSync(join(out, 'extensions')).filter((entry) => entry.endsWith('.js')));
+const missing = asked.filter((entry) => !arrived.has(entry.replace(/\.ts$/, '.js')));
+if (missing.length > 0) {
+    process.stderr.write(
+        `the build put ${missing.length} of ${asked.length} extensions somewhere pi will not look for them (${missing.slice(0, 3).join(', ')}...).\n`,
+    );
+    process.exit(1);
 }
 
 // Removed after the build, not before, and from wherever they landed: this

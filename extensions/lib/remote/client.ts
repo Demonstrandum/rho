@@ -380,7 +380,19 @@ export { Failed };
 export function connectOverOriginChannel(name: string, socketPath: string): Connection {
     const socket = netConnect(socketPath);
     let gone: ((why: string) => void) | undefined;
-    socket.on('connect', () => socket.write(`${JSON.stringify(ORIGIN_OPEN)}\n`));
+    /**
+     * The first line written, rather than the first line written after the
+     * socket opens.
+     *
+     * node queues writes made before a socket is connected and flushes them in
+     * the order they were made, so a request the caller writes in this same
+     * tick goes out ahead of a declaration deferred to the connect event. The
+     * broker then has a frame from a connection it has not classified, sends it
+     * to the origins -- of which there are none, this being the one -- and the
+     * request is dropped: `pwd` on the laptop waited out its whole twenty
+     * second deadline and reported that the origin did not answer.
+     */
+    socket.write(`${JSON.stringify(ORIGIN_OPEN)}\n`);
     return connectOver(name, {
         describe: `${socketPath} (the attached interface)`,
         write: (bytes) => void socket.write(`${JSON.stringify(packOrigin(bytes))}\n`),

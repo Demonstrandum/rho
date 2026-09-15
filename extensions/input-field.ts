@@ -12,27 +12,29 @@
 // wrap borderColor with a sentinel-emitting function for the duration of the
 // original call. every row produced through it carries '\x00', so the two
 // border rows self-identify.
+//
+// since pi 0.85 the top border can also carry the working indicator (see
+// lib/working-status.ts). replacing that row with the half-block edge is what
+// hid the spinner, so under `[spinner] placement = "border"` the status is
+// rendered again and cut into the edge at the columns pi used.
 
 import {
     CustomEditor,
     type ExtensionAPI,
     type Theme,
-    type ThemeColor,
 } from '@earendil-works/pi-coding-agent';
 import { Editor } from '@earendil-works/pi-tui';
 import { config, type GradientSpec } from './lib/config';
+import { borderStatus, cutInto } from './lib/working-status';
+import { resolveColour } from './lib/colour-spec';
 import {
     type Rgb,
     blend,
     ansiFg,
     ansiBg,
     parseFgRgb,
-    parseHex,
     themeRgb,
     themeBgRgb,
-    rgbToHsl,
-    hslToRgb,
-    applyHslFilters,
     RESET,
 } from './lib/utils';
 
@@ -64,36 +66,11 @@ function fieldBgRgb(): Rgb | undefined {
     return blend(base, target, amount);
 }
 
-// resolve a colour spec. forms:
-//   ""                  empty, returns undefined
-//   "#rrggbb"           hex
-//   "border"            theme fg or bg colour name
-//   "border@l=80,s*0.4" colour with HSL filters
-//   "#3366aa@l+20"      hex with filters
-function resolveColour(spec: string): Rgb | undefined {
-    if (!spec || !activeTheme) return undefined;
-
-    let colourPart = spec;
-    let filters: string[] | undefined;
-    const at = spec.indexOf('@');
-    if (at !== -1) {
-        colourPart = spec.slice(0, at);
-        filters = spec.slice(at + 1).split(',');
-    }
-
-    let rgb: Rgb | undefined;
-    if (colourPart.startsWith('#')) {
-        rgb = parseHex(colourPart);
-    } else {
-        try { rgb = themeRgb(activeTheme, colourPart as ThemeColor); } catch {}
-        if (!rgb) { try { rgb = themeBgRgb(activeTheme, colourPart); } catch {} }
-    }
-    if (!rgb) return undefined;
-
-    if (filters && filters.length > 0) {
-        rgb = hslToRgb(applyHslFilters(rgbToHsl(rgb), filters));
-    }
-    return rgb;
+// a colour spec ("border", "#3366aa@l+20") against the captured theme.
+// the resolver itself is in lib/colour-spec.ts, since command-hint.ts reads
+// the same form of spec out of the same config file.
+function colourOf(spec: string): Rgb | undefined {
+    return resolveColour(activeTheme, spec);
 }
 
 interface ResolvedGradient {
@@ -106,7 +83,7 @@ function resolveGradient(spec: GradientSpec): ResolvedGradient | undefined {
     if (names.length === 0) return undefined;
     const colors: Rgb[] = [];
     for (const s of names) {
-        const rgb = resolveColour(s);
+        const rgb = colourOf(s);
         if (!rgb) return undefined;
         colors.push(rgb);
     }
@@ -283,7 +260,8 @@ if (halfBlockEdges || background) {
         ensureCache(width, tinted);
 
         if (halfBlockEdges) {
-            lines[topIdx] = cachedTopEdge;
+            const status = borderStatus(this, width);
+            lines[topIdx] = status === undefined ? cachedTopEdge : cutInto(cachedTopEdge, status, width);
             lines[bottomIdx] = cachedBottomEdge;
         }
 

@@ -80,7 +80,17 @@ export class RpcLink {
                 this.pending.delete(id);
                 if (waiting !== undefined) {
                     if (waiting.timer !== null) clearTimeout(waiting.timer);
-                    waiting.settle(message);
+                    // A refusal is an answer, and pi sends it as one:
+                    // success false with the reason beside it. Settling on it
+                    // as though it were a result meant every refusal the far
+                    // side gave -- no such model, a prompt during compaction,
+                    // a command that threw -- resolved a promise nobody read.
+                    if (message.success === false) {
+                        const said = typeof message.error === 'string' ? message.error : 'the session refused';
+                        waiting.fail(new Error(said));
+                    } else {
+                        waiting.settle(message);
+                    }
                 }
                 continue;
             }

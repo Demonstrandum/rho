@@ -1,0 +1,243 @@
+{
+  "comment": "syntax palettes for /syntax. each one sets only the code colours; the session keeps the theme it has for everything else. a key left out keeps the theme's own value. roles are pi's: comment, keyword, function, variable, string, number, type, operator, punctuation, code (inline `code` in markdown), codeBlock (a fenced block in no known language).",
+  "palettes": [
+    {
+      "name": "catppuccin-mocha",
+      "origin": "Catppuccin Mocha",
+      "colors": {
+        "comment": "#6C7086",
+        "keyword": "#CBA6F7",
+        "function": "#89B4FA",
+        "variable": "#CDD6F4",
+        "string": "#A6E3A1",
+        "number": "#FAB387",
+        "type": "#F9E2AF",
+        "operator": "#89DCEB",
+        "punctuation": "#9399B2",
+        "code": "#A6E3A1",
+        "codeBlock": "#CDD6F4"
+      }
+    },
+    {
+      "name": "catppuccin-latte",
+      "origin": "Catppuccin Latte",
+      "colors": {
+        "comment": "#9CA0B0",
+        "keyword": "#8839EF",
+        "function": "#1E66F5",
+        "variable": "#4C4F69",
+        "string": "#40A02B",
+        "number": "#FE640B",
+        "type": "#DF8E1D",
+        "operator": "#179299",
+        "punctuation": "#6C6F85",
+        "code": "#40A02B",
+        "codeBlock": "#4C4F69"
+      }
+    },
+    {
+      "name": "dracula",
+      "origin": "Dracula",
+      "colors": {
+        "comment": "#6272A4",
+        "keyword": "#FF79C6",
+        "function": "#50FA7B",
+        "variable": "#F8F8F2",
+        "string": "#F1FA8C",
+        "number": "#BD93F9",
+        "type": "#8BE9FD",
+        "operator": "#FF79C6",
+        "punctuation": "#F8F8F2",
+        "code": "#F1FA8C",
+        "codeBlock": "#F8F8F2"
+      }
+    },
+    {
+      "name": "gruvbox-dark",
+      "origin": "Gruvbox dark",
+      "colors": {
+        "comment": "#928374",
+        "keyword": "#FB4934",
+        "function": "#B8BB26",
+        "variable": "#EBDBB2",
+        "string": "#B8BB26",
+        "number": "#D3869B",
+        "type": "#FABD2F",
+        "operator": "#8EC07C",
+        "punctuation": "#A89984",
+        "code": "#B8BB26",
+        "codeBlock": "#EBDBB2"
+      }
+    },
+    {
+      "name": "gruvbox-light",
+      "origin": "Gruvbox light",
+      "colors": {
+        "comment": "#928374",
+        "keyword": "#9D0006",
+        "function": "#79740E",
+        "variable": "#3C3836",
+        "string": "#79740E",
+        "number": "#8F3F71",
+        "type": "#B57614",
+        "operator": "#427B58",
+        "punctuation": "#665C54",
+        "code": "#79740E",
+        "codeBlock": "#3C3836"
+      }
+    },
+    {
+      "name": "nord",
+      "origin": "Nord",
+      "colors": {
+        "comment": "#616E88",
+        "keyword": "#81A1C1",
+        "function": "#88C0D0",
+        "variable": "#D8DEE9",
+        "string": "#A3BE8C",
+        "number": "#B48EAD",
+        "type": "#8FBCBB",
+        "operator": "#81A1C1",
+        "punctuation": "#D8DEE9",
+        "code": "#A3BE8C",
+        "codeBlock": "#D8DEE9"
+      }
+    },
+    {
+      "name": "tokyo-night",
+      "origin": "Tokyo Night",
+      "colors": {
+        "comment": "#565F89",
+        "keyword": "#BB9AF7",
+        "function": "#7AA2F7",
+        "variable": "#C0CAF5",
+        "string": "#9ECE6A",
+        "number": "#FF9E64",
+        "type": "#2AC3DE",
+        "operator": "#89DDFF",
+        "punctuation": "#A9B1D6",
+        "code": "#9ECE6A",
+        "codeBlock": "#C0CAF5"
+      }
+    },
+    {
+      "name": "one-dark",
+      "origin": "Atom One Dark",
+      "colors": {
+        "comment": "#5C6370",
+        "keyword": "#C678DD",
+        "function": "#61AFEF",
+        "variable": "#ABB2BF",
+        "string": "#98C379",
+        "number": "#D19A66",
+        "type": "#E5C07B",
+        "operator": "#56B6C2",
+        "punctuation": "#ABB2BF",
+        "code": "#98C379",
+        "codeBlock": "#ABB2BF"
+      }
+    },
+    {
+      "name": "solarized-dark",
+      "origin": "Solarized dark",
+      "colors": {
+        "comment": "#586E75",
+        "keyword": "#859900",
+        "function": "#268BD2",
+        "variable": "#839496",
+        "string": "#2AA198",
+        "number": "#D33682",
+        "type": "#B58900",
+        "operator": "#CB4B16",
+        "punctuation": "#93A1A1",
+        "code": "#2AA198",
+        "codeBlock": "#839496"
+      }
+    },
+    {
+      "name": "solarized-light",
+      "origin": "Solarized light",
+      "colors": {
+        "comment": "#93A1A1",
+        "keyword": "#859900",
+        "function": "#268BD2",
+        "variable": "#657B83",
+        "string": "#2AA198",
+        "number": "#D33682",
+        "type": "#B58900",
+        "operator": "#CB4B16",
+        "punctuation": "#586E75",
+        "code": "#2AA198",
+        "codeBlock": "#657B83"
+      }
+    },
+    {
+      "name": "monokai",
+      "origin": "Monokai",
+      "colors": {
+        "comment": "#75715E",
+        "keyword": "#F92672",
+        "function": "#A6E22E",
+        "variable": "#F8F8F2",
+        "string": "#E6DB74",
+        "number": "#AE81FF",
+        "type": "#66D9EF",
+        "operator": "#F92672",
+        "punctuation": "#F8F8F2",
+        "code": "#E6DB74",
+        "codeBlock": "#F8F8F2"
+      }
+    },
+    {
+      "name": "github-light",
+      "origin": "GitHub light",
+      "colors": {
+        "comment": "#6E7781",
+        "keyword": "#CF222E",
+        "function": "#8250DF",
+        "variable": "#24292F",
+        "string": "#0A3069",
+        "number": "#0550AE",
+        "type": "#953800",
+        "operator": "#0550AE",
+        "punctuation": "#24292F",
+        "code": "#0A3069",
+        "codeBlock": "#24292F"
+      }
+    },
+    {
+      "name": "plan9-muted",
+      "origin": "the plan9-dark palette, at the contrast the rest of that theme uses",
+      "colors": {
+        "comment": "#6B694F",
+        "keyword": "#8494CC",
+        "function": "#6E9BC0",
+        "variable": "",
+        "string": "#71A87F",
+        "number": "#A57FB0",
+        "type": "#4C9A9A",
+        "operator": "#BE6E6B",
+        "punctuation": "#93906A",
+        "code": "#71A87F",
+        "codeBlock": ""
+      }
+    },
+    {
+      "name": "ansi",
+      "origin": "the terminal's own sixteen colours, so the palette follows its profile",
+      "colors": {
+        "comment": 8,
+        "keyword": 5,
+        "function": 4,
+        "variable": "",
+        "string": 2,
+        "number": 13,
+        "type": 6,
+        "operator": 1,
+        "punctuation": 7,
+        "code": 2,
+        "codeBlock": ""
+      }
+    }
+  ]
+}

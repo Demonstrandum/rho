@@ -57,6 +57,29 @@ export function actionsBoundTo(key: KeyId): { ids: KeybindingId[]; keysInUse: Se
     return { ids, keysInUse };
 }
 
+/**
+ * take one key away from a built-in action and leave it on the rest of its
+ * keys. for a key an extension wants where the action has another way in
+ * anyway: ctrl+f leaves tui.editor.cursorRight, which the right arrow still
+ * reaches. a keybindings.json that already names `id` is left alone, and the
+ * new binding applies from the next start, as with every write here.
+ */
+export function releaseKey(id: KeybindingId, key: KeyId): boolean {
+    let resolved: Record<string, KeyId | KeyId[] | undefined>;
+    try {
+        resolved = getKeybindings().getResolvedBindings();
+    } catch {
+        return false;
+    }
+    const bound = resolved[id];
+    if (bound === undefined) return false;
+    const target = key.toLowerCase();
+    const list = Array.isArray(bound) ? bound : [bound];
+    const remaining = list.filter((k) => k.toLowerCase() !== target);
+    if (remaining.length === list.length) return false;
+    return ensureKeybinding(id, remaining);
+}
+
 export function ensureKeybinding(id: KeybindingId, keys: KeyId | readonly KeyId[]): boolean {
     const path = keybindingsPath();
     let bindings: Bindings = {};

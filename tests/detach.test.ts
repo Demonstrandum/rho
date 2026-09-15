@@ -65,7 +65,11 @@ describe('the commands it registers', () => {
         let asked = false;
         const ctx = {
             ui: { notify: (message: string) => said.push(message) },
-            sessionManager: { getSessionFile: () => undefined, getCwd: () => '/tmp' },
+            sessionManager: {
+                getSessionFile: () => undefined,
+                getCwd: () => '/tmp',
+                getSessionId: () => '01a0-test',
+            },
             shutdown: () => {
                 asked = true;
             },

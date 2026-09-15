@@ -114,7 +114,17 @@ if (verb === 'stop') {
     // whose note went missing is still a session, and it still answers.
     const bypid = stop(name);
     const asked = bypid ? true : await askToStop(name);
-    process.stdout.write(asked ? `stopped ${name}\n` : `no session called ${name}\n`);
+    if (asked) {
+        process.stdout.write(`stopped ${name}\n`);
+        process.exit(0);
+    }
+    // A session that is not running is not a session that does not exist: its
+    // transcript is kept, and connecting starts it again where it left off.
+    // Reporting both states as "no session called X" made a stop that had
+    // already happened look like a name nobody recognised, and the four
+    // sessions it was said about were all still listed by `all`.
+    const kept = existsSync(join(stateHome(), 'rho', 'sessions', name));
+    process.stdout.write(kept ? `${name} was already stopped\n` : `no session called ${name}\n`);
     process.exit(0);
 }
 

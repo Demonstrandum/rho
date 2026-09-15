@@ -874,6 +874,108 @@ export default function (pi: ExtensionAPI) {
         return listed || 'no sessions';
     };
 
+    /**
+     * Attach to a session, starting it if it is not running.
+     *
+     * A function rather than the body of the connect verb, because the picker
+     * offers the same action: /remote manage said enter was connect, drew that
+     * on its hint line, and then returned the chosen name to nobody. A label
+     * for an action nothing performs is worse than no label.
+     */
+    const connectTo = async (ctx: ExtensionContext, session: string, given?: string): Promise<void> => {
+                const address_ = given ?? hosts.get(session) ?? worktrees.get(session)?.host;
+                if (address_ === undefined) {
+                    ctx.ui.notify(`I do not know which host ${session} is on. /remote connect ${session} user@host`, 'error');
+                    return;
+                }
+                // An address given here is create's argument, so connect takes
+                // create's place when there is nothing to connect to: asking
+                // for a session is asking for it to exist.
+                const host = address_.includes(':') ? address_.slice(0, address_.indexOf(':')) : address_;
+                // Running, not merely known: a stopped session is one that has to
+                // be started again, and attaching to it found no socket and
+                // bounced straight back to this interface.
+                const alreadyThere = (await held(host).catch(() => [])).some(
+                    (found) => found.name === session && found.state === 'running',
+                );
+                if (!alreadyThere) {
+                    // A project's session belongs in its worktree, which is the
+                    // whole point of having made one.
+                    const tree = worktrees.get(session);
+                    const where = tree === undefined ? address_ : `${tree.host}:${tree.path}`;
+                    const bar = progress(ctx);
+                    bar.say(`starting ${session} on ${host}`);
+                    try {
+                        await create(session, where, (text) => bar.say(text));
+                    } catch (error) {
+                        ctx.ui.notify(`Could not create ${session}: ${(error as Error).message}`, 'error');
+                        return;
+                    } finally {
+                        bar.done();
+                    }
+                }
+                // The terminal is handed over, not described.
+                //
+                // The interface that draws a remote session is a different
+                // process, and this one owns the terminal. Shutting down and
+                // spawning it does not work: the child dies with the parent
+                // and the window closes. pi already knows how to stand aside
+                // for a program that needs the terminal -- it is what it does
+                // for an external editor -- so this borrows that: the drawing
+                // stops, the client runs in its place, and when it exits the
+                // interface comes back exactly as it was.
+                // rho's own code on that machine, brought up to date before it
+                // is used: a session started last week should not be attached
+                // to by last week's runner.
+                await ensureRunner(host, () => {}).catch(() => {
+                    // An update that cannot be made is not a reason to refuse a
+                    // session that is already running.
+                });
+
+                const client = join(rhoRoot(), 'bin', 'rho-remote');
+                // Why the client left, since the screen it wrote on is redrawn
+                // by this interface the moment it returns.
+                let left = 0;
+                let said = '';
+                await ctx.ui.custom<void>(
+                    (tui, _theme, _keys, done) => {
+                        queueMicrotask(() => {
+                            tui.stop();
+                            try {
+                                // stderr is captured rather than inherited: it is
+                                // where the client says why it stopped, and this
+                                // interface redraws over it the moment it returns.
+                                const ran = spawnSync('bun', [client, host, session], {
+                                    stdio: ['inherit', 'inherit', 'pipe'],
+                                    encoding: 'utf8',
+                                });
+                                left = ran.status ?? 1;
+                                said = ran.stderr ?? '';
+                            } finally {
+                                tui.start();
+                                tui.requestRender(true);
+                                done();
+                            }
+                        });
+                        return {
+                            render: () => [],
+                            handleInput: () => {},
+                        } as never;
+                    },
+                    { overlay: true },
+                );
+                if (left === 0) {
+                    ctx.ui.notify(`back from ${session} on ${host}, which is still running`, 'info');
+                    return;
+                }
+                const trouble = troubleWith(said, session, host);
+                ctx.ui.notify(
+                    trouble.advice === null ? trouble.reason : `${trouble.reason}\n${trouble.advice}`,
+                    'error',
+                );
+                return;
+    };
+
     pi.registerCommand('remote', {
         description:
             'run the session on another machine: /remote create <name> user@host, /remote connect <name>, /remote list <user@host>',
@@ -993,7 +1095,7 @@ export default function (pi: ExtensionAPI) {
                 const refresh = async () => {
                     sessions = await held(host);
                 };
-                await browse(ctx, {
+                const chosen = await browse(ctx, {
                     title: `sessions on ${host}`,
                     empty: `nothing on ${host}. /remote create <name> ${host} starts one`,
                     items: () =>
@@ -1056,102 +1158,17 @@ export default function (pi: ExtensionAPI) {
                         return true;
                     },
                 });
+                // What the picker chose: enter means connect, and saying so on
+                // the hint line while dropping the answer is how this came to
+                // look like a picker that does nothing.
+                if (chosen !== null) await connectTo(ctx, chosen);
                 return;
             }
 
             if (verb === 'connect') {
                 const session = first ?? (await chooseSession(ctx, 'connect'));
                 if (session === null) return;
-                const address_ = second ?? hosts.get(session) ?? worktrees.get(session)?.host;
-                if (address_ === undefined) {
-                    ctx.ui.notify(`I do not know which host ${session} is on. /remote connect ${session} user@host`, 'error');
-                    return;
-                }
-                // An address given here is create's argument, so connect takes
-                // create's place when there is nothing to connect to: asking
-                // for a session is asking for it to exist.
-                const host = address_.includes(':') ? address_.slice(0, address_.indexOf(':')) : address_;
-                // Running, not merely known: a stopped session is one that has to
-                // be started again, and attaching to it found no socket and
-                // bounced straight back to this interface.
-                const alreadyThere = (await held(host).catch(() => [])).some(
-                    (found) => found.name === session && found.state === 'running',
-                );
-                if (!alreadyThere) {
-                    // A project's session belongs in its worktree, which is the
-                    // whole point of having made one.
-                    const tree = worktrees.get(session);
-                    const where = tree === undefined ? address_ : `${tree.host}:${tree.path}`;
-                    const bar = progress(ctx);
-                    bar.say(`starting ${session} on ${host}`);
-                    try {
-                        await create(session, where, (text) => bar.say(text));
-                    } catch (error) {
-                        ctx.ui.notify(`Could not create ${session}: ${(error as Error).message}`, 'error');
-                        return;
-                    } finally {
-                        bar.done();
-                    }
-                }
-                // The terminal is handed over, not described.
-                //
-                // The interface that draws a remote session is a different
-                // process, and this one owns the terminal. Shutting down and
-                // spawning it does not work: the child dies with the parent
-                // and the window closes. pi already knows how to stand aside
-                // for a program that needs the terminal -- it is what it does
-                // for an external editor -- so this borrows that: the drawing
-                // stops, the client runs in its place, and when it exits the
-                // interface comes back exactly as it was.
-                // rho's own code on that machine, brought up to date before it
-                // is used: a session started last week should not be attached
-                // to by last week's runner.
-                await ensureRunner(host, () => {}).catch(() => {
-                    // An update that cannot be made is not a reason to refuse a
-                    // session that is already running.
-                });
-
-                const client = join(rhoRoot(), 'bin', 'rho-remote');
-                // Why the client left, since the screen it wrote on is redrawn
-                // by this interface the moment it returns.
-                let left = 0;
-                let said = '';
-                await ctx.ui.custom<void>(
-                    (tui, _theme, _keys, done) => {
-                        queueMicrotask(() => {
-                            tui.stop();
-                            try {
-                                // stderr is captured rather than inherited: it is
-                                // where the client says why it stopped, and this
-                                // interface redraws over it the moment it returns.
-                                const ran = spawnSync('bun', [client, host, session], {
-                                    stdio: ['inherit', 'inherit', 'pipe'],
-                                    encoding: 'utf8',
-                                });
-                                left = ran.status ?? 1;
-                                said = ran.stderr ?? '';
-                            } finally {
-                                tui.start();
-                                tui.requestRender(true);
-                                done();
-                            }
-                        });
-                        return {
-                            render: () => [],
-                            handleInput: () => {},
-                        } as never;
-                    },
-                    { overlay: true },
-                );
-                if (left === 0) {
-                    ctx.ui.notify(`back from ${session} on ${host}, which is still running`, 'info');
-                    return;
-                }
-                const trouble = troubleWith(said, session, host);
-                ctx.ui.notify(
-                    trouble.advice === null ? trouble.reason : `${trouble.reason}\n${trouble.advice}`,
-                    'error',
-                );
+                await connectTo(ctx, session, second);
                 return;
             }
 

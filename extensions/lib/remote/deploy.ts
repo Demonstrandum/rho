@@ -18,6 +18,7 @@ import { connectOverProcess } from './client';
 import type { Connection } from './client';
 import { parseAddress, sshTarget } from './address';
 import type { Address } from './address';
+import { posix } from './shell';
 
 /** Where the compiled executor is kept on this machine, and on the far side. */
 const CACHE = join(process.env.HOME ?? '/tmp', '.cache', 'rho', 'remote');
@@ -272,7 +273,7 @@ export async function deploy(
         `exec "$R" ${warmFile} --attach ${warmSocket} --idle ${idle}`,
     ].join('; ');
 
-    const warm = connectOverProcess(ssh_to, 'ssh', [...sshOptions('attach'), ssh_to, warmScript]);
+    const warm = connectOverProcess(ssh_to, 'ssh', [...sshOptions('attach'), ssh_to, posix(warmScript)]);
     // Bounded, because this is the handshake: a far side that is unreachable,
     // busy or wedged answers nothing, and waiting on it forever is worse than
     // falling through to the slow path that reports why.
@@ -298,7 +299,7 @@ export async function deploy(
     const probe = await run('ssh', [
         ...sshOptions(),
         ssh_to,
-        'command -v bun || command -v node || true; echo ---; uname -m',
+        posix('command -v bun || command -v node || true; echo ---; uname -m'),
     ]);
     if (probe.code !== 0) throw new Error(`cannot reach ${ssh_to}: ${probe.err.trim() || 'ssh failed'}`);
     const [runtimeLine = '', machineLine = ''] = probe.out.split('---');
@@ -319,7 +320,7 @@ export async function deploy(
     }
     const remote = runtime === '' ? `${REMOTE_DIR}/executor-${hash}` : `${REMOTE_DIR}/executor-${hash}.js`;
 
-    const present = await run('ssh', [...sshOptions(), ssh_to, `test -s ${remote} && echo yes || echo no`]);
+    const present = await run('ssh', [...sshOptions(), ssh_to, posix(`test -s ${remote} && echo yes || echo no`)]);
     if (present.out.trim() !== 'yes') {
         const bytes = readFileSync(path);
         say(`copying ${(bytes.byteLength / 1e6).toFixed(1)} MB to ${ssh_to}`);
@@ -330,7 +331,7 @@ export async function deploy(
             [
                 ...sshOptions(),
                 ssh_to,
-                `mkdir -p ${REMOTE_DIR} && cat > ${remote}.part && chmod +x ${remote}.part && mv ${remote}.part ${remote}`,
+                posix(`mkdir -p ${REMOTE_DIR} && cat > ${remote}.part && chmod +x ${remote}.part && mv ${remote}.part ${remote}`),
             ],
             bytes,
         );
@@ -346,7 +347,7 @@ export async function deploy(
     const connection = connectOverProcess(ssh_to, 'ssh', [
         ...sshOptions('attach'),
         ssh_to,
-        `${start} --attach ${socket} --idle ${idle}`,
+        posix(`${start} --attach ${socket} --idle ${idle}`),
     ]);
 
     const answered = await connection.request({ kind: 'ping' }, undefined, 15_000);

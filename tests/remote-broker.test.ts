@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { connect } from 'node:net';
-import { Broker, existing, named } from '../extensions/lib/remote/broker';
+import { Broker, existing, named, request } from '../extensions/lib/remote/broker';
 
 /**
  * The broker is tested with a stand-in for pi rather than pi itself: what
@@ -138,6 +138,67 @@ describe('broker', () => {
         watcher.end();
     });
 
+    test("what the session asked an interface to draw waits for one, and is not replayed as history", async () => {
+        // rpc mode has no terminal: `ctx.ui` on the far side is these frames.
+        // A notification sent while nobody was attached used to go into the
+        // replay buffer, where a client draws it as something that already
+        // happened, which is to say does not draw it at all.
+        start('asking', ['--ask-at-start']);
+        await settle(300);
+        const watcher = await client('asking');
+        await settle(400);
+        const frames = watcher.lines.map((line) => JSON.parse(line) as { type: string; id?: string; method?: string });
+        const bracket = frames.findIndex((frame) => frame.type === 'rho_replay_end');
+        const drawn = frames.filter((frame) => frame.type === 'extension_ui_request');
+        expect(drawn.map((frame) => frame.method)).toEqual(['notify', 'select']);
+        // After the replay bracket, if there was one: these are live.
+        for (const frame of drawn) expect(frames.indexOf(frame)).toBeGreaterThan(bracket);
+        watcher.end();
+    });
+
+    test('a dialog nobody answered is asked again of the next interface', async () => {
+        start('parked', ['--ask-at-start']);
+        await settle(300);
+        const first = await client('parked');
+        await settle(300);
+        first.end();
+        await settle(100);
+
+        const second = await client('parked');
+        await settle(300);
+        const asked = second.lines
+            .map((line) => JSON.parse(line) as { type: string; method?: string })
+            .filter((frame) => frame.type === 'extension_ui_request');
+        // The notification was shown once, to the client that was there for
+        // it; the question is still open, so it is put to whoever is here now.
+        expect(asked.map((frame) => frame.method)).toEqual(['select']);
+        second.end();
+    });
+
+    test('an answer reaches the agent under the id it asked with, once', async () => {
+        start('answered', ['--ask-at-start']);
+        await settle(300);
+        const first = await client('answered');
+        const second = await client('answered');
+        await settle(300);
+        // Tagging this the way a command is tagged would make the agent look up
+        // an id it never issued, and the extension behind the dialog would wait
+        // for ever.
+        first.send(JSON.stringify({ type: 'extension_ui_response', id: 'd1', value: 'one' }));
+        await settle(200);
+        second.send(JSON.stringify({ type: 'extension_ui_response', id: 'd1', value: 'two' }));
+        await settle(300);
+
+        const answers = first.lines
+            .map((line) => JSON.parse(line) as { type: string; text?: string })
+            .filter((event) => typeof event.text === 'string' && event.text.startsWith('answered'));
+        expect(answers).toHaveLength(1);
+        expect(answers[0]?.text).toContain('"id":"d1"');
+        expect(answers[0]?.text).toContain('"value":"one"');
+        first.end();
+        second.end();
+    });
+
     test('a broker does not outlive the agent it exists to hold', async () => {
         // Stopping a session killed the agent and left the broker resident,
         // reparented to init, holding a machine's memory for nothing and a
@@ -199,4 +260,52 @@ describe('broker', () => {
         expect(broker.state.alive).toBe(true);
         watcher.end();
     }, 10_000);
+});
+
+/**
+ * One question and its answer, for a caller that is not an interface.
+ *
+ * Carrying a conversation between machines asks a running session what it is
+ * and hands it a session file, and both are rpc commands: the machine that is
+ * connecting needs the answer to its own question and nothing else that is in
+ * flight.
+ */
+describe('a session sending the interface home', () => {
+    test('the frame crosses to whoever is attached, and not to the agent', async () => {
+        start('sending');
+        await settle(100);
+        const watcher = await client('sending');
+        await settle(100);
+        const asSession = await client('sending');
+        asSession.send(JSON.stringify({ type: 'rho_origin_open' }));
+        asSession.send(JSON.stringify({ type: 'rho_leave' }));
+        await settle();
+        const seen = watcher.lines.map((line) => JSON.parse(line) as { type: string });
+        expect(seen.filter((event) => event.type === 'rho_leave')).toHaveLength(1);
+        // The stand-in echoes anything that reaches the agent, so a leave that
+        // had gone to pi's stdin would come back as a message.
+        expect(watcher.lines.join(' ')).not.toContain('"text":"{\\"type\\":\\"rho_leave');
+        watcher.end();
+        asSession.end();
+    });
+});
+
+describe('asking a session one question', () => {
+    test('the answer comes back to whoever asked', async () => {
+        start('asked');
+        await settle(100);
+        const answer = await request('asked', { type: 'get_state' });
+        expect(answer.success).toBe(true);
+        expect((answer.data as { message?: string }).message).toContain('get_state');
+    });
+
+    test('and what the session said while nobody watched is still there for the next interface', async () => {
+        start('kept', ['--ask-at-start']);
+        await settle(150);
+        await request('kept', { type: 'get_state' });
+        const watcher = await client('kept');
+        await settle(600);
+        expect(watcher.lines.join(' ')).toContain('no checkpoints available');
+        watcher.end();
+    });
 });

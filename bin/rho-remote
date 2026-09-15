@@ -26,6 +26,8 @@ import { join } from 'node:path';
 import { RpcLink } from '../extensions/lib/remote/rpc-link';
 import { RemoteActions, RemoteState } from '../extensions/lib/remote/proxy-session';
 import { remoteSession } from '../extensions/lib/remote/remote-session';
+import { UiRelay, asUiRequest, isAnswerable, publishRelay, unanswerable } from '../extensions/lib/remote/ui-relay';
+import { config } from '../extensions/lib/config';
 import { TurnGate } from '../extensions/lib/remote/turn-gate';
 import { controlPath } from '../extensions/lib/remote/agent-tag';
 import { troubleWith } from '../extensions/lib/remote/advice';
@@ -107,7 +109,7 @@ const relend = async (): Promise<void> => {
     if (process.env.RHO_REMOTE_SSH !== undefined || here) return;
     const authPath = join(homedir(), '.pi', 'agent', 'auth.json');
     if (!existsSync(authPath)) return;
-    const sent = await ask(`${RUNNER} relend ${name}`, JSON.stringify({ auth: readFileSync(authPath, 'utf8'), env: {} }));
+    const sent = await ask(`${RUNNER} relend ${name}`, JSON.stringify({ auth: readFileSync(authPath, 'utf8') }));
     if (sent.code !== 0 && !/no credentials of its own/.test(sent.err)) {
         process.stderr.write(`could not refresh the credentials on ${target}: ${sent.err.trim()}\n`);
     }
@@ -144,6 +146,17 @@ const where: { name: string; host: string; cwd: string; branch: string | null; s
     },
 };
 (globalThis as Record<string, unknown>).__rho_environment = where;
+
+/**
+ * The session's user interface, which has to be somewhere.
+ *
+ * A session running as a daemon is `pi --mode rpc`, and rpc mode draws nothing:
+ * every `ctx.ui` call there leaves as a frame and is answered with a frame. The
+ * relay is published before pi loads anything, because the extension that draws
+ * these requests looks for it while it is being constructed.
+ */
+const relay = new UiRelay((frame) => link.tell(frame));
+publishRelay(relay);
 
 /**
  * The interface's own half, built while the far side is being asked.
@@ -189,6 +202,61 @@ const link = new RpcLink(attaching.command, attaching.args, {
             process.exit(1);
         }, 150).unref?.();
     },
+});
+
+/**
+ * Everything the session says that is not the conversation.
+ *
+ * A request to draw something goes to the relay, which hands it to the
+ * extension holding this interface's `ctx.ui`. A method this build does not
+ * know is cancelled rather than ignored, since an unanswered dialog parks the
+ * extension that opened it. An extension that threw, and anything the far side
+ * wrote to stderr, are said here too: both used to travel the whole way across
+ * the link and then be dropped on arrival.
+ */
+link.onEvent((event) => {
+    const request = asUiRequest(event);
+    if (request !== null) {
+        // With the relay turned off nothing here can draw, and a dialog left
+        // unanswered parks the extension that opened it for as long as the
+        // session lives. Cancelling is the truthful answer: there is no
+        // interface for this.
+        if (!config.remote.relayUi) {
+            if (isAnswerable(request.method)) relay.cancel(request.id);
+            return;
+        }
+        relay.deliver(request);
+        return;
+    }
+    const unknown = unanswerable(event);
+    if (unknown !== null) {
+        relay.cancel(unknown);
+        relay.say(`the session asked for something this interface cannot draw (${String((event as { method?: unknown }).method)})`, 'warning');
+        return;
+    }
+    if (event.type === 'extension_error') {
+        const where = typeof event.extensionPath === 'string' ? event.extensionPath : 'an extension';
+        const what = typeof event.error === 'string' ? event.error : 'failed';
+        relay.say(`${where}: ${what}`, 'error');
+        return;
+    }
+    if (event.type === 'rho_stderr' && typeof event.text === 'string') {
+        relay.say(event.text, 'warning');
+        return;
+    }
+    /**
+     * The session asking this interface to leave.
+     *
+     * The same exit ctrl+d takes, decided on the other side: the flag says the
+     * agent stays behind its socket, the terminal is given back, and the
+     * interface that spawned this one carries the conversation home.
+     */
+    if (event.type === 'rho_leave') {
+        (globalThis as { __rho_detaching?: boolean }).__rho_detaching = true;
+        if (drawing !== null) drawing.stop();
+        process.stdout.write(`${name} asked this interface to leave. it is still running on ${target}.\n`);
+        process.exit(0);
+    }
 });
 
 // RHO_REMOTE_LOG names a file to write every event type to, which is the only
@@ -314,6 +382,14 @@ if (typeof raise === 'function') {
     // without a beginning makes anything that measures a turn measure from
     // nothing. See lib/remote/turn-gate.ts.
     const gate = new TurnGate();
+    // Attaching to a session that is already answering: the turn on screen is
+    // one this client walked in on, so extensions are told about the next one
+    // instead of half of this one. The rows still stream, because the
+    // interface draws from the session's events and not from these.
+    if (state.state.isStreaming === true) {
+        gate.join();
+        relay.say('joined a turn that was already running: the working indicator starts with the next one', 'info');
+    }
     state.subscribe((event) => {
         if (!gate.admits((event as { type: string }).type)) return;
         void raise.call(made.session, event).catch(() => {
@@ -323,11 +399,15 @@ if (typeof raise === 'function') {
     });
 }
 
-// A refusal is said on the status line rather than thrown: the interface asks
-// some of these from a keystroke handler, where an exception ends the client.
-state.onRefusal((what) => process.stderr.write(`${what}\n`));
+// A refusal is shown rather than thrown: the interface asks some of these from
+// a keystroke handler, where an exception ends the client. It went to stderr,
+// which the interface is drawing over, so nobody ever read one.
+state.onRefusal((what) => relay.say(what, 'warning'));
 
-const proxied = remoteSession(made.session as unknown as Record<string, unknown>, link, state, actions);
+const proxied = remoteSession(made.session as unknown as Record<string, unknown>, link, state, actions, {
+    say: (message, level) => relay.say(message, level),
+    keepHere: new Set(config.remote.commandsHere),
+});
 
 const runtime = new AgentSessionRuntime(
     proxied as never,

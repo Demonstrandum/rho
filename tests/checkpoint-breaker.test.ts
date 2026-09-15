@@ -31,9 +31,7 @@ test('a missing storage directory leaves the prototype alone', async () => {
     expect(installed).toBe(false);
 });
 
-test('only checkpoint failures are touched, and only the first is reported', () => {
-    expect(failureAction('Rewind completed', false)).toBe('pass');
-    expect(failureAction('Rewind completed', true)).toBe('pass');
-    expect(failureAction('Checkpoint failed: fatal: adding files failed', false)).toBe('report-once');
-    expect(failureAction('Checkpoint failed: fatal: adding files failed', true)).toBe('drop');
+test('only checkpoint failures are touched, and none of them is shown', () => {
+    expect(failureAction('Rewind completed')).toBe('pass');
+    expect(failureAction('Checkpoint failed: fatal: adding files failed')).toBe('drop');
 });

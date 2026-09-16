@@ -385,6 +385,29 @@ async function main(): Promise<number> {
     check('exits on ctrl+d', tui.code === 0, `exit ${tui.code}\n${tail(screen, 20)}`);
     checkNoCrash('terminal session', tui);
 
+    section('sample session');
+    // --sample-session writes a made-up session and switches to it, which is the
+    // only path in rho that a flag, a queued command, and a session switch all
+    // take together. the tree view is opened over it because the sample exists
+    // to be looked at in one.
+    const sample = await run(
+        ptyCommand(`cd ${workspace.project} && pi --model ${model} --sample-session`, [
+            { afterSeconds: 10, text: '/tree\\r' },
+            { afterSeconds: 4, text: '\\033' },
+            { afterSeconds: 2, text: '\\004' },
+            { afterSeconds: 2, text: '\\004' },
+            { afterSeconds: 4, text: '' },
+        ]),
+        workspace,
+        { timeoutMs: 120_000 },
+    );
+    const sampleScreen = sample.output;
+    check('the sample session opened', sampleScreen.includes('--version flag'), tail(sampleScreen, 60));
+    check('the tree view opened over it',
+        sampleScreen.includes('Session Tree') && sampleScreen.includes('select'),
+        tail(sampleScreen, 80));
+    checkNoCrash('sample session', sample);
+
     section('checks after a config file exists');
     const withConfig = await run([
         'pi', '-p', '--mode', 'json', '--model', model, 'run the smoke check again',

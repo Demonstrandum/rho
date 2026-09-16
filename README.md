@@ -18,7 +18,7 @@ personal [pi](https://pi.dev) dotfiles, packaged as a pi package (Bun + TypeScri
 - **editor**: `ctrl+s` parks a prompt on a stack and `ctrl+r` pops it, prompt history that survives a restart, `ctrl+enter` cuts into a running turn.
 - **commands**: `/audit` (prose review), `/cwd` (change directory mid-session), `/stash`, `/history`, `/search` (pi's own commands and docs), `/context`, `/rho config`, `/web` (launch pi-web UI).
 - **settings**: auto-configures terminal and display preferences on first run.
-- **bundled packages**: web browsing and librarian (pi-web-access), session rewind (pi-rewind), FTS5 knowledge base (context-mode), output speed display (token-rate-pi).
+- **bundled packages**: web browsing and librarian (pi-web-access), session rewind (pi-rewind), FTS5 knowledge base (context-mode), output speed display (token-rate-pi), subagent delegation (pi-subagents).
 - **themes**: plan9 and plan9-dark.
 
 ## contents
@@ -46,6 +46,7 @@ bundles my:
   - [`@ayulab/pi-rewind`](https://github.com/ayu-exorcist/oh-my-pi): rewind
   - [`context-mode`](https://github.com/mksglu/context-mode): context mode.
   - [`token-rate-pi`](https://www.npmjs.com/package/token-rate-pi): average output tokens/sec in the footer status line.
+  - [`pi-subagents`](https://github.com/nicobailon/pi-subagents): delegation to subagents and scripted multi-agent workflows; brings its own skills and `/`-prompts.
 
 ## install
 

@@ -12,14 +12,16 @@
       "node_modules/@ayulab/pi-rewind/index.js",
       "node_modules/context-mode/build/adapters/pi/extension.js",
       "node_modules/token-rate-pi/token-rate.ts",
-      "node_modules/pi-btw/extensions/btw.ts"
+      "node_modules/pi-btw/extensions/btw.ts",
+      "node_modules/pi-subagents/index.ts"
     ],
     "skills": [
       "./skills",
       "node_modules/pi-web-access/skills",
-      "node_modules/context-mode/skills"
+      "node_modules/context-mode/skills",
+      "node_modules/pi-subagents/skills"
     ],
-    "prompts": ["./prompts"],
+    "prompts": ["./prompts", "node_modules/pi-subagents/prompts"],
     "themes": ["./themes"]
   },
   "scripts": {
@@ -48,11 +50,12 @@
     "context-mode": "^1.0.169",
     "env-paths": "^4.0.0",
     "pi-btw": "^0.4.1",
+    "pi-subagents": "^0.68.0",
     "pi-web-access": "^0.13.0",
     "smol-toml": "^1.8.0",
     "token-rate-pi": "^1.0.5"
   },
-  "bundledDependencies": ["pi-web-access", "@ayulab/pi-rewind", "context-mode", "token-rate-pi"],
+  "bundledDependencies": ["pi-web-access", "@ayulab/pi-rewind", "context-mode", "token-rate-pi", "pi-subagents"],
   "peerDependencies": {
     "@earendil-works/pi-ai": "^0.85.1",
     "@earendil-works/pi-agent-core": "^0.85.1",

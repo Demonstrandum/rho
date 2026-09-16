@@ -74,7 +74,7 @@ if an entry here is growing past two lines, that is the signal to move it.
 - `rho.toml` generated output, never hand-edited: the schema in `extensions/lib/config.ts` printed with its docs.
   change the schema, then run `bun run config`; `tests/config.test.ts` fails while the two disagree.
 - `package.json` the `pi` manifest declaring resource paths.
-- bundled third-party packages (in `dependencies` + `bundledDependencies`, referenced via `node_modules/...` in the `pi` manifest): `pi-web-access`, `@ayulab/pi-rewind`, `context-mode`, `token-rate-pi` (shows average output tokens/sec in the footer status line).
+- bundled third-party packages (in `dependencies` + `bundledDependencies`, referenced via `node_modules/...` in the `pi` manifest): `pi-web-access`, `@ayulab/pi-rewind`, `context-mode`, `token-rate-pi` (shows average output tokens/sec in the footer status line), `pi-subagents` (subagent delegation; also contributes its own skills and prompts).
   they install and load automatically with rho.
 
 ## ci and tooling

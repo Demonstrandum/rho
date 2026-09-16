@@ -63,7 +63,7 @@ import type { RowColor, RowTheme } from './lib/tool-row/theme';
 import { retitle, toolTitle } from './lib/tool-row/title';
 
 const { titles, detail, execPreview, names } = config.tools;
-const { boxToolTails } = config.render;
+const { selfRenderedRows } = config.render;
 
 // pi calls render(width) on every layout pass, including a resize, without
 // rebuilding the component, so anything that depends on the width has to
@@ -98,8 +98,14 @@ interface ToolExecutionInternals {
     toolName: string;
     getCallRenderer(): RenderCallFn | undefined;
     getResultRenderer(): RenderResultFn | undefined;
+    getRenderShell(): RenderShell;
     formatToolExecution(): string;
 }
+
+type RenderShell = 'default' | 'self';
+
+/** the tools pi declares `renderShell: "self"` on. */
+const SELF_SHELL_TOOLS: ReadonlySet<string> = new Set(['edit']);
 
 if (titles || detail || execPreview) {
     const titleOf = (name: string): string => (titles ? toolTitle(name, names) : name);
@@ -342,22 +348,40 @@ if (titles || detail || execPreview) {
     }
 }
 
-if (boxToolTails) {
+if (selfRenderedRows) {
     // pi's edit tool is the only one that declares renderShell "self": it draws
     // its own row rather than letting ToolExecutionComponent wrap its output in
     // the usual Box, because the row has to keep a diff on screen while the
     // arguments are still streaming and rewrite it in place when they settle.
-    // that is its call slot. its result slot (core/tools/renderers/edit.js)
-    // returns a bare Container of a Spacer and a Text, which lands after the
-    // box it drew: an unpainted blank line and an unpainted line of text, the
-    // one row in a transcript with neither a background nor half-block edges.
-    // it is reached whenever the result differs from what the preview already
-    // showed, which in practice is every failed edit.
+    // two things go wrong with that row, and both are repaired here rather than
+    // by changing what the tool draws.
     //
-    // the fix is a Box around that tail, not a change to the row pi draws: a
-    // Box picks up halfblock-boxes.ts's patch on Box.prototype.render for free,
-    // and the blank line goes because the tail is trimmed before it is boxed.
+    // the shell is lost. a definition reaches the component through
+    // wrapToolDefinition, which copies name, label, description, parameters,
+    // constrainedSampling, prepareArguments, executionMode and execute, and
+    // then through withBuiltInRenderers, which rebuilds it as `{...definition,
+    // renderCall, renderResult}`. neither carries renderShell, so
+    // getRenderShell() answers "default" and pi wraps the box the tool drew in
+    // its own contentBox: the row is boxed twice, one frame inside the other,
+    // and the inner frame is invisible until a selection inverts it.
+    //
+    // the result lands outside the box. edit's result slot
+    // (core/tools/renderers/edit.js) returns a bare Container of a Spacer and a
+    // Text, which comes after the box: an unpainted blank line and an unpainted
+    // line of text. it is reached whenever the result differs from the preview
+    // already drawn, which in practice is every failed edit. so the tail is
+    // trimmed and put in a Box of its own, which picks up halfblock-boxes.ts's
+    // patch on Box.prototype.render for free.
     const proto = ToolExecutionComponent.prototype as unknown as ToolExecutionInternals;
+
+    const origGetRenderShell = proto.getRenderShell;
+    proto.getRenderShell = function (this: ToolExecutionInternals): RenderShell {
+        const shell = origGetRenderShell.call(this);
+        // a pi that stops dropping renderShell answers "self" here already, and
+        // this leaves it alone.
+        if (shell !== 'default' || !SELF_SHELL_TOOLS.has(this.toolName)) return shell;
+        return 'self';
+    };
 
     /** a self-rendered tool's trailing output, in a box of its own. */
     class Tail extends Box {

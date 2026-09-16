@@ -222,6 +222,49 @@ function connectOver(name: string, carrier: Carrier): Connection {
 
 const text = new TextDecoder();
 
+/** What one short command on the far side produced. */
+export interface Captured {
+    /** the exit status, or null when the process never reported one. */
+    readonly code: number | null;
+    readonly stdout: string;
+    readonly stderr: string;
+}
+
+/** Enough for a status and a short log; a command that says more is not this. */
+const CAPTURE_LIMIT = 64 * 1024;
+
+/**
+ * Run one command where the tools act and read what it said.
+ *
+ * spawn, wait, read-range, release is four round trips that three callers were
+ * each writing out, and each of them was dropping something: the exit status,
+ * stderr, or the release that frees the output on the far side.
+ */
+export async function capture(
+    connection: Connection,
+    command: string,
+    options: { readonly timeoutMs?: number; readonly limit?: number } = {},
+): Promise<Captured> {
+    const limit = options.limit ?? CAPTURE_LIMIT;
+    const started = await connection.request({
+        kind: 'spawn',
+        command,
+        ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
+    });
+    if (started.kind !== 'spawned') {
+        return { code: null, stdout: '', stderr: started.kind === 'error' ? started.message : `expected spawned, got ${started.kind}` };
+    }
+    const finished = await waitFor(connection, started.process);
+    const read = async (stream: 'stdout' | 'stderr'): Promise<string> => {
+        const bytes = await connection.request({ kind: 'read-range', process: started.process, stream, offset: 0, length: limit });
+        return bytes.kind === 'bytes' ? text.decode(bytes.data) : '';
+    };
+    const stdout = await read('stdout');
+    const stderr = await read('stderr');
+    void connection.request({ kind: 'release', process: started.process });
+    return { code: finished === null ? null : finished.code, stdout, stderr };
+}
+
 /** The pieces pi's tools need, each one a request across the wire. */
 export function operationsFor(connection: Connection) {
     const readWhole = async (path: string): Promise<Buffer> => {

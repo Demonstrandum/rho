@@ -28,16 +28,20 @@ import {
     createWriteTool,
 } from '@earendil-works/pi-coding-agent';
 import { completeLastWord } from './lib/complete-words';
-import { projectPlan } from './lib/remote/project';
+import { scriptComplaint } from './lib/remote/project';
 import { parseProjectRequest } from './lib/remote/naming';
-import { connectOverOriginChannel, operationsFor, waitFor } from './lib/remote/client';
+import { capture, connectOverOriginChannel, operationsFor, waitFor } from './lib/remote/client';
+import type { Captured } from './lib/remote/client';
 import { ORIGIN, sessionSocketFor } from './lib/remote/origin';
 import { existsSync } from 'node:fs';
 import type { Connection } from './lib/remote/client';
 import { deploy } from './lib/remote/deploy';
 import { addressName, parseAddress, parseLocated, sshTarget } from './lib/remote/address';
+import { configuredHosts, isConfiguredHost } from './lib/remote/ssh-config';
 import type { Address } from './lib/remote/address';
 import { PersistedState } from './lib/state-store';
+import { config } from './lib/config';
+import { gitBlockFor, gitThrough } from './lib/where-note';
 
 interface Environment {
     readonly name: string;
@@ -63,6 +67,14 @@ export interface Where {
     readonly shell: string;
     readonly alive: boolean;
     chdir(path: string): Promise<string>;
+    /**
+     * Run one command there and read what it said.
+     *
+     * For something that describes the machine rather than acting on it: the
+     * git state of the directory the agent is standing in has to be read from
+     * the machine holding it, and that is not a tool call.
+     */
+    capture(command: string, timeoutMs?: number): Promise<Captured>;
 }
 
 const PUBLISHED = '__rho_environment';
@@ -176,10 +188,12 @@ export default function (pi: ExtensionAPI) {
                 const done = (code: number | null) => {
                     stop();
                     const lines = text.trim().split('\n').filter((line) => line.trim() !== '');
-                    // What it said last is what went wrong, and saying nothing
-                    // about a failure is how a checkout looks like a mystery.
+                    // The tail of what it said is what went wrong, and saying
+                    // nothing about a failure is how a checkout looks like a
+                    // mystery. Not the last line alone: git ends its refusals
+                    // on their least useful line.
                     if (code !== 0) {
-                        settle({ last: null, said: lines[lines.length - 1] ?? `it exited ${code}` });
+                        settle({ last: null, said: scriptComplaint(text, code) });
                         return;
                     }
                     settle({ last: lines[lines.length - 1] ?? null, said: '' });
@@ -229,6 +243,17 @@ export default function (pi: ExtensionAPI) {
     /** The last environment that died, so a tool can say so rather than acting locally. */
     let dead: { name: string; why: string } | null = null;
 
+    /** The branch of a directory on the far side, or null where there is no work tree. */
+    const branchAt = async (environment: Environment, cwd: string): Promise<string | null> => {
+        const said = await capture(
+            environment.connection,
+            `git -C ${JSON.stringify(cwd)} rev-parse --abbrev-ref HEAD`,
+            { timeoutMs: config.git.timeoutMs },
+        );
+        const branch = said.stdout.trim();
+        return said.code === 0 && branch !== '' ? branch : null;
+    };
+
     /** What the far side is: directory, shell, and whether it is a repository. */
     const describe = async (environment: Environment): Promise<string> => {
         const facts: string[] = [`host: ${environment.host}`];
@@ -265,18 +290,39 @@ export default function (pi: ExtensionAPI) {
                     name: environment.name,
                     host: environment.host,
                     cwd,
+                    branch: null,
                     shell: shell || 'unknown',
-                    alive: true,
+                    // A getter, not a fact recorded once. This object said
+                    // alive while the session's tools were acting somewhere
+                    // else entirely: the footer named the machine, /cwd moved
+                    // that machine's directory and reported it, and the agent
+                    // ran every command in the directory it started in,
+                    // because the tools ask the current environment and this
+                    // said what it was told at attach time. What it describes
+                    // is the environment the tools use, or nothing.
+                    get alive() {
+                        return active() === environment && environment.connection.alive;
+                    },
+                    capture: (command: string, timeoutMs?: number) =>
+                        capture(environment.connection, command, { timeoutMs }),
                     chdir: async (path: string) => {
                         const moved = await environment.connection.request({ kind: 'chdir', path });
                         if (moved.kind !== 'cwd') {
                             throw new Error(moved.kind === 'error' ? moved.message : 'could not change directory');
                         }
                         const state = published[PUBLISHED];
-                        if (state !== undefined) state.cwd = moved.path;
+                        if (state !== undefined) {
+                            state.cwd = moved.path;
+                            // The branch belongs to the directory. Left as it
+                            // was, the footer read a path from one worktree
+                            // beside the branch of another and said the work
+                            // worktree was on main.
+                            state.branch = await branchAt(environment, moved.path);
+                        }
                         return moved.path;
                     },
                 };
+
             }
         }
         return facts.join('\n');
@@ -316,11 +362,21 @@ export default function (pi: ExtensionAPI) {
         // machine whatever is attached. Saying so where the switch is
         // announced is the only place the model reads both facts together.
         if (environment === null) {
+            // The work tree is read again on the way back: the last thing the
+            // agent was told about a tree was about the one on the machine it
+            // is leaving.
+            const here = await gitBlockFor({ host: null, cwd: process.cwd() });
             pi.sendMessage(
                 {
                     customType: 'environment',
-                    content:
-                        '<environment>\nworking locally on this machine\nevery tool acts here, including ctx_execute and ctx_batch_execute\n</environment>',
+                    content: [
+                        '<environment>',
+                        'working locally on this machine',
+                        `cwd: ${process.cwd()}`,
+                        'every tool acts here, including ctx_execute and ctx_batch_execute',
+                        '</environment>',
+                        ...(here.text === null ? [] : ['', here.text]),
+                    ].join('\n'),
                     display: true,
                 },
                 { deliverAs: 'followUp' },
@@ -330,6 +386,19 @@ export default function (pi: ExtensionAPI) {
 
         const facts = await describe(environment);
         const state = published[PUBLISHED];
+        // The branch and the dirty files of the tree the agent now stands in:
+        // the <git> block in the prompt describes a tree on another machine.
+        const tree =
+            state === undefined
+                ? { text: null, branch: null }
+                : await gitBlockFor({
+                      host: state.host,
+                      cwd: state.cwd,
+                      git: gitThrough((command, timeoutMs) => state.capture(command, timeoutMs)),
+                  });
+        // The branch of the directory just described, for anything that draws
+        // where the session is standing without asking git again.
+        if (state !== undefined) state.branch = tree.branch;
         pi.sendMessage(
             {
                 customType: 'environment',
@@ -342,6 +411,7 @@ export default function (pi: ExtensionAPI) {
                     'laptop and are refused while this is attached, whatever the context-mode',
                     'guidance says. use bash for commands here.',
                     '</environment>',
+                    ...(tree.text === null ? [] : ['', tree.text]),
                 ].join('\n'),
                 display: true,
                 // What the renderer draws, so the screen shows a line and the
@@ -425,7 +495,8 @@ export default function (pi: ExtensionAPI) {
         'machine, attaching to it if nothing is attached yet, and "local:/abs/path"',
         'always means the machine this session runs on. A plain path means whichever',
         'machine the environment tool currently points at, so while an environment is',
-        'attached, "local:" is how to reach a file here.',
+        'attached, "local:" is how to reach a file here. The user part is optional:',
+        'ssh takes it, with the address and the port, from ~/.ssh/config.',
     ].join(' ');
 
     /**
@@ -502,7 +573,7 @@ export default function (pi: ExtensionAPI) {
         on: Type.Optional(
             Type.String({
                 description:
-                    'Where to run it: an attached environment name, a user@host to attach on demand, or "local". Omit it to run where the session already points, which is the usual case: pass it only to run one command somewhere other than the current environment.',
+                    'Where to run it: an attached environment name, a host to attach on demand (a name from ~/.ssh/config is enough; ssh resolves the user, address and port, so never look one up), or "local". Omit it to run where the session already points, which is the usual case: pass it only to run one command somewhere other than the current environment.',
             }),
         ),
     });
@@ -515,8 +586,9 @@ export default function (pi: ExtensionAPI) {
         ],
         description:
             `${localBash.description ?? ''} Pass "on" to run this one command somewhere else: an attached ` +
-            'environment name, a user@host to attach on demand, or "local" for the machine this session ' +
-            'runs on. Without it, the command runs wherever the environment tool currently points.',
+            'environment name, a host to attach on demand, or "local" for the machine this session ' +
+            'runs on. A bare name from ~/.ssh/config is a complete address, since ssh resolves the user ' +
+            'and the rest from there. Without it, the command runs wherever the environment tool currently points.',
         async execute(id: string, params: { command: string; timeout?: number; on?: string }, ...rest: never[]) {
             const { on, ...forwarded } = params;
             // The wrapped tool's own result type, which this returns unchanged.
@@ -536,10 +608,16 @@ export default function (pi: ExtensionAPI) {
                     if (!attached.connection.alive) throw new Error(`the connection to ${on} is closed`);
                     return attached.connection;
                 }
-                if (!on.includes('@')) {
+                // A bare word is a host when ssh has a Host block for it:
+                // ssh resolves the user, the address and the port from its
+                // own config, so requiring `user@` here only invited the user
+                // to be looked up by hand first.
+                if (!on.includes('@') && !isConfiguredHost(on)) {
+                    const known = configuredHosts();
                     throw new Error(
                         `no environment called ${on}. Give a user@host to attach to, or "local", or one of: ` +
-                            `${[...environments.keys()].join(', ') || 'nothing attached'}`,
+                            `${[...environments.keys()].join(', ') || 'nothing attached'}` +
+                            `${known.length === 0 ? '' : `. ~/.ssh/config knows: ${known.join(', ')}`}`,
                     );
                 }
                 const address = parseAddress(on);
@@ -631,12 +709,16 @@ export default function (pi: ExtensionAPI) {
         promptGuidelines: [
             'Use environment connect after allocating a node, and environment default local when it is finished with.',
             'A rented node can vanish mid-command: if an environment goes, say so rather than retrying against it.',
-            'To read or write one file on another machine, or on this one while an environment is attached, address the path as user@host:/abs/path or local:/abs/path rather than switching environment for a single file.',
+            'To read or write one file on another machine, or on this one while an environment is attached, address the path as host:/abs/path or local:/abs/path rather than switching environment for a single file.',
+            'A host name alone is a complete address: ssh reads ~/.ssh/config for the user, the address, the port and the key. Never read that file to build a user@host.',
         ],
         parameters: Type.Object({
             action: Type.Union([Type.Literal('connect'), Type.Literal('default'), Type.Literal('list')]),
             target: Type.Optional(
-                Type.String({ description: 'For connect: user@host or user@host:/path. For default: a name, or "local".' }),
+                Type.String({
+                    description:
+                        'For connect: a host (a ~/.ssh/config name resolves its own user), or user@host, either with :/path. For default: a name, or "local".',
+                }),
             ),
             name: Type.Optional(Type.String({ description: 'What to call it. Defaults to the host.' })),
         }),
@@ -671,7 +753,7 @@ export default function (pi: ExtensionAPI) {
                 return said(`Working on ${target}.`);
             }
 
-            if (params.target === undefined) return said('connect needs a target: user@host.');
+            if (params.target === undefined) return said('connect needs a target: a host, or user@host.');
             try {
                 const parsed = parseAddress(params.target);
                 if (parsed === null) return said(`not a machine address: ${params.target}`);

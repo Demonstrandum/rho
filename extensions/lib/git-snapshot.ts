@@ -36,9 +36,18 @@ export interface SnapshotOptions {
     readonly commits: number;
     readonly maxFiles: number;
     readonly timeoutMs: number;
+    /**
+     * How git is asked, when it is not this machine's git. The work tree the
+     * agent is standing in can be on another machine, and the snapshot of that
+     * tree has to come from there.
+     */
+    readonly run?: GitRunner;
 }
 
-import { runGit } from './run-git';
+import { runGit, type GitRun } from './run-git';
+
+/** git, wherever the work tree is: the same signature runGit has. */
+export type GitRunner = (args: readonly string[], cwd: string, timeoutMs: number) => Promise<GitRun>;
 
 type Run = { readonly ok: true; readonly text: string } | { readonly ok: false; readonly failure: Failure };
 
@@ -47,10 +56,11 @@ type Run = { readonly ok: true; readonly text: string } | { readonly ok: false; 
 // error and not only for a directory outside a work tree.
 const OUTSIDE_WORK_TREE = /not a git repository/i;
 
-const run = async (args: readonly string[], cwd: string, timeoutMs: number): Promise<Run> => {
-    // Through runGit, so this works under node as well as bun: the agent on
-    // another machine runs under whichever of them that machine can give it.
-    const answer = await runGit(args, cwd, timeoutMs);
+const run = async (args: readonly string[], cwd: string, timeoutMs: number, git: GitRunner = runGit): Promise<Run> => {
+    // Through runGit by default, so this works under node as well as bun: the
+    // agent on another machine runs under whichever of them that machine can
+    // give it.
+    const answer = await git(args, cwd, timeoutMs);
     if (answer.ok) return { ok: true, text: answer.text };
     if (answer.code === null) return { ok: false, failure: { reason: 'unavailable', detail: answer.errors } };
     if (answer.timedOut) {
@@ -80,8 +90,8 @@ export const parseBranchLine = (line: string): Pick<Snapshot, 'branch' | 'tracki
 };
 
 export const snapshot = async (options: SnapshotOptions): Promise<Reading> => {
-    const { cwd, commits, maxFiles, timeoutMs } = options;
-    const status = await run(['status', '--porcelain=v1', '-b'], cwd, timeoutMs);
+    const { cwd, commits, maxFiles, timeoutMs, run: git = runGit } = options;
+    const status = await run(['status', '--porcelain=v1', '-b'], cwd, timeoutMs, git);
     if (!status.ok) return { kind: 'failed', failure: status.failure };
 
     const lines = status.text.split('\n').filter((line) => line.length > 0);
@@ -89,7 +99,7 @@ export const snapshot = async (options: SnapshotOptions): Promise<Reading> => {
     const entries = lines.filter((line) => !line.startsWith('## '));
 
     // an empty repository has no commits, so a failed log is not a failed read.
-    const log = await run(['log', `-${commits}`, '--format=%h %s'], cwd, timeoutMs);
+    const log = await run(['log', `-${commits}`, '--format=%h %s'], cwd, timeoutMs, git);
 
     return {
         kind: 'snapshot',

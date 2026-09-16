@@ -30,12 +30,15 @@ import { shorthandFor, takeVerb } from './lib/shorthand';
 import { completeLastWord, lastWord } from './lib/complete-words';
 import { troubleWith } from './lib/remote/advice';
 import { agentTrouble, describeAgentTrouble } from './lib/remote/ssh-agent';
-import { branchSlug, parseProjectRequest, repoName, sessionName } from './lib/remote/naming';
+import { branchSlug, parseProjectRequest, projectNameOf, repoName, sessionName } from './lib/remote/naming';
+import type { ProjectRequest } from './lib/remote/naming';
 import { publishConnect, readLedger, writeLedger } from './lib/remote/sessions';
 import type { Worktree } from './lib/remote/sessions';
 import { projectPlan } from './lib/remote/project';
 import { entryCount, freePath, rehomed, sessionIdOf } from './lib/remote/transfer';
 import { askInterfaceToLeave } from './lib/remote/leave';
+import { carryEnv, leavingIn, withoutLeaving } from './lib/remote/leaving';
+import { leaveTerminal, resumeLines } from './lib/leave-terminal';
 import { modelFlags } from './lib/remote/pi-args';
 import type { ModelChoice } from './lib/remote/pi-args';
 import { config } from './lib/config';
@@ -397,25 +400,25 @@ export default function (pi: ExtensionAPI) {
         return new TextEncoder().encode(JSON.stringify({ auth }));
     };
 
-    const project = async (
-        host: string,
-        repo: string,
-        projectName: string,
-        branch: string,
-        say: (note: string) => void,
-    ): Promise<string> => {
+    const project = async (host: string, asked: ProjectRequest, say: (note: string) => void): Promise<string> => {
         // The layout is one definition, shared with the checkout the agent
         // asks for on whatever machine it is attached to. See lib/remote/project.ts.
-        const { script, worktree } = projectPlan(repo, branch, projectName);
+        const { script, worktree } = projectPlan({
+            source: asked.source,
+            branch: asked.branch,
+            base: asked.base,
+            name: asked.name,
+        });
+        const what = projectNameOf(asked.source);
 
         // Asked before the clone rather than discovered as GitHub's refusal:
         // -A with no agent forwards nothing, and the far side reports a
         // permission denied that sends people to look at their keys and the
         // host's authorized_keys, neither of which is the fault.
         const trouble = agentTrouble();
-        if (trouble !== null) throw new Error(describeAgentTrouble(trouble, `${repoName(repo)} on ${host}`));
+        if (trouble !== null) throw new Error(describeAgentTrouble(trouble, `${what} on ${host}`));
 
-        say(`cloning ${repoName(repo)} on ${host}`);
+        say(`${asked.source.kind === 'repository' ? 'cloning' : 'branching'} ${what} on ${host}`);
 
         // -A forwards the agent for the clone. Without it a private repo needs
         // a key on the host, which is the thing this avoids.
@@ -1150,6 +1153,11 @@ export default function (pi: ExtensionAPI) {
                                 const ran = spawnSync('bun', [client, host, session], {
                                     stdio: ['inherit', 'inherit', 'pipe'],
                                     encoding: 'utf8',
+                                    // Whether the two sides hold one
+                                    // conversation, which is what decides
+                                    // whether carrying it home is on the menu
+                                    // the client draws on the way out.
+                                    env: { ...process.env, ...carryEnv(joined !== 'apart') },
                                 });
                                 left = ran.status ?? 1;
                                 said = ran.stderr ?? '';
@@ -1162,11 +1170,30 @@ export default function (pi: ExtensionAPI) {
                         return {
                             render: () => [],
                             handleInput: () => {},
-                        } as never;
+                            invalidate: () => {},
+                        };
                     },
                     { overlay: true },
                 );
                 if (left === 0) {
+                    // Nothing said is an interface that closed without being
+                    // asked: the far side's own rho_leave, or a client from
+                    // before the question existed. Both mean carry.
+                    const chose = leavingIn(said) ?? 'carry';
+                    if (chose === 'exit') {
+                        leaveTerminal(ctx, 300, [
+                            `${session} keeps running on ${host}.`,
+                            ...resumeLines(ctx, session),
+                        ]);
+                        return;
+                    }
+                    if (chose === 'leave') {
+                        ctx.ui.notify(
+                            `back from ${session} on ${host}, which is still running and keeps what was said there. /remote connect ${session} picks it up again`,
+                            'info',
+                        );
+                        return;
+                    }
                     // What was said there comes back, so this machine can carry
                     // on from it: the session on the far side keeps running and
                     // holds the same conversation, and connecting again
@@ -1187,7 +1214,7 @@ export default function (pi: ExtensionAPI) {
                     ctx.ui.notify(`back from ${session} on ${host}, which is still running`, 'info');
                     return;
                 }
-                const trouble = troubleWith(said, session, host);
+                const trouble = troubleWith(withoutLeaving(said), session, host);
                 ctx.ui.notify(
                     trouble.advice === null ? trouble.reason : `${trouble.reason}\n${trouble.advice}`,
                     'error',
@@ -1276,23 +1303,25 @@ export default function (pi: ExtensionAPI) {
             }
 
             if (verb === 'project') {
-                // /remote project <repo> [branch] [user@host] [as <name>]
+                // /remote project <repo|project> [branch] [from <base>] [user@host] [as <name>]
                 const asked = parseProjectRequest(spoken.rest);
                 if (asked === null) {
-                    ctx.ui.notify('Usage: /remote project <repo> [branch] [user@host] [as <name>]', 'error');
+                    ctx.ui.notify(
+                        'Usage: /remote project <repo|project> [branch] [from <base>] [user@host] [as <name>]',
+                        'error',
+                    );
                     return;
                 }
                 const host = asked.host ?? [...hosts.values()][0];
                 if (host === undefined) {
-                    ctx.ui.notify('No host known yet: /remote project <repo> [branch] user@host', 'error');
+                    ctx.ui.notify('No host known yet: /remote project <repo|project> [branch] user@host', 'error');
                     return;
                 }
-                const projectName = repoName(asked.repo);
-                const name = sessionName(asked.repo, asked.branch, asked.name ?? undefined);
+                const name = sessionName(asked.source, asked.branch, asked.name ?? undefined);
                 const bar = progress(ctx);
                 bar.say(`setting up ${name} on ${host}`);
                 try {
-                    const worktree = await project(host, asked.repo, projectName, asked.branch, (note) => bar.say(note));
+                    const worktree = await project(host, asked, (note) => bar.say(note));
                     worktrees.set(name, { host, path: worktree });
                     hosts.set(name, host);
                     rememberHosts();

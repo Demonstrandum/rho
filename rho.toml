@@ -277,6 +277,12 @@ typing = true
 # draws from extensions/assets/maxims.txt, the same pool the spinner
 # uses, so one place decides what the agent says while it works
 loading-messages = []
+# what is sent to slack when a turn reaches its first tool call and
+# nothing has been said yet. a turn that goes straight to tools sends
+# nothing until it ends, and ending can take minutes: this is the line
+# that says the message landed and the work started. set it empty to
+# send nothing
+ack-text = "on it, one sec"
 # also forward the first reply of an exchange as a message, the way the
 # daemon version did. the status line already says the message landed,
 # so this costs a message in the thread for nothing unless the app has

@@ -771,6 +771,28 @@ export default function (pi: ExtensionAPI) {
 
     pi.on('session_shutdown', async () => disconnect(false));
 
+    /**
+     * Say something before the work, not only after it.
+     *
+     * A turn that answers a Slack message by going straight to tools sends
+     * nothing until it is finished, and finishing can take minutes: the person
+     * is holding a phone and cannot tell work from having been ignored. The
+     * instructions say to send a line first, and instructions are not a
+     * mechanism -- this is, and it fires on the first tool call of an exchange
+     * because that is the moment the turn stops being a quick answer.
+     *
+     * It says nothing once anything else has been sent: an explicit reply, or
+     * the model's own words before its tools, is the better acknowledgement and
+     * this stays out of the way.
+     */
+    pi.on('tool_call', async () => {
+        if (attached === null || exchange === null) return;
+        if (exchange.ackSent || exchange.repliedExplicitly) return;
+        if (config.slack.ackText.trim() === '') return;
+        exchange.ackSent = true;
+        await attached.web.post(exchange.channel, config.slack.ackText, exchange.thread);
+    });
+
     // The last reply of a turn is the answer, so it goes to Slack. Every turn
     // before it ended because tool calls came back, which is narration: sending
     // those turns one question into a stream of updates, which is what the read

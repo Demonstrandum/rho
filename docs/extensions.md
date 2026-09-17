@@ -363,6 +363,28 @@ the class is not exported, so the instance whose prototype is patched comes from
 that export name is minified; `tests/checkpoint-breaker.test.ts` pins it, because a rename would leave every turn waiting on a checkpoint that cannot succeed.
 `keep-trying` restores pi-rewind's behaviour of one attempt and one warning per turn.
 
+`remove.ts` and `undo.ts` + `lib/file-store.ts`, `lib/acting-file.ts`, `lib/undo-journal.ts` stop `write` destroying a file, give the agent a way to destroy one on purpose, and give it a way to take either back.
+pi's write is `mkdir` then `writeFile` (`dist/core/tools/write.js`): it does not stat the path, does not require that the file was read, and does not compare what is there with what the model last saw, so a model whose picture of a file is two turns old replaces every byte in it with one call.
+`[files] overwrite = 'refuse'` blocks that call in `tool_call` when the target holds bytes, and the block names the two ways through, `edit` for part of a file and `remove` for the whole of it.
+a write is let through when the path is absent, when the file is empty, and when its contents already hash to what is being written, since none of those destroy anything.
+
+`remove` uses the machine's own trash (`/usr/bin/trash` on macOS 15, `gio trash` or `trash-put` on linux) rather than unlink, so an item is recoverable by the person without the agent, and `-v` names the destination, which is what lets an undo move it back rather than copy over it.
+a machine with no trash command gets a refusal, not a delete: `[files] remove-to = 'delete'` is how a person says otherwise.
+
+the journal is the second half, and it exists because `/rewind` cannot do this job.
+pi-rewind's unit is the prompt: `producer.turnStart` commits on the first assistant message of a turn, `turnEnd` at the end of it, and `checkoutCommit` restores with `git reset --hard` followed by `git clean -fd` over the whole work tree.
+so taking back one wrong write also carries away everything else that happened in that window, including the edits the person made while the turn ran, and it only exists inside a git work tree, which `rewind-guard.ts` already narrows further.
+the journal records one entry per mutation instead: the path, a copy of the file as it was, and what the file looked like when the tool finished.
+`undo` restores one entry, and refuses when the file no longer matches what the mutation left, since writing old bytes over newer ones is the same accident one level down.
+each entry has a number, and the number goes back to the agent in the result of the call that made it (`[undo 7 takes this back]`, appended in `tool_result`), so `undo {id: 7}` names one mutation exactly.
+without that the only handles are the most recent mutation and the most recent for a path, and both move under the agent as later tools run: a file written three times has three records, and the wrong one is chosen silently.
+neither mechanism knows about the other, and an undo leaves `/rewind`'s checkpoints as they were.
+
+the copy never crosses the wire.
+`capture` caps one command's output at 64 KiB, so pulling a remote file back into this process would truncate it silently at about 48 KiB of source, and a backup is instead a `cp` made on the machine the file is on, under `~/.rho/undo/<session>` there or rho's data directory here.
+only a stat line and a sha256 travel.
+`lib/acting-file.ts` resolves a tool argument the way `environment.ts` does, so `local:/path`, a plain path, and `user@host:/path` each reach the machine the tool call itself reached; a path addressed at a machine nothing is attached to is left alone rather than guessed at, by the guard and by the journal both.
+
 `goal.ts` + `lib/goal.ts` port claude code's `/goal`: `/goal <condition>` sets a stopping condition, and the session keeps working until a second model says the condition holds.
 the division of labour is the whole point: the model doing the work does not decide when the work is done, since an agent twenty turns into a migration is the worst available judge of whether the migration is finished.
 after each turn a separate model reads the transcript and answers one forced `report_verdict` call, `{ok, reason, impossible?}`, through `ctx.modelRegistry.complete` (the same path `lib/audit.ts` uses, whose `forcedToolChoice` and `resolveReviewer` are shared rather than copied).

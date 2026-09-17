@@ -45,6 +45,10 @@ Only an assistant or agent app has that surface: the first call settles which me
 The text acknowledgement, the first reply of an exchange forwarded as a message, is what the daemon version did and is now off by default (`[slack] ack-message`).
 The reaction and the status line say the same thing without spending a message in the thread.
 
+A fixed line sent on the first tool call of an exchange (`[slack] ack-text`) was the fourth, and is gone.
+The reaction already says the message landed, and a canned "on it, one sec" in front of the agent's own words says it twice.
+What replaces it is the instruction: the delivered message and the `slack_reply` description both tell the agent to send a line before starting anything that will take more than a moment, in its own words, which is what a colleague does and what a fixed string cannot be.
+
 ## Files, and where a message is allowed to come from
 
 An attachment is not a URL the session can use: `url_private` answers only to the bot token, and answers a browser with a login page.

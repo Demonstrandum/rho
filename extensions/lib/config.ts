@@ -738,16 +738,6 @@ const SCHEMA = {
             'draws from extensions/assets/maxims.txt, the same pool the spinner',
             'uses, so one place decides what the agent says while it works',
         ),
-        ackText: field(
-            'ack-text',
-            isString,
-            'on it, one sec',
-            'what is sent to slack when a turn reaches its first tool call and',
-            'nothing has been said yet. a turn that goes straight to tools sends',
-            'nothing until it ends, and ending can take minutes: this is the line',
-            'that says the message landed and the work started. set it empty to',
-            'send nothing',
-        ),
         ackMessage: field(
             'ack-message',
             isBool,

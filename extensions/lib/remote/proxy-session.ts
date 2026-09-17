@@ -103,14 +103,14 @@ export class RemoteState {
                 this.snapshot.isCompacting = false;
                 break;
             case 'message_end': {
-                const message = (event as { message?: AgentMessage }).message;
+                const message = event.message as AgentMessage | undefined;
                 if (message !== undefined) this.history.push(message);
                 this.noticeModelDrift(message);
                 // An assistant message that carries a refusal instead of an
                 // answer reads as the model having nothing to say: the token
                 // expiring on the far side looked exactly like silence. The
                 // trouble is kept where a client can ask for it.
-                const trouble = (message as { errorMessage?: string } | undefined)?.errorMessage;
+                const trouble = message?.role === 'assistant' ? message.errorMessage : undefined;
                 // Only from a live turn: a refusal in the replayed history is
                 // something that already happened, and reporting it as current
                 // is how a fixed problem gets diagnosed twice.
@@ -136,11 +136,9 @@ export class RemoteState {
      * reads the context window and the reasoning levels off the whole model.
      */
     private noticeModelDrift(message: AgentMessage | undefined): void {
-        if (message === undefined || (message as { role?: string }).role !== 'assistant') return;
-        const answered = message as unknown as { provider?: string; model?: string };
-        if (typeof answered.model !== 'string') return;
+        if (message?.role !== 'assistant') return;
         const named = this.snapshot.model;
-        if (named?.id === answered.model && named.provider === answered.provider) return;
+        if (named?.id === message.model && named?.provider === message.provider) return;
         void this.syncState();
     }
 

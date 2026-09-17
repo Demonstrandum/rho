@@ -197,6 +197,12 @@ const render = (message: Incoming): string => {
         'Reply as a colleague would in Slack, not as a report.',
         'A one-line question gets a one-line answer. Never several paragraphs.',
         'No headings, no bullet lists, no preamble. Say the thing.',
+        // Said before the work, because the work can take minutes and the
+        // person is holding a phone. A turn that begins with tool calls and
+        // answers at the end leaves them with silence and no way to tell it
+        // from having been ignored.
+        'If anything here takes more than a moment, send a line with slack_reply before you start: "sure, one sec", "looking now", or what you are about to do.',
+        'Never leave a message unanswered while you work, and never end a turn without having replied.',
         'Your last reply of this turn is what Slack receives; the work in between stays in the terminal.',
         'If the full detail matters, it belongs in the terminal, and Slack gets the summary plus an offer.',
         `Answer ${message.name}, and use slack_reply to write to anyone else.`,
@@ -344,7 +350,7 @@ export default function (pi: ExtensionAPI) {
             name: 'slack_reply',
             label: 'Slack reply',
             description:
-                'Send a message to Slack now. Use it to answer the person who wrote with something other than the reply shown in the terminal, to answer a different person, or to say something before the work is done. Without it, the last reply of a Slack-triggered turn is forwarded automatically. Keep it to a line or two, the way a colleague replies: no headings, no bullet lists, no preamble.',
+                'Send a message to Slack now. Use it to answer the person who wrote with something other than the reply shown in the terminal, to answer a different person, or to say something before the work is done. Send one line with this as soon as a request will take longer than a moment ("sure, one sec", "looking now"): the person is waiting, and a turn that answers only at the end leaves them unable to tell work from silence. Without it, the last reply of a Slack-triggered turn is forwarded automatically. Keep it to a line or two, the way a colleague replies: no headings, no bullet lists, no preamble.',
             promptSnippet: 'Reply to Slack explicitly, in a line or two, instead of forwarding the whole reply',
             promptGuidelines: [
                 'Use slack_reply when a turn came from Slack and the person there needs a shorter or different answer than the one in the terminal.',

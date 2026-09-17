@@ -197,6 +197,9 @@ the payload also carries every message, every tool schema, and whatever an exten
 that hook is the only place the finished payload exists, so each one is kept as it goes out in `lib/prompt-log.ts`, a log bounded at eight entries, since a payload holds the whole conversation and a turn sends one per tool round.
 `/prompt view` browses the newest, `/prompt view <n>` an older one by its ordinal, `/prompt list` picks from the log, `/prompt view system` opens the system prompt, `/prompt view json` the newest payload as raw JSON, `/prompt clear` drops the log.
 before the first turn there is nothing to show, because nothing has been sent: `/prompt view system` and the payload views both say so rather than opening an empty pager, and the note names what to do, which is run a turn.
+in an interface onto a session on another machine the log is empty for a different reason, and the two must not share a message: `prompt` is in `[remote] commands-here`, so `/prompt` runs in this process, and this process sends nothing to a provider however many turns are answered on screen.
+there the note says where the payloads are, and `/prompt view system` falls back to the prompt the far side reported with the rest of its state, labelled as pi's string rather than the payload text.
+routing `/prompt` to the session instead (taking it out of `[remote] commands-here`) gets the payloads but not the viewer: the far side is `pi --mode rpc`, whose `ui.custom` returns undefined with no terminal to draw on, so only `/prompt dump` does anything there, writing the files on that machine.
 `/prompt dump [path]` writes the newest payload as JSON, `/prompt dump all [dir]` writes every kept payload, `/prompt dump system [path]` writes the system prompt as text; with no path they land in the session scratch directory, which is where a throwaway file belongs and what gets cleaned up.
 `lib/prompt-outline.ts` reads a payload as a tree: the payload type is `unknown`, so the walk is over JSON itself, every property and every array element becoming a node down to a depth of four, which reaches one content block without naming a single provider field.
 the one place shape is guessed at is the label, where an element carrying a `role`, `type`, or `name` string is named by it.
@@ -215,6 +218,13 @@ both paths call `ctx.shutdown()`, which is where `/quit` and ctrl+D end up; pi d
 
 `cwd.ts` adds `/cwd [path]` to change the directory the agent operates in, mid-session.
 the target is stored per session (`lib/state-store.ts`, `[cwd] remember`, on by default), so a resume chdirs back and re-registers the tools against it; a stored directory that no longer exists is dropped without a message and the session keeps the directory pi started it in.
+`moveHere` is exported from it, because `project.ts` lands a checkout somewhere and the session is meant to be standing in it: everything that moves this machine's session goes through the one function that re-registers pi's tools against the new directory.
+
+`lib/where-note.ts` sends the agent the facts it opened with, whenever something moves it.
+the `<env>` and `<git>` blocks are built before the first turn and describe where the session started, while `/cwd`, a project checkout, and attaching or detaching an environment all move the ground after that, and each of them only called `ui.notify`, which is drawn for the person and is not in the conversation: the agent went on reasoning about the old directory, the old machine, and the old branch.
+the note is one custom message, `location`, carrying the machine, the directory, and a `<git>` block for the tree that is there; the renderer draws a single line and the block is read when the row is expanded.
+the git read is a `GitRunner` (`lib/git-snapshot.ts` takes one), so the tree on another machine is read by `git -C <dir>` through `capture` on the environment's connection rather than by this machine's git, which would answer about a directory of the same name here or about nothing at all.
+`environment.ts` folds the same block into the message it already sends when a machine is attached or released, so a change of machine reports the branch and the dirty files rather than only `git repo: yes`.
 
 ## rendering
 
@@ -245,7 +255,7 @@ pi also reacts to it by parking a 2-line `IdleStatus` in the dock, which `halfbl
 `tight-tool-rows` drops the blank lines a tool row wraps itself in.
 `tight-after-tool-rows` drops the leading `Spacer(1)` of an assistant message when a tool row is what precedes it (the same blank line is kept after a user bubble, so it is decided by adjacency in `Container.render`).
 `hide-idle-status` skips pi's `IdleStatus`, two reserved dock rows, matched on constructor name since pi exports neither the class nor a subpath to it.
-`box-tool-tails` is in `[render]` with them but lives in `tool-rows.ts`, since it patches a renderer rather than a `render`.
+`self-rendered-rows` is in `[render]` with them but lives in `tool-rows.ts`, since it patches a renderer rather than a `render`.
 every trim skips a block holding an inline image: an image reserves its height as blank rows (after the escape sequence under kitty, before it under iterm2) and the terminal draws over them regardless, so dropping them leaves the transcript shorter than the picture and the input field and footer are drawn on top of it.
 matched on the kitty and iterm2 prefixes, since pi-tui's `isImageLine` is not re-exported through the package index; an iterm2 line also has to be recognised before OSC stripping, which would leave it looking blank.
 
@@ -255,9 +265,17 @@ a tool that ships a `renderCall` writes its own name into the call slot (`read`,
 so a row's name came from as many places as there are tool authors, and half the rows said nothing about what they did.
 three behaviours, each switched by a key in `[tools]`: `titles`, `detail`, `exec-preview`.
 
-a fourth, `[render] box-tool-tails`, repairs the one row that has neither a background nor half-block edges.
+a fourth, `[render] self-rendered-rows`, repairs the row of a tool that draws its own box.
 pi's edit tool is the only tool that declares `renderShell: "self"`: it draws its own row, because the row holds a diff that has to stay on screen while the arguments are still streaming and be rewritten in place when they settle.
-its call slot returns a `Box` and therefore takes the half-block patch like anything else, but its result slot (`core/tools/renderers/edit.js`) returns a bare `Container` of a `Spacer(1)` and a `Text`, which lands after that box as an unpainted blank line and an unpainted line of text.
+two things go wrong with that row.
+
+the shell is lost before the component sees it.
+a definition reaches `ToolExecutionComponent` through `wrapToolDefinition`, which copies name, label, description, parameters, `constrainedSampling`, `prepareArguments`, `executionMode` and `execute`, and then through `withBuiltInRenderers`, which rebuilds it as `{...definition, renderCall, renderResult}`.
+neither carries `renderShell`, so `getRenderShell()` answers `"default"` and pi wraps the box the tool drew inside its own `contentBox`: the row is boxed twice, one frame a column inside the other, and the inner frame is invisible until a selection inverts it.
+`getRenderShell` is patched to answer `"self"` for the tools pi declares it on, and to leave any other answer alone, so a pi that stops dropping it needs no change here.
+
+the result lands outside the box.
+edit's result slot (`core/tools/renderers/edit.js`) returns a bare `Container` of a `Spacer(1)` and a `Text`, which comes after the box as an unpainted blank line and an unpainted line of text.
 it is reached whenever the result differs from the preview already drawn, which in practice is every failed edit.
 the blank line survives `tight-tool-rows` because it is interior to the row, and `trimBlankEdges` takes only the leading and trailing rows.
 so the tail is trimmed and put in a `Box` of its own, coloured by `isError` from the render context (`AgentToolResult` does not carry it), which picks up the half-block edges for free and leaves pi's own streaming row untouched.
@@ -431,6 +449,53 @@ credentials belong to an app and an app is locked to one session, because Slack 
 an incoming message gets a reaction as the read mark and a rotating status line (`code-bot is thinking...`) refreshed every 90 seconds, and only the turn that ends without tool calls is forwarded as the answer.
 `lib/slack-api.ts` holds the six Web API calls and the reconnecting Socket Mode client, `lib/slack-config.ts` the app store, the per-app lock, and the manifest.
 the reasoning, the traps, and what is deliberately not built are in `extensions/slack.NOTES.md`.
+
+`sample-session.ts` opens a session made up to be looked at: `pi --sample-session`, or `/sample-session` in a running one.
+the things that draw a session are hard to work on without one, and the sessions that exist are somebody's work, with their paths, their keys, and their mistakes in it, so none of them can go in a screenshot or be replayed on another machine.
+`lib/sample-session.ts` builds one from nothing: every entry kind in `docs/session-format.md`, three branch points, thinking blocks, a tool call whose result is an error, an aborted reply, a branch summary, a label, and a `custom_message` standing in for a summarised span.
+it is deterministic, fixed ids and a fixed clock, so two runs write identical files and a test can name an entry.
+
+two things about how it opens were learned the hard way.
+the flag starts pi again with `--session` rather than switching the session under the running one: a switch tears the extension runtime down and binds a new one, which fires `session_start` again with the flag still set, and the first version wrote a sample and switched to it on every one of those, a loop that left thousands of session files in minutes.
+the switch also makes every extension holding a captured ctx report it as stale, since a replacement at startup is one nobody asked for; re-running has neither problem, because the session is the sample from the first line of the new process.
+the re-exec sits in the extension factory, before the TUI owns the terminal, which is where `bun-runtime.ts` replaces the process for the same reason.
+
+the sample is one file at a fixed path in rho's data directory, rewritten on each use and outside pi's session directory, so `/resume` never lists it.
+a file per run fills the session picker with copies of the same made-up session, and a sample is not work to come back to.
+the smoke check runs `pi --sample-session` in a pty and opens `/tree` over it, since a flag, a queued command, and a session switch in sequence is not something the unit tests reach.
+
+`session-tree.ts` turns pi's tree view into an edit surface, and leaves its navigation exactly as it was.
+pi matches `/tree` in `InteractiveMode`'s submit handler before extension commands are consulted, so a command of that name would never run; the view is installed by patching `InteractiveMode.prototype.showTreeSelector`, which is what `/tree`, esc esc, and the `app.session.tree` binding all call, shift+ctrl+t is that binding, so one patch covers every way in and the file registers no shortcut of its own: an extension shortcut on that key takes it off pi's action and pi reports the conflict.
+the patch keeps pi's own `TreeSelectorComponent`, wraps the instance's `handleInput`, and hands back every key normal mode does not claim, so folding, the filter modes, labels, paging, and copy keep working without being reimplemented.
+
+pi's tree sends every printable key to its search query, which leaves no letter free for a verb and no digit free for a count, so the view is modal: normal mode holds the motions and the verbs, `/` enters search, escape leaves it.
+shift is held rather than switched on: `shift+up` and `shift+down` drag the selection, an unshifted move drops it and moves, and `3` then `shift+up` drags three rows, which is the behaviour of a text editor rather than a mode.
+a digit typed while shift is down arrives as its shifted symbol, so `#` counts as 3 and shift can stay held for the whole gesture.
+`v` is for a selection that has to outlive the keys, since the verbs are typed after the drag and shift cannot be held through them; `g` and `G` extend to the root and to the leaf of the branch, which is what "summarise from here" and "summarise to here" are here: one operation, two ends.
+the verbs then act on whatever is selected, or on the entry under the cursor when nothing is: `d` delete, `s` summarise, `p` prune, `e` edit, `y` copy, `u` and `U` undo.
+
+navigating the leaf is `AgentSession.navigateTree`, not the runtime host: the host forks, switches files, and imports, and moving inside one file is the session's.
+the transcript does not repaint itself afterwards, so the tail of pi's own navigation is reproduced, clearing the chat container, rendering the branch again, and restoring the editor text the session hands back.
+`tests/session-tree.test.ts` pins every private the patch reaches by name against pi's own dist, because a fake that matched a method pi does not have is exactly how navigation reached a live session and threw.
+
+a selection is a connected span of one root-to-leaf path and never an arbitrary run of display rows, because a flattened run crosses a branch point into a sibling and deleting or summarising that has no meaning.
+extension therefore follows lineage, and a drag that would cross a branch point is refused with a line saying so.
+the gutter carries relative row numbers that stop at the branch point above and below the cursor, so a count never promises a row it cannot reach, and the place the numbers run out is where the branch is.
+those two columns are pi's own cursor column, rewritten in place by `lib/tree-gutter.ts` over lines pi has already rendered, so nothing about a row's content, colour, or horizontal clipping is reproduced here; a line count that does not match the renderer's shape leaves the lines untouched rather than corrupting them.
+
+nothing reaches disk while the view is open.
+`lib/session-edit.ts` holds the entries and a log of ops over them, recomputes the edited list from the base after every change, and `u` walks back through the log.
+the surgery has to respect three things a session file can express: a surviving entry's `parentId` names a surviving entry, an assistant message carrying tool calls and the `toolResult` entries answering them are one unit, and a label, a compaction's `firstKeptEntryId`, and a branch summary's `fromId` all name entries that may be the ones removed.
+so a selection endpoint landing inside a tool-call pair widens to cover it, a delete either re-chains what hung off the span or takes the subtree with it, a label whose target went is removed and its own children re-chained past it, and a compaction retargets to the nearest surviving ancestor, which keeps its kept range as wide as it was and never wider.
+a summarised span collapses to one `custom_message` of type `rho-summary`, which participates in context as a `custom` entry does not, and stays clear of the bookkeeping pi's own compaction entries carry.
+
+committing writes the edited tree to a new session file through `lib/session-file.ts` and switches to it.
+pi's own copies (`/fork`, `/clone`, `SessionManager.createBranchedSession`) keep one root-to-leaf path, since both commands exist to start a new line of work; this copy keeps every branch, and the file being edited is never written, so it is the backup and `/resume` is the way back to it.
+leaving with edits pending asks commit, discard, or keep editing; leaving with none behaves as pi's tree always has, including the branch-summary prompt.
+`/session-copy` and `/session-backup` are the same whole-tree copy without an edit, one switching to the copy and one staying put.
+
+the view can no longer read its tree off the session manager, because the buffer's tree is not on disk, so `treeOf()` rebuilds pi's node shape from the buffer under pi's own rules, timestamp sibling order and orphans as roots included.
+every private of pi's the file reaches is named one by one in an interface, so a release that moves one fails at the patch rather than at a keystroke, and `tests/session-tree.test.ts` drives the patched method through fakes to catch exactly that.
 
 `rho.ts` `/rho config` shows the live config as TOML, `/rho config overwrite` writes it to the XDG path, `/rho config write PATH` writes it elsewhere.
 

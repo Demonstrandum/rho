@@ -13,26 +13,60 @@
  */
 
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
+import type { AssistantMessage, TextContent, ThinkingContent, ToolCall } from '@earendil-works/pi-ai';
 import type { RpcEvent } from './rpc-link';
 
-interface Part {
-    type: string;
-    text?: string;
-    thinking?: string;
-    id?: string;
-    name?: string;
-    arguments?: unknown;
+/** A tool call whose arguments are still arriving keeps the json text so far. */
+interface ArrivingToolCall extends ToolCall {
+    raw?: string;
 }
 
-/** One assistant message, assembled as its pieces arrive. */
+type Part = TextContent | ThinkingContent | ArrivingToolCall;
+
+/** Everything an assistant message carries besides its content. */
+type Frame = Omit<AssistantMessage, 'content'>;
+
+/**
+ * The frame before any `message_start` has named one: an interface attached
+ * mid-turn sees deltas for a message whose start it missed.
+ */
+const UNNAMED_FRAME: Frame = {
+    role: 'assistant',
+    api: 'pi-messages',
+    provider: '',
+    model: '',
+    usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: 'pending',
+    timestamp: 0,
+};
+
+/**
+ * One assistant message, assembled as its pieces arrive.
+ *
+ * `message_start` fires for every message in the loop, a user message with a
+ * plain string for content included. Only an assistant message is streamed,
+ * so only one is kept; anything else clears what was being built.
+ */
 export class StreamingMessage {
     private parts: Part[] = [];
-    private role = 'assistant';
+    private frame: Frame = UNNAMED_FRAME;
 
     reset(message?: AgentMessage): void {
-        const carried = message as unknown as { role?: string; content?: Part[] } | undefined;
-        this.role = carried?.role ?? 'assistant';
-        this.parts = carried?.content === undefined ? [] : carried.content.map((part) => ({ ...part }));
+        if (message?.role !== 'assistant') {
+            this.frame = UNNAMED_FRAME;
+            this.parts = [];
+            return;
+        }
+        const { content, ...frame } = message;
+        this.frame = frame;
+        this.parts = content.map((part) => ({ ...part }));
     }
 
     /**
@@ -50,18 +84,20 @@ export class StreamingMessage {
                 this.parts[index] = { type: 'text', text: '' };
                 break;
             case 'text_delta': {
-                const part = this.parts[index] ?? { type: 'text', text: '' };
-                part.text = `${part.text ?? ''}${String(event.delta ?? '')}`;
-                this.parts[index] = part;
+                const part = this.parts[index];
+                const text = part?.type === 'text' ? part : { type: 'text' as const, text: '' };
+                text.text = `${text.text}${String(event.delta ?? '')}`;
+                this.parts[index] = text;
                 break;
             }
             case 'thinking_start':
                 this.parts[index] = { type: 'thinking', thinking: '' };
                 break;
             case 'thinking_delta': {
-                const part = this.parts[index] ?? { type: 'thinking', thinking: '' };
-                part.thinking = `${part.thinking ?? ''}${String(event.delta ?? '')}`;
-                this.parts[index] = part;
+                const part = this.parts[index];
+                const thought = part?.type === 'thinking' ? part : { type: 'thinking' as const, thinking: '' };
+                thought.thinking = `${thought.thinking}${String(event.delta ?? '')}`;
+                this.parts[index] = thought;
                 break;
             }
             case 'toolcall_start':
@@ -73,24 +109,29 @@ export class StreamingMessage {
                 };
                 break;
             case 'toolcall_delta': {
-                const part = this.parts[index] ?? { type: 'toolCall', id: '', name: '', arguments: {} };
-                const grown = `${(part as { raw?: string }).raw ?? ''}${String(event.delta ?? '')}`;
-                (part as { raw?: string }).raw = grown;
+                const part = this.parts[index];
+                const call: ArrivingToolCall =
+                    part?.type === 'toolCall' ? part : { type: 'toolCall', id: '', name: '', arguments: {} };
+                const grown = `${call.raw ?? ''}${String(event.delta ?? '')}`;
+                call.raw = grown;
                 // The arguments arrive as json text; a half-written object is
                 // not parseable, and the row shows what it can until it is.
                 try {
-                    part.arguments = JSON.parse(grown) as unknown;
+                    const parsed: unknown = JSON.parse(grown);
+                    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                        call.arguments = parsed as Record<string, unknown>;
+                    }
                 } catch {
                     // still arriving
                 }
-                this.parts[index] = part;
+                this.parts[index] = call;
                 break;
             }
         }
     }
 
-    get message(): AgentMessage {
-        return { role: this.role, content: this.parts } as unknown as AgentMessage;
+    get message(): AssistantMessage {
+        return { ...this.frame, content: this.parts };
     }
 }
 
@@ -103,17 +144,17 @@ export class StreamingMessage {
 export function reshape(event: RpcEvent, streaming: StreamingMessage): RpcEvent | null {
     switch (event.type) {
         case 'message_start': {
-            const message = (event as { message?: AgentMessage }).message;
+            const message = event.message as AgentMessage | undefined;
             streaming.reset(message);
             return event;
         }
         case 'message_update': {
-            const inner = (event as { assistantMessageEvent?: Record<string, unknown> }).assistantMessageEvent;
+            const inner = event.assistantMessageEvent as Record<string, unknown> | undefined;
             if (inner !== undefined) streaming.apply(inner);
             return { ...event, message: streaming.message } as RpcEvent;
         }
         case 'message_end': {
-            const message = (event as { message?: AgentMessage }).message;
+            const message = event.message as AgentMessage | undefined;
             if (message !== undefined) streaming.reset(message);
             return event;
         }

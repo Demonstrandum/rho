@@ -460,10 +460,8 @@ if (verb === 'serve') {
         // chose, and pi picking it would bill an account the person at the
         // interface is not looking at. Nothing is stripped when no login was
         // lent, because then the environment is all there is.
-        const withoutHostKeys =
-            lent.auth === null
-                ? {}
-                : Object.fromEntries(PROVIDER_KEYS.map((key) => [key, undefined as unknown as string]));
+        const withoutHostKeys: Record<string, string | undefined> =
+            lent.auth === null ? {} : Object.fromEntries(PROVIDER_KEYS.map((key) => [key, undefined]));
         const child = spawn(process.execPath, [import.meta.filename, 'serve', name, ...rest], {
             cwd,
             detached: true,

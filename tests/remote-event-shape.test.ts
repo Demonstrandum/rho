@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { AssistantMessage, UserMessage } from '@earendil-works/pi-ai';
 import { StreamingMessage, reshape } from '../extensions/lib/remote/event-shape';
 
 /**
@@ -8,20 +9,57 @@ import { StreamingMessage, reshape } from '../extensions/lib/remote/event-shape'
  * every update, and without the snapshot it draws nothing at all.
  */
 
-const update = (inner: Record<string, unknown>) =>
-    reshape({ type: 'message_update', assistantMessageEvent: inner }, streaming) as unknown as {
-        message: { content: { type: string; text?: string }[] };
-    };
+const update = (inner: Record<string, unknown>): { message: AssistantMessage } => {
+    reshape({ type: 'message_update', assistantMessageEvent: inner }, streaming);
+    return { message: streaming.message };
+};
+
+const assistant = (content: AssistantMessage['content']): AssistantMessage => ({
+    role: 'assistant',
+    content,
+    api: 'anthropic-messages',
+    provider: 'anthropic',
+    model: 'claude',
+    usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: 'stop',
+    timestamp: 0,
+});
+
+const text = (part: AssistantMessage['content'][number] | undefined): string | undefined =>
+    part?.type === 'text' ? part.text : undefined;
 
 let streaming = new StreamingMessage();
 
 describe('rebuilding the assistant message', () => {
     test('text arrives as deltas and accumulates', () => {
         streaming = new StreamingMessage();
-        reshape({ type: 'message_start', message: { role: 'assistant', content: [] } as never }, streaming);
+        reshape({ type: 'message_start', message: assistant([]) }, streaming);
         update({ type: 'text_start', contentIndex: 0 });
-        expect(update({ type: 'text_delta', contentIndex: 0, delta: 'bo' }).message.content[0]?.text).toBe('bo');
-        expect(update({ type: 'text_delta', contentIndex: 0, delta: 'nes' }).message.content[0]?.text).toBe('bones');
+        expect(text(update({ type: 'text_delta', contentIndex: 0, delta: 'bo' }).message.content[0])).toBe('bo');
+        expect(text(update({ type: 'text_delta', contentIndex: 0, delta: 'nes' }).message.content[0])).toBe('bones');
+    });
+
+    test('a user message starting carries a plain string and is not the message being built', () => {
+        streaming = new StreamingMessage();
+        const user: UserMessage = { role: 'user', content: 'hello there', timestamp: 0 };
+        expect(() => reshape({ type: 'message_start', message: user }, streaming)).not.toThrow();
+        expect(streaming.message.content).toEqual([]);
+    });
+
+    test('the frame of the started message is kept under the parts', () => {
+        streaming = new StreamingMessage();
+        reshape({ type: 'message_start', message: assistant([]) }, streaming);
+        update({ type: 'text_start', contentIndex: 0 });
+        const shaped = update({ type: 'text_delta', contentIndex: 0, delta: 'x' });
+        expect(shaped.message.model).toBe('claude');
+        expect(shaped.message.provider).toBe('anthropic');
     });
 
     test('thinking is kept apart from text', () => {
@@ -31,7 +69,7 @@ describe('rebuilding the assistant message', () => {
         update({ type: 'text_start', contentIndex: 1 });
         const shaped = update({ type: 'text_delta', contentIndex: 1, delta: 'hello' });
         expect(shaped.message.content.map((part) => part.type)).toEqual(['thinking', 'text']);
-        expect(shaped.message.content[1]?.text).toBe('hello');
+        expect(text(shaped.message.content[1])).toBe('hello');
     });
 
     test('a tool call is readable before its arguments finish arriving', () => {
@@ -48,11 +86,8 @@ describe('rebuilding the assistant message', () => {
         streaming = new StreamingMessage();
         update({ type: 'text_start', contentIndex: 0 });
         update({ type: 'text_delta', contentIndex: 0, delta: 'partial' });
-        reshape(
-            { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'final' }] } as never },
-            streaming,
-        );
-        expect((streaming.message as unknown as { content: { text: string }[] }).content[0]?.text).toBe('final');
+        reshape({ type: 'message_end', message: assistant([{ type: 'text', text: 'final' }]) }, streaming);
+        expect(text(streaming.message.content[0])).toBe('final');
     });
 
     test('events that carry no message pass through untouched', () => {

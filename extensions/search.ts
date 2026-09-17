@@ -85,7 +85,7 @@ function indexer(pi: ExtensionAPI): () => IndexReport {
     let cached: IndexReport | null = null;
     return () => {
         if (cached === null) {
-            const sessionCommands = pi.getCommands() as unknown as readonly SessionCommand[];
+            const sessionCommands: readonly SessionCommand[] = pi.getCommands();
             cached = buildIndex({
                 sessionCommands,
                 extraDocRoots: config.search.docRoots,

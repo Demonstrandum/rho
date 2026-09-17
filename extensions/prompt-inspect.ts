@@ -31,6 +31,7 @@ import { Pager } from './lib/pager';
 import { type CapturedRequest, RequestLog } from './lib/prompt-log';
 import { type OutlineNode, outline, pretty, raw, systemText, weight } from './lib/prompt-outline';
 import { collapseHome, truncate } from './lib/text';
+import { publishedRelay } from './lib/remote/ui-relay';
 
 type ViewKind = 'payload' | 'system' | 'json';
 
@@ -226,9 +227,24 @@ export default function (pi: ExtensionAPI) {
 
     const NOTHING_YET = 'nothing sent yet; run a turn and the request is here';
 
+    /**
+     * Whether this process is drawing a session that runs elsewhere.
+     *
+     * A viewer sends nothing to a provider: the far side does, so the payload
+     * log here stays empty however many turns have been answered on screen.
+     * Saying "nothing sent yet" to someone watching a session mid-turn is a
+     * false statement about the session, so the two cases are separated.
+     */
+    const viewing = (): boolean => publishedRelay() !== null;
+
+    const ELSEWHERE =
+        'the payloads are on the machine running this session; this terminal sends nothing to the provider. '
+        + '/prompt view system shows the prompt it reported. for the payloads, take "prompt" out of '
+        + '[remote] commands-here, which sends /prompt to the session, where /prompt dump writes them there.';
+
     function nothingCaptured(ctx: ExtensionContext): boolean {
         if (log.size > 0) return false;
-        ctx.ui.notify(NOTHING_YET, 'warning');
+        ctx.ui.notify(viewing() ? ELSEWHERE : NOTHING_YET, 'warning');
         return true;
     }
 
@@ -243,7 +259,17 @@ export default function (pi: ExtensionAPI) {
     function systemPrompt(ctx: ExtensionContext): string | null {
         const latest = log.latest();
         if (latest === undefined) {
-            ctx.ui.notify(`no system prompt sent yet; ${NOTHING_YET}`, 'warning');
+            // A viewer has the far side's prompt as pi built it, carried with
+            // the rest of the session state. It is not the payload text, and
+            // the difference is said rather than glossed over.
+            if (viewing()) {
+                const reported = ctx.getSystemPrompt();
+                if (reported !== '') {
+                    ctx.ui.notify('the prompt the session reported, not the payload text; the payloads are on that machine', 'info');
+                    return reported;
+                }
+            }
+            ctx.ui.notify(viewing() ? ELSEWHERE : `no system prompt sent yet; ${NOTHING_YET}`, 'warning');
             return null;
         }
         const text = systemText(latest.payload);

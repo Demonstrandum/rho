@@ -31,6 +31,8 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `cwd.ts` `/cwd [path]` changes the agent's working directory mid-session, `[cwd]`
   - `quit.ts` `/exit`, and the bare words `quit` / `exit`, end the session, `[quit]`
   - `prompt-inspect.ts` `/prompt` browses the provider payloads and the system prompt, and dumps either to disk.
+  - `sample-session.ts` `pi --sample-session` and `/sample-session` open a made-up session: tool calls, thinking, branches, every entry kind.
+  - `session-tree.ts` patches `/tree` (and esc esc, and shift+ctrl+t) into an edit surface: select a span, delete, summarise, prune or rewrite it, commit as a copy; `/session-copy`, `/session-backup`.
   - `input-field.ts` styles the input field: half-block edges, background, gradient, `[input]`
   - `command-hint.ts` shows the form of the command being typed at the right of the field, fading out as the typed line approaches it, `[hint]`
   - `spinner.ts` working indicator and shimmering message, from `assets/spinners.json`, `maxims.txt`, `verbs.txt`; `[spinner] placement` puts it on its own row below the input field or in the field's border.

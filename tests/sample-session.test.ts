@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { SessionEntry } from '@earendil-works/pi-coding-agent';
 import { SAMPLE_LEAF, sampleEntries } from '../extensions/lib/sample-session';
+import { sampleArgv } from '../extensions/sample-session';
 import { writeSessionCopy } from '../extensions/lib/session-file';
 import { pathTo, runIds, treeOf, unitRun } from '../extensions/lib/session-edit';
 
@@ -110,4 +111,21 @@ test('it round-trips through a session file unchanged', () => {
 
 test('the sample is the same file every time', () => {
     expect(JSON.stringify(sampleEntries())).toBe(JSON.stringify(entries));
+});
+
+test('the re-run drops the flag and names the sample file', () => {
+    expect(sampleArgv(['--sample-session', '--model', 'x/y'], '/s.jsonl')).toEqual([
+        '--model',
+        'x/y',
+        '--session',
+        '/s.jsonl',
+    ]);
+    expect(sampleArgv(['--sample-session=true', '-c'], '/s.jsonl')).toEqual(['-c', '--session', '/s.jsonl']);
+    // a flag that merely starts with the same letters is not this one
+    expect(sampleArgv(['--sample-sessions-dir', 'x'], '/s.jsonl')).toEqual([
+        '--sample-sessions-dir',
+        'x',
+        '--session',
+        '/s.jsonl',
+    ]);
 });

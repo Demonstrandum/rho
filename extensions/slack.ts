@@ -40,12 +40,16 @@ import {
     type Acknowledgement,
     addressed,
     type ChannelId,
+    type Conversation,
     type Identity,
     type Incoming,
+    type Person,
     type RawMessage,
+    scheduleTime,
     SlackWeb,
     SocketMode,
     type Timestamp,
+    type UserId,
 } from './lib/slack-api';
 import {
     type AppName,
@@ -145,6 +149,36 @@ const scratchDir = (): string => process.env.RHO_SCRATCH ?? tmpdir();
  */
 const remember = (message: Incoming): void => {
     if (message.kind === 'im') setNote(message.channel, message.name);
+};
+
+/** every tool here answers in one block of text. */
+const said = (text: string) => ({ content: [{ type: 'text' as const, text }], details: undefined });
+
+/** hh:mm of a Slack timestamp, in UTC, which is how every line here prints a time. */
+const clock = (ts: Timestamp): string => new Date(Number.parseFloat(ts) * 1000).toISOString().slice(11, 16);
+
+/** a conversation as one line of a listing. */
+const conversationLine = (conversation: Conversation): string => {
+    const named = conversation.name === '' ? '' : ` ${conversation.kind === 'im' ? '' : '#'}${conversation.name}`;
+    const marks = [
+        conversation.kind,
+        conversation.isMember ? 'member' : 'not a member',
+        conversation.members === null ? null : `${conversation.members} people`,
+        conversation.topic === '' ? null : `topic: ${conversation.topic}`,
+    ].filter((mark): mark is string => mark !== null);
+    return `${conversation.id}${named} (${marks.join(', ')})`;
+};
+
+/** a person as one line of a listing; `dm` is their DM channel where one is already open. */
+const personLine = (person: Person, dm: ChannelId | null): string => {
+    const marks = [
+        person.realName === '' || person.realName === person.name ? null : person.realName,
+        person.title === '' ? null : person.title,
+        person.timezone === '' ? null : person.timezone,
+        person.isBot ? 'bot' : null,
+    ].filter((mark): mark is string => mark !== null);
+    const where = dm === null ? '' : ` dm ${dm}`;
+    return `${person.id}${where} ${person.name}${marks.length === 0 ? '' : ` (${marks.join(', ')})`}`;
 };
 
 /**
@@ -307,11 +341,11 @@ export default function (pi: ExtensionAPI) {
         const seen = new Set(Object.keys(stored.marks));
         const found = await attached.web.conversations();
         if (!found.ok) return null;
-        const fresh = found.value.filter((channel) => !seen.has(channel));
+        const fresh = found.value.filter((conversation) => !seen.has(conversation.id));
         if (fresh.length === 0) return null;
 
         const lines: string[] = [];
-        for (const channel of fresh) {
+        for (const { id: channel, name } of fresh) {
             const recent = await attached.web.history(channel, config.slack.catchUp);
             if (!recent.ok || recent.value.length === 0) continue;
             const last = recent.value[recent.value.length - 1];
@@ -321,8 +355,9 @@ export default function (pi: ExtensionAPI) {
             // next attach should not show it again.
             mark(channel, last.ts);
             const at = new Date(Number.parseFloat(last.ts) * 1000).toISOString().slice(11, 16);
+            const where = name === '' ? channel : `${channel} (${name})`;
             lines.push(
-                `${channel} (${recent.value.length}) last [${at} UTC] ${last.name}: ${last.text.slice(0, 120)}`,
+                `${where} (${recent.value.length}) last [${at} UTC] ${last.name}: ${last.text.slice(0, 120)}`,
             );
         }
         if (lines.length === 0) return null;
@@ -340,7 +375,12 @@ export default function (pi: ExtensionAPI) {
      * session that never touches Slack carries none of their definitions. An
      * attached session needs them immediately: a message can arrive a second
      * later, and an agent that cannot answer it is worse than one that costs
-     * four definitions.
+     * seven definitions.
+     *
+     * Seven and not more: each Slack surface that operates on something rather
+     * than sending gets one tool with an action, because a tool per method
+     * would put a dozen definitions in the prompt of every attached session to
+     * save the model one enum.
      */
     const registerTools = (): void => {
         if (toolsRegistered) return;
@@ -355,25 +395,33 @@ export default function (pi: ExtensionAPI) {
             promptGuidelines: [
                 'Use slack_reply when a turn came from Slack and the person there needs a shorter or different answer than the one in the terminal.',
                 'Slack replies are short: a one-line question gets a one-line answer, and long detail stays in the terminal.',
-                'Pass channel to answer someone other than the person whose message started this turn.',
+                'Pass channel to write to someone other than the person whose message started this turn: a DM channel (D...), a channel (C...), or a person directly by user ID (U...), which opens the DM by itself. slack_directory finds all three.',
+                'Pass thread to answer inside one message\'s thread rather than the conversation body.',
             ],
             parameters: Type.Object({
                 text: Type.String({ description: 'The message to send.' }),
                 channel: Type.Optional(
                     Type.String({
-                        description: 'Channel or user ID. Defaults to the conversation the message came from.',
+                        description:
+                            'Where to send it: a DM channel (D...), a channel (C...), or a user ID (U...), which sends a plain DM to that person. Defaults to the conversation the message came from.',
+                    }),
+                ),
+                thread: Type.Optional(
+                    Type.String({
+                        description:
+                            "Timestamp of the message to reply under, from slack_read. Omit to write to the conversation itself, or to stay in the current exchange's thread.",
                     }),
                 ),
             }),
-            async execute(_id, params: { text: string; channel?: string }) {
-                const said = (text: string) => ({ content: [{ type: 'text' as const, text }], details: undefined });
+            async execute(_id, params: { text: string; channel?: string; thread?: string }) {
                 if (attached === null) return said('Slack is not attached to this session.');
                 const target = params.channel ?? exchange?.channel ?? null;
                 if (target === null) return said('No channel: nothing has arrived from Slack, so pass one.');
-                const thread = target === exchange?.channel ? (exchange?.thread ?? null) : null;
+                const thread = params.thread ?? (target === exchange?.channel ? (exchange?.thread ?? null) : null);
                 const sent = await attached.web.post(target, params.text, thread);
                 if (exchange !== null && target === exchange.channel) exchange.repliedExplicitly = true;
-                return said(sent.ok ? `Sent to ${target}.` : `Slack refused it: ${sent.error}`);
+                if (!sent.ok) return said(`Slack refused it: ${sent.error}`);
+                return said(`Sent to ${target}${thread === null ? '' : ` in thread ${thread}`} as ${sent.value}.`);
             },
         });
 
@@ -391,11 +439,16 @@ export default function (pi: ExtensionAPI) {
                 path: Type.String({ description: 'Path to the file to send, absolute or relative to the working directory.' }),
                 comment: Type.Optional(Type.String({ description: 'One line sent with the file.' })),
                 channel: Type.Optional(
-                    Type.String({ description: 'Channel or user ID. Defaults to the conversation in progress.' }),
+                    Type.String({
+                        description:
+                            'DM channel (D...), channel (C...), or user ID (U...). Defaults to the conversation in progress.',
+                    }),
+                ),
+                thread: Type.Optional(
+                    Type.String({ description: 'Timestamp of the message to attach it under.' }),
                 ),
             }),
-            async execute(_id, params: { path: string; comment?: string; channel?: string }) {
-                const said = (text: string) => ({ content: [{ type: 'text' as const, text }], details: undefined });
+            async execute(_id, params: { path: string; comment?: string; channel?: string; thread?: string }) {
                 if (attached === null) return said('Slack is not attached to this session.');
                 const target = params.channel ?? exchange?.channel ?? null;
                 if (target === null) return said('No channel: nothing has arrived from Slack, so pass one.');
@@ -406,7 +459,7 @@ export default function (pi: ExtensionAPI) {
                 } catch (error) {
                     return said(`Cannot read ${path}: ${(error as Error).message}`);
                 }
-                const thread = target === exchange?.channel ? (exchange?.thread ?? null) : null;
+                const thread = params.thread ?? (target === exchange?.channel ? (exchange?.thread ?? null) : null);
                 const sent = await attached.web.upload(
                     target,
                     { name: basename(path), bytes },
@@ -422,7 +475,7 @@ export default function (pi: ExtensionAPI) {
             name: 'slack_read',
             label: 'Slack read',
             description:
-                "Read a conversation's recent messages, or one thread's replies. Use it to see what was said before this session attached, to re-read a thread that has scrolled out of the conversation, or to check a channel nobody has written in yet. Reading marks the conversation read.",
+                "Read a conversation's recent messages, or one thread's replies. Use it to see what was said before this session attached, to re-read a thread that has scrolled out of the conversation, or to check a channel nobody has written in yet. Each line carries the message's timestamp, which slack_reply takes as a thread and slack_message takes as its target. Reading marks the conversation read.",
             promptSnippet: 'Read past Slack messages in a conversation or a thread',
             promptGuidelines: [
                 'Use slack_read when the answer depends on something said in Slack that is not in front of you.',
@@ -432,7 +485,7 @@ export default function (pi: ExtensionAPI) {
                 channel: Type.Optional(
                     Type.String({
                         description:
-                            'Channel or user ID. Defaults to the conversation the current message came from.',
+                            'DM channel (D...), channel (C...), or user ID (U...). Defaults to the conversation the current message came from.',
                     }),
                 ),
                 thread: Type.Optional(
@@ -446,7 +499,6 @@ export default function (pi: ExtensionAPI) {
                 ),
             }),
             async execute(_id, params: { channel?: string; thread?: string; limit?: number }) {
-                const said = (text: string) => ({ content: [{ type: 'text' as const, text }], details: undefined });
                 if (attached === null) return said('Slack is not attached to this session.');
                 const target = params.channel ?? exchange?.channel ?? null;
                 if (target === null) return said('No channel: nothing has arrived from Slack, so pass one.');
@@ -456,10 +508,7 @@ export default function (pi: ExtensionAPI) {
                 const last = read.value[read.value.length - 1];
                 if (last !== undefined) mark(target, last.ts);
                 for (const message of read.value) remember(message);
-                const lines = read.value.map((m) => {
-                    const at = new Date(Number.parseFloat(m.ts) * 1000).toISOString().slice(11, 16);
-                    return `[${at} UTC] ${m.name}: ${m.text}`;
-                });
+                const lines = read.value.map((m) => `[${clock(m.ts)} UTC ${m.ts}] ${m.name}: ${m.text}`);
                 return said(`${target}, ${read.value.length} messages:\n${lines.join('\n')}`);
             },
         });
@@ -481,7 +530,311 @@ export default function (pi: ExtensionAPI) {
                 exchange = null;
                 save({ answering: null });
                 stopTyping();
-                return { content: [{ type: 'text' as const, text: 'Slack exchange closed.' }], details: undefined };
+                return said('Slack exchange closed.');
+            },
+        });
+
+        pi.registerTool({
+            name: 'slack_directory',
+            label: 'Slack directory',
+            description:
+                'Find people and conversations, and the IDs that address them. With no arguments it lists the conversations this app is in. query matches a name or an ID. user gives one person in full, their timezone and their DM channel included. channel gives one conversation in full, its members included. This is how you write to someone who has not written first: take their ID from here and pass it to slack_reply.',
+            promptSnippet: 'Look up Slack channels and people, and the IDs that reach them',
+            promptGuidelines: [
+                'Use slack_directory before writing to anyone who is not the person whose message started this turn: a name is not an address, and the ID it needs comes from here.',
+                'Ask with a query rather than listing the workspace when the name is known.',
+            ],
+            parameters: Type.Object({
+                query: Type.Optional(
+                    Type.String({ description: 'Part of a name or an ID. Omit to list everything, to the limit.' }),
+                ),
+                kind: Type.Optional(
+                    Type.Union(
+                        [Type.Literal('people'), Type.Literal('conversations'), Type.Literal('all')],
+                        {
+                            description:
+                                "What to list. 'conversations' is the default and covers DMs, group DMs and channels.",
+                        },
+                    ),
+                ),
+                user: Type.Optional(Type.String({ description: 'A user ID (U...), for that person in full.' })),
+                channel: Type.Optional(
+                    Type.String({ description: 'A channel or DM ID, for that conversation in full.' }),
+                ),
+                limit: Type.Optional(
+                    Type.Integer({ minimum: 1, maximum: 200, description: 'How many entries. Default 40.' }),
+                ),
+            }),
+            async execute(
+                _id,
+                params: {
+                    query?: string;
+                    kind?: 'people' | 'conversations' | 'all';
+                    user?: string;
+                    channel?: string;
+                    limit?: number;
+                },
+            ) {
+                if (attached === null) return said('Slack is not attached to this session.');
+                const web = attached.web;
+                const limit = params.limit ?? 40;
+
+                if (params.user !== undefined) {
+                    const who = await web.person(params.user);
+                    if (!who.ok) return said(`Slack refused it: ${who.error}`);
+                    const dm = await web.direct(params.user);
+                    const localTime = new Date(Date.now() + who.value.timezoneOffset * 1000)
+                        .toISOString()
+                        .slice(11, 16);
+                    return said(
+                        [
+                            personLine(who.value, dm.ok ? dm.value : null),
+                            who.value.timezone === '' ? null : `local time ${localTime}`,
+                            dm.ok ? `slack_reply channel: ${dm.value} or ${who.value.id}` : `no DM: ${dm.error}`,
+                        ]
+                            .filter((line): line is string => line !== null)
+                            .join('\n'),
+                    );
+                }
+
+                if (params.channel !== undefined) {
+                    const where = await web.conversation(params.channel);
+                    if (!where.ok) return said(`Slack refused it: ${where.error}`);
+                    const who = await web.members(params.channel, limit);
+                    const names: string[] = [];
+                    if (who.ok) for (const member of who.value) names.push(`${member} ${await web.nameOf(member)}`);
+                    return said(
+                        [
+                            conversationLine(where.value),
+                            where.value.purpose === '' ? null : `purpose: ${where.value.purpose}`,
+                            names.length === 0 ? null : `members:\n${names.map((n) => `  ${n}`).join('\n')}`,
+                        ]
+                            .filter((line): line is string => line !== null)
+                            .join('\n'),
+                    );
+                }
+
+                const kind = params.kind ?? 'conversations';
+                const matches = (text: string): boolean =>
+                    params.query === undefined || text.toLowerCase().includes(params.query.toLowerCase());
+                const blocks: string[] = [];
+
+                if (kind === 'people' || kind === 'all') {
+                    const everyone = await web.people();
+                    if (!everyone.ok) return said(`Slack refused it: ${everyone.error}`);
+                    // The DM channel of a person who has already been written
+                    // to, so the common case needs no conversations.open at all.
+                    const open = await web.conversations();
+                    const dms = new Map<UserId, ChannelId>();
+                    if (open.ok) {
+                        for (const conversation of open.value) {
+                            if (conversation.kind === 'im' && conversation.user !== null) {
+                                dms.set(conversation.user, conversation.id);
+                            }
+                        }
+                    }
+                    const found = everyone.value
+                        .filter((person) => !person.deleted)
+                        .filter((person) => matches(`${person.id} ${person.name} ${person.realName}`))
+                        .slice(0, limit);
+                    blocks.push(
+                        found.length === 0
+                            ? 'No people match.'
+                            : [
+                                  `${quantity(found.length, 'person', 'people')}:`,
+                                  ...found.map((person) => `  ${personLine(person, dms.get(person.id) ?? null)}`),
+                              ].join('\n'),
+                    );
+                }
+
+                if (kind === 'conversations' || kind === 'all') {
+                    // users.list first, where it ran, so a DM listing can name
+                    // the other party from the cache rather than one call each.
+                    if (kind === 'conversations') await web.people();
+                    const mine = await web.conversations();
+                    if (!mine.ok) return said(`Slack refused it: ${mine.error}`);
+                    const rest = await web.channels();
+                    const merged = new Map<ChannelId, Conversation>();
+                    for (const conversation of mine.value) merged.set(conversation.id, conversation);
+                    if (rest.ok) {
+                        for (const conversation of rest.value) {
+                            if (!merged.has(conversation.id)) merged.set(conversation.id, conversation);
+                        }
+                    }
+                    const found = [...merged.values()]
+                        .filter((conversation) => matches(`${conversation.id} ${conversation.name}`))
+                        .slice(0, limit);
+                    blocks.push(
+                        found.length === 0
+                            ? 'No conversations match.'
+                            : [
+                                  `${quantity(found.length, 'conversation')}:`,
+                                  ...found.map((conversation) => `  ${conversationLine(conversation)}`),
+                              ].join('\n'),
+                    );
+                }
+
+                return said(blocks.join('\n\n'));
+            },
+        });
+
+        pi.registerTool({
+            name: 'slack_message',
+            label: 'Slack message',
+            description:
+                'Act on a message that already exists, named by its timestamp: correct one this app sent (update), take it back (delete), react to one with an emoji (react, unreact), read the reactions on one (reactions), or get its link (permalink). Timestamps come from slack_read and from slack_reply.',
+            promptSnippet: 'Edit, delete, react to, or link a Slack message',
+            promptGuidelines: [
+                'Correct a wrong answer with update rather than sending a second message that contradicts the first.',
+                'A reaction answers a request that needs acknowledgement rather than words.',
+                'update and delete work only on messages this app sent.',
+            ],
+            parameters: Type.Object({
+                action: Type.Union(
+                    [
+                        Type.Literal('update'),
+                        Type.Literal('delete'),
+                        Type.Literal('react'),
+                        Type.Literal('unreact'),
+                        Type.Literal('reactions'),
+                        Type.Literal('permalink'),
+                    ],
+                    { description: 'What to do with the message.' },
+                ),
+                ts: Type.String({ description: "The message's timestamp, as slack_read prints it." }),
+                channel: Type.Optional(
+                    Type.String({ description: 'Where the message is. Defaults to the conversation in progress.' }),
+                ),
+                text: Type.Optional(Type.String({ description: 'The new text, for update.' })),
+                emoji: Type.Optional(
+                    Type.String({ description: 'Emoji name without colons, for react and unreact. Example: eyes.' }),
+                ),
+            }),
+            async execute(
+                _id,
+                params: {
+                    action: 'update' | 'delete' | 'react' | 'unreact' | 'reactions' | 'permalink';
+                    ts: string;
+                    channel?: string;
+                    text?: string;
+                    emoji?: string;
+                },
+            ) {
+                if (attached === null) return said('Slack is not attached to this session.');
+                const target = params.channel ?? exchange?.channel ?? null;
+                if (target === null) return said('No channel: nothing has arrived from Slack, so pass one.');
+                const web = attached.web;
+
+                switch (params.action) {
+                    case 'update': {
+                        if (params.text === undefined) return said('update needs text.');
+                        const done = await web.edit(target, params.ts, params.text);
+                        return said(done.ok ? `Rewrote ${params.ts}.` : `Slack refused it: ${done.error}`);
+                    }
+                    case 'delete': {
+                        const done = await web.unsend(target, params.ts);
+                        return said(done.ok ? `Deleted ${params.ts}.` : `Slack refused it: ${done.error}`);
+                    }
+                    case 'react':
+                    case 'unreact': {
+                        if (params.emoji === undefined) return said(`${params.action} needs an emoji.`);
+                        const emoji = params.emoji.replace(/:/g, '');
+                        const done =
+                            params.action === 'react'
+                                ? await web.react(target, params.ts, emoji)
+                                : await web.unreact(target, params.ts, emoji);
+                        if (!done.ok) return said(`Slack refused it: ${done.error}`);
+                        return said(`${params.action === 'react' ? 'Added' : 'Removed'} :${emoji}: on ${params.ts}.`);
+                    }
+                    case 'reactions': {
+                        const got = await web.reactions(target, params.ts);
+                        if (!got.ok) return said(`Slack refused it: ${got.error}`);
+                        if (got.value.length === 0) return said(`Nothing on ${params.ts}.`);
+                        const lines: string[] = [];
+                        for (const reaction of got.value) {
+                            const names: string[] = [];
+                            for (const user of reaction.users) names.push(await web.nameOf(user));
+                            lines.push(
+                                `:${reaction.emoji}: ${reaction.count}${names.length === 0 ? '' : ` (${names.join(', ')})`}`,
+                            );
+                        }
+                        return said(lines.join('\n'));
+                    }
+                    case 'permalink': {
+                        const link = await web.permalink(target, params.ts);
+                        return said(link.ok ? link.value : `Slack refused it: ${link.error}`);
+                    }
+                }
+            },
+        });
+
+        pi.registerTool({
+            name: 'slack_schedule',
+            label: 'Slack schedule',
+            description:
+                'Send a message later, by Slack\'s clock rather than by this machine staying awake: send holds it until a time, list shows what is waiting, cancel calls one back. Use it for anything meant for someone\'s morning, or for a reminder after work that has not started yet.',
+            promptSnippet: 'Send a Slack message at a later time, or list and cancel what is waiting',
+            promptGuidelines: [
+                'Schedule rather than waiting: a held message survives this session ending, and a sleep does not.',
+                "Times are '+90m', '2h', '3d', or an ISO 8601 timestamp. Slack holds a message for at most 120 days.",
+            ],
+            parameters: Type.Object({
+                action: Type.Optional(
+                    Type.Union([Type.Literal('send'), Type.Literal('list'), Type.Literal('cancel')], {
+                        description: "Default 'send'.",
+                    }),
+                ),
+                text: Type.Optional(Type.String({ description: 'The message, for send.' })),
+                when: Type.Optional(
+                    Type.String({
+                        description: "When to send it: '+90m', '2h', '3d', or an ISO 8601 timestamp such as 2026-09-18T08:30:00Z.",
+                    }),
+                ),
+                channel: Type.Optional(
+                    Type.String({
+                        description:
+                            'DM channel (D...), channel (C...), or user ID (U...). Defaults to the conversation in progress.',
+                    }),
+                ),
+                id: Type.Optional(Type.String({ description: 'The scheduled message to cancel, from list.' })),
+            }),
+            async execute(
+                _id,
+                params: { action?: 'send' | 'list' | 'cancel'; text?: string; when?: string; channel?: string; id?: string },
+            ) {
+                if (attached === null) return said('Slack is not attached to this session.');
+                const web = attached.web;
+                const action = params.action ?? 'send';
+                const target = params.channel ?? exchange?.channel ?? null;
+
+                if (action === 'list') {
+                    const waiting = await web.scheduled(target);
+                    if (!waiting.ok) return said(`Slack refused it: ${waiting.error}`);
+                    if (waiting.value.length === 0) return said('Nothing scheduled.');
+                    return said(
+                        waiting.value
+                            .map(
+                                (message) =>
+                                    `${message.id} ${message.channel} ${new Date(message.postAt * 1000).toISOString()} ${message.text.slice(0, 80)}`,
+                            )
+                            .join('\n'),
+                    );
+                }
+
+                if (action === 'cancel') {
+                    if (params.id === undefined) return said('cancel needs the id of a scheduled message.');
+                    if (target === null) return said('cancel needs the channel the message is scheduled in.');
+                    const done = await web.cancelScheduled(target, params.id);
+                    return said(done.ok ? `Cancelled ${params.id}.` : `Slack refused it: ${done.error}`);
+                }
+
+                if (params.text === undefined || params.when === undefined) return said('send needs text and when.');
+                if (target === null) return said('No channel: nothing has arrived from Slack, so pass one.');
+                const at = scheduleTime(params.when);
+                if (!at.ok) return said(`Cannot schedule that: ${at.why}`);
+                const held = await web.postLater(target, params.text, at.at);
+                if (!held.ok) return said(`Slack refused it: ${held.error}`);
+                return said(`Held for ${new Date(at.at * 1000).toISOString()} in ${target}, id ${held.value}.`);
             },
         });
     };

@@ -80,6 +80,27 @@ Without that rule one question becomes a stream of narration in Slack, which is 
 `slack_done` closes the exchange when the rest of the work is only of interest here.
 Both are registered when a session attaches, not at load, so an unattached session pays nothing for them in its prompt.
 
+## Seven tools, and why not fifteen
+
+The first four could only answer a conversation that had already written: `slack_reply`, `slack_send_file`, `slack_read` and `slack_done` all take a channel id, and the only source of one was an incoming message.
+A name was therefore not an address, and everything the agent could do was a reply.
+
+`slack_directory` is the missing half: `users.list` and `conversations.list` for the workspace, `users.conversations` for what this app is in, `conversations.info` and `conversations.members` for one of them, `users.info` and `conversations.open` for one person and the DM channel with them.
+`slack_message` acts on a message that exists, named by the timestamp `slack_read` prints: update, delete, react, unreact, reactions, permalink.
+`slack_schedule` sends by Slack's clock: `chat.scheduleMessage` was in `SlackWeb` from the start and no tool reached it, so a message for someone's morning depended on this machine being awake.
+
+Those three carry an action rather than becoming a tool each.
+Every definition is in the prompt of every attached session, and eleven small tools would cost ten times what the enum costs the model.
+
+None of it adds a scope.
+The manifest already asks for `users:read`, `channels:read`, `groups:read`, `im:read`, `im:write`, `reactions:read` and `chat:write`, which is what all of the above needs, and `chat.getPermalink` needs none at all.
+That matters because a scope added later means reinstalling the app to every workspace it is in.
+
+Two things behind the tools rather than in them.
+Every listing is paged: Slack answers with at most 200 entries and a cursor, and a caller that reads one page reports a prefix of the workspace as the whole of it, silently, and only once the workspace is large enough to matter.
+And a user id is an address everywhere: `chat.postMessage` resolves a `U...` to the DM itself, the read and scheduling methods do not, so `SlackWeb.addressed` opens the DM once per person and every method goes through it.
+Without that, half the surface would accept an id the directory hands out and half would refuse it with `channel_not_found`.
+
 ## Three traps
 
 **Post with the incoming `thread_ts`.** An assistant app's DMs arrive in a thread, and a reply sent without it lands in the channel body, where the sender never sees it.
@@ -152,3 +173,10 @@ A channel needs `channels:history`, `message.channels`, and a mention guard, or 
 
 **Sender allow-lists.** Anyone who can DM the app reaches the session.
 That is correct for an app installed for one person and wrong for anything wider.
+
+**What a bot token cannot do.** `search.messages` and `conversations.mark` answer only to a user token (`xoxp-`), and the store holds an app-level and a bot token.
+So there is no search, and the read mark stays a reaction rather than Slack's own unread state.
+
+**What would need a scope added.** Joining a channel (`conversations.join`, `channels:join`), presence (`users:read.presence`), and lookup by email (`users:read.email`).
+Each means reinstalling the app to every workspace it is in, so none is there until one is asked for.
+`chat:write.public` covers posting into a public channel without joining it, which is most of what joining was for.

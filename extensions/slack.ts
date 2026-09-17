@@ -236,12 +236,19 @@ const render = (message: Incoming): string => {
         // answers at the end leaves them with silence and no way to tell it
         // from having been ignored.
         'If anything here takes more than a moment, send a line with slack_reply before you start: "sure, one sec", "looking now", or what you are about to do.',
-        'Never leave a message unanswered while you work, and never end a turn without having replied.',
+        'Never leave a message unanswered while you work.',
         'Your last reply of this turn is what Slack receives; the work in between stays in the terminal.',
+        // The turn's final text is forwarded whatever it says, so a model that
+        // decides no answer is needed says exactly that, to the person, as the
+        // answer. There is no silent ending without one of these two calls.
+        'There is no way to end a turn silently by writing about it: whatever you write last is sent, including a sentence saying no reply is needed.',
+        'When nothing needs saying, because the message was thanks or an acknowledgement, answer with a reaction instead: slack_message with action react and emoji +1, then slack_done. Write nothing after that.',
         'If the full detail matters, it belongs in the terminal, and Slack gets the summary plus an offer.',
         `Answer ${message.name}, and use slack_reply to write to anyone else.`,
     ].join(' ');
-    return `A Slack message arrived.\n[${at} UTC] ${message.name} in ${message.channel}: ${message.text}${attached}\n\n${how}`;
+    // The timestamp is in the header because a reaction needs it: without it
+    // the only answer available is words.
+    return `A Slack message arrived.\n[${at} UTC ${message.ts}] ${message.name} in ${message.channel}: ${message.text}${attached}\n\n${how}`;
 };
 
 export default function (pi: ExtensionAPI) {
@@ -517,10 +524,11 @@ export default function (pi: ExtensionAPI) {
             name: 'slack_done',
             label: 'Slack done',
             description:
-                'Stop forwarding replies to Slack for the current exchange. Use it after the Slack side has the answer and the remaining work is only of interest in the terminal.',
+                'Stop forwarding replies to Slack for the current exchange. Use it after the Slack side has the answer and the remaining work is only of interest in the terminal, and use it when the message needs no answer at all: what you write at the end of a turn is sent to Slack whatever it says, so a sentence explaining that no reply is needed is itself a reply. React and call this instead.',
             promptSnippet: 'End the Slack exchange so further replies stay in the terminal',
             promptGuidelines: [
                 'Use slack_done once a Slack question has been answered and the rest of the work does not need reporting there.',
+                'A message that needs no answer ("great", "thanks", "ok") gets a reaction with slack_message and then slack_done, not a sentence saying it needs no answer.',
             ],
             parameters: Type.Object({}),
             async execute() {

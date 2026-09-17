@@ -23,14 +23,13 @@
 // reading. the system prompt dumps as text, since that is what it is.
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from '@earendil-works/pi-coding-agent';
-import { getSelectListTheme } from '@earendil-works/pi-coding-agent';
-import { Container, matchesKey, type SelectItem, SelectList, Text } from '@earendil-works/pi-tui';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { Pager } from './lib/pager';
 import { type CapturedRequest, RequestLog } from './lib/prompt-log';
-import { type OutlineNode, outline, pretty, raw, systemText, weight } from './lib/prompt-outline';
-import { collapseHome, truncate } from './lib/text';
+import { outline, raw, systemText } from './lib/prompt-outline';
+import { payloadOutline, payloadText, requestList, textView } from './lib/prompt-views';
+import { present } from './lib/view/terminal';
+import { collapseHome } from './lib/text';
 
 type ViewKind = 'payload' | 'system' | 'json';
 
@@ -46,9 +45,6 @@ const SUBCOMMANDS = ['view', 'list', 'dump', 'clear'] as const;
 // grown. this many covers a turn and the retries around it.
 const KEEP = 8;
 
-/** what closed the outline: a node to open, or the reason there is none. */
-type OutlineResult = { kind: 'open'; index: number } | { kind: 'close' };
-
 function stamp(at: number): string {
     return new Date(at).toISOString().replace(/[:.]/g, '-');
 }
@@ -62,6 +58,9 @@ function requestTitle(request: CapturedRequest): string {
     const when = new Date(request.at).toISOString().slice(11, 19);
     return `request ${request.ordinal}  ${when}  ${request.model ?? 'no model'}`;
 }
+
+/** The time of a request, for the row that lists it. */
+const clockOf = (at: number): string => new Date(at).toISOString().slice(11, 19);
 
 export default function (pi: ExtensionAPI) {
     const log = new RequestLog(KEEP);
@@ -92,132 +91,37 @@ export default function (pi: ExtensionAPI) {
     }
 
     // ------------------------------------------------------------- viewing
+    //
+    // Three views, described in lib/prompt-views.ts and drawn by
+    // lib/view/terminal.ts. Nothing here builds a SelectList, writes a hint
+    // line or names a key: what this file decides is which view comes after
+    // which, which is the only part of it that is about prompts.
 
-    function pagerContent(node: OutlineNode, asJson: boolean) {
-        return {
-            title: `${node.path === '' ? 'payload' : node.path}  ${node.detail}`,
-            lines: asJson ? raw(node.value) : pretty(node.value),
-        };
-    }
+    const showPager = async (ctx: ExtensionContext, title: string, lines: readonly string[]): Promise<void> => {
+        await present(ctx, textView(title, lines));
+    };
 
-    /** a pager over fixed text. returns when the reader closes it. */
-    function showPager(
-        ctx: ExtensionContext,
-        title: string,
-        lines: readonly string[],
-        toggleable: boolean,
-        onToggle?: (asJson: boolean) => readonly string[],
-    ): Promise<void> {
-        let asJson = false;
-        return ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-            const hints = ['up/down scroll', 'pgup/pgdn page', 'home/end ends'];
-            if (toggleable) hints.push('r raw json');
-            hints.push('esc back');
-            const pager = new Pager({ title, lines }, theme, () => tui.terminal.rows, hints);
-            return {
-                render: (width) => pager.render(width),
-                invalidate: () => pager.invalidate(),
-                handleInput: (data) => {
-                    if (matchesKey(data, 'escape') || matchesKey(data, 'q')) {
-                        done();
-                        return;
-                    }
-                    if (toggleable && onToggle !== undefined && matchesKey(data, 'r')) {
-                        asJson = !asJson;
-                        pager.setContent({ title, lines: onToggle(asJson) });
-                        tui.requestRender();
-                        return;
-                    }
-                    if (pager.handleInput(data)) tui.requestRender();
-                },
-            };
-        });
-    }
-
-    function outlineItem(node: OutlineNode, index: number): SelectItem {
-        const indent = '  '.repeat(node.depth);
-        return {
-            value: String(index),
-            label: `${indent}${truncate(node.label, 44)}`,
-            description: `${node.kind}  ${node.detail}`,
-        };
-    }
-
-    function header(theme: Theme, title: string): Text {
-        return new Text(theme.fg('accent', theme.bold(title)), 1, 0);
-    }
-
-    /** one showing of the outline; it is reopened after a pager closes. */
-    function showOutline(
-        ctx: ExtensionContext,
-        title: string,
-        nodes: readonly OutlineNode[],
-        cursor: number,
-    ): Promise<OutlineResult> {
-        return ctx.ui.custom<OutlineResult>((tui, theme, _keybindings, done) => {
-            const container = new Container();
-            container.addChild(header(theme, title));
-            const rows = Math.max(6, Math.min(nodes.length, tui.terminal.rows - 10));
-            const list = new SelectList(nodes.map(outlineItem), rows, getSelectListTheme());
-            list.setSelectedIndex(cursor);
-            list.onSelect = (item) => done({ kind: 'open', index: Number(item.value) });
-            list.onCancel = () => done({ kind: 'close' });
-            container.addChild(list);
-            container.addChild(new Text(theme.fg('dim', 'up/down move, enter open, esc close'), 1, 0));
-            return {
-                render: (width) => container.render(width),
-                invalidate: () => container.invalidate(),
-                handleInput: (data) => {
-                    list.handleInput(data);
-                    tui.requestRender();
-                },
-            };
-        });
-    }
-
+    /** The outline, then the node that was opened, until the reader leaves. */
     async function browse(ctx: ExtensionContext, request: CapturedRequest): Promise<void> {
         const nodes = outline(request.payload);
         if (nodes.length === 0) {
-            await showPager(ctx, requestTitle(request), raw(request.payload), false);
+            await showPager(ctx, requestTitle(request), raw(request.payload));
             return;
         }
-        let cursor = 0;
         for (;;) {
-            const result = await showOutline(ctx, requestTitle(request), nodes, cursor);
-            if (result.kind === 'close') return;
-            cursor = result.index;
-            const node = nodes[cursor];
-            const formatted = pagerContent(node, false);
-            await showPager(ctx, formatted.title, formatted.lines, true, (asJson) => pagerContent(node, asJson).lines);
+            const chosen = await present(ctx, payloadOutline(requestTitle(request), nodes));
+            if (chosen === null || chosen === undefined) return;
+            const node = nodes[chosen];
+            if (node === undefined) return;
+            await present(ctx, payloadText(`${node.path === '' ? 'payload' : node.path}  ${node.detail}`, node.value, true));
         }
     }
 
     /** pick one of the captured requests, then browse it. */
     async function showList(ctx: ExtensionContext): Promise<void> {
         const requests = [...log.list()].reverse();
-        const chosen = await ctx.ui.custom<number | null>((tui, theme, _keybindings, done) => {
-            const container = new Container();
-            container.addChild(header(theme, `provider requests (${requests.length})`));
-            const items = requests.map((request) => ({
-                value: String(request.ordinal),
-                label: requestTitle(request),
-                description: `${weight(request.payload)} chars`,
-            }));
-            const list = new SelectList(items, Math.min(items.length, 12), getSelectListTheme());
-            list.onSelect = (item) => done(Number(item.value));
-            list.onCancel = () => done(null);
-            container.addChild(list);
-            container.addChild(new Text(theme.fg('dim', 'up/down move, enter open, esc close'), 1, 0));
-            return {
-                render: (width) => container.render(width),
-                invalidate: () => container.invalidate(),
-                handleInput: (data) => {
-                    list.handleInput(data);
-                    tui.requestRender();
-                },
-            };
-        });
-        if (chosen === null) return;
+        const chosen = await present(ctx, requestList(requests, clockOf));
+        if (chosen === null || chosen === undefined) return;
         const request = log.byOrdinal(chosen);
         if (request !== undefined) await browse(ctx, request);
     }
@@ -259,7 +163,7 @@ export default function (pi: ExtensionAPI) {
         if (what === 'system') {
             const prompt = systemPrompt(ctx);
             if (prompt === null) return;
-            await showPager(ctx, `system prompt  ${requestTitle(log.latest()!)}`, prompt.split('\n'), false);
+            await showPager(ctx, `system prompt  ${requestTitle(log.latest()!)}`, prompt.split('\n'));
             return;
         }
         const ordinal = Number(what);
@@ -275,7 +179,7 @@ export default function (pi: ExtensionAPI) {
         if (nothingCaptured(ctx)) return;
         const latest = log.latest()!;
         if (what === 'json') {
-            await showPager(ctx, `${requestTitle(latest)}  json`, raw(latest.payload), false);
+            await showPager(ctx, `${requestTitle(latest)}  json`, raw(latest.payload));
             return;
         }
         await browse(ctx, latest);

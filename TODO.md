@@ -2,7 +2,7 @@
 
 ## short term
 
-* cmd args for remoting
+* cmd args for remoting.
 
 ## long term
 

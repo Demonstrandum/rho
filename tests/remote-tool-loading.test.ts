@@ -150,19 +150,53 @@ describe('resuming a session that was working elsewhere', () => {
 });
 
 describe('the remote_session tool', () => {
-    test('is registered but not active at startup', async () => {
-        const h = harness();
-        remote(h.pi as never);
-        await h.turn();
-        expect(h.registered).toContain('remote_session');
-        expect(h.active).not.toContain('remote_session');
+    /**
+     * Which machine the test is pretending to be.
+     *
+     * A session held by a runner keeps these tools whatever the conversation
+     * says, and the broker says so through RHO_SESSION_NAME. The test process
+     * inherits that variable when the suite is run from inside a session that
+     * is itself held by one, and the startup case then failed for being right:
+     * the tools were active because the agent was, by construction, a remote
+     * session.
+     */
+    const asLocal = <T>(run: () => Promise<T>): Promise<T> => {
+        const held = process.env.RHO_SESSION_NAME;
+        delete process.env.RHO_SESSION_NAME;
+        return run().finally(() => {
+            if (held !== undefined) process.env.RHO_SESSION_NAME = held;
+        });
+    };
+
+    test('is registered but not active at startup, on a machine holding its own session', async () =>
+        asLocal(async () => {
+            const h = harness();
+            remote(h.pi as never);
+            await h.turn();
+            expect(h.registered).toContain('remote_session');
+            expect(h.active).not.toContain('remote_session');
+        }));
+
+    test('is active from the start in a session a runner holds, which is one by construction', async () => {
+        const held = process.env.RHO_SESSION_NAME;
+        process.env.RHO_SESSION_NAME = 'held-by-a-runner';
+        try {
+            const h = harness();
+            remote(h.pi as never);
+            await h.turn();
+            expect(h.active).toContain('remote_session');
+        } finally {
+            if (held === undefined) delete process.env.RHO_SESSION_NAME;
+            else process.env.RHO_SESSION_NAME = held;
+        }
     });
 
-    test('arrives when a long-lived session is asked for', async () => {
-        const h = harness();
-        remote(h.pi as never);
-        await h.turn();
-        await h.input('start a remote session on dev-box');
-        expect(h.active).toContain('remote_session');
-    });
+    test('arrives when a long-lived session is asked for', async () =>
+        asLocal(async () => {
+            const h = harness();
+            remote(h.pi as never);
+            await h.turn();
+            await h.input('start a remote session on dev-box');
+            expect(h.active).toContain('remote_session');
+        }));
 });

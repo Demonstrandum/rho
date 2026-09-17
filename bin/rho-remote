@@ -419,8 +419,12 @@ const runtime = new AgentSessionRuntime(
 );
 
 // Extensions in this process are drawing an interface onto a session that is
-// already running on its own: rho reads this to tell the two apart.
+// already running on its own: rho reads this to tell the two apart. The name
+// and the machine come with it, since an interface that is being closed has to
+// say which session it is leaving running and where.
 process.env.RHO_REMOTE_CLIENT = '1';
+process.env.RHO_SESSION_NAME = name;
+process.env.RHO_REMOTE_HOST = target;
 
 const interactive = new InteractiveMode(runtime, {
     initialMessage: opening === '' ? undefined : opening,

@@ -110,6 +110,17 @@ a joined turn is passed on in neither direction and the run it belongs to is clo
 it used to happen silently, and the session came back with the tool call in the transcript, no output under it, and nothing running.
 `/detach` and `/restart` now ask, and end the turn where ending it is written down.
 
+**Which way out.** closing an interface onto a session elsewhere used to mean one thing, that everything said there came back into the local session.
+that is the common case and a poor only case: somebody who connected to watch a long run wants the local transcript left as it was, and somebody who is finished for the day wants the shell.
+so ctrl+d asks, with a menu of at most three rows, each tagged by the word that also names it on the command line (`/detach carry`, `/detach leave`, `/detach exit`) and answering to that word's first letter.
+escape stays, since a question about leaving needs an answer that does not leave.
+`[remote] leave-default` says which row the cursor starts on, so the whole interaction is ctrl+d and enter.
+
+the menu is drawn by the client, which is showing the far side, and the carrying is done by the interface that launched it, which is the only process holding a local session to carry into.
+one line on stderr joins the two (`lib/remote/leaving.ts`), a stream the launcher already captures to report why a client stopped.
+whether carrying is possible at all is something only the launcher knows, so it goes the other way as `RHO_CARRY_BACK` in the client's environment, and a session that was never joined to this one is offered two rows rather than three.
+nothing said on stderr means carry: that is what the far side's own `rho_leave` does, and what a client from before the question existed does.
+
 **A refusal is an answer.** pi answers a command it will not run with `success: false` and the reason beside it.
 the link settled on that as though it were a result, so every refusal the far side gave resolved a promise nobody read: a prompt refused during compaction left the text gone and the screen unchanged.
 the link now rejects with what the far side said, and the client shows it.

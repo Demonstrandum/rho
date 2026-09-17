@@ -24,6 +24,20 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { completeLastWord } from './lib/complete-words';
 import { fileURLToPath } from 'node:url';
 import { rhoRoot } from './lib/rho-root';
+import { chooseOne } from './lib/choice';
+import { config } from './lib/config';
+import { attachCommand, leaveTerminal as leave, resumeLines } from './lib/leave-terminal';
+import {
+    carryEnv,
+    carryingBack,
+    type Leaving,
+    leavingIn,
+    leavingNamed,
+    leavingOptions,
+    leavingTitle,
+    sayLeaving,
+    withoutLeaving,
+} from './lib/remote/leaving';
 import { attachable, offers, publishedConnect, remember, runningHere } from './lib/remote/sessions';
 import type { Kept } from './lib/remote/sessions';
 
@@ -43,33 +57,7 @@ export function suggestedName(cwd: string, when: Date): string {
     return nameFor(`${place}-${clock}`, 'session');
 }
 
-/**
- * What pi says on the way out, plus the way back to a session that is still up.
- *
- * pi prints "To resume this session: pi --session <id>" from its own shutdown,
- * which does not run when an extension leaves by itself, so the line is
- * rebuilt here rather than lost. The id resumes the transcript in a new
- * process; the name attaches to the agent that is still running on it, which
- * is the difference detaching makes and the reason both are printed.
- */
-export function resumeLines(ctx: ExtensionContext, name: string | undefined): readonly string[] {
-    const id = ctx.sessionManager.getSessionId();
-    const lines: string[] = [];
-    if (id !== undefined && id !== '') lines.push(`To resume this session: pi --session ${id}`);
-    if (name !== undefined && name !== '') lines.push(`Or attach it by name:   ${attachCommand(name)}`);
-    return lines;
-}
-
-/**
- * The shell command that draws a session that is still running.
- *
- * pi's own command line, because rho registers the flag on it. Printing a path
- * to a script inside a checkout, to be run under bun, is neither short nor
- * something anybody would type twice.
- */
-export function attachCommand(name: string): string {
-    return `pi --attach ${name}`;
-}
+export { attachCommand, resumeLines };
 
 export default function (pi: ExtensionAPI) {
     /**
@@ -83,39 +71,32 @@ export default function (pi: ExtensionAPI) {
     const attached = (): boolean => process.env.RHO_REMOTE_CLIENT === '1';
 
     /**
-     * Leave, without leaving the terminal in pi's mode.
+     * Which way out, for an interface onto a session that runs elsewhere.
      *
-     * process.exit runs no cleanup, so the terminal keeps raw mode, bracketed
-     * paste and the kitty keyboard protocol, and the next keystrokes arrive as
-     * escape sequences printed into the shell (`0;1:3u` and friends) with half
-     * a prompt still on screen. tui.stop puts all of it back, and it is
-     * reached the way pi's own external-editor handoff reaches it.
-     *
-     * The wait exists because shutdown is deferred to the next idle moment,
-     * which from a key handler has not always arrived: the interface stayed up
-     * while the daemon waited for it, which is the one state a detach must not
-     * leave behind. A shutdown that does land exits first and this never runs.
+     * The word can be given (`/detach carry`), and otherwise the menu asks.
+     * Escape is staying: a question about leaving needs an answer that does
+     * not leave, and ctrl+d is easy to press by accident.
      */
-    const leave = (ctx: ExtensionContext, after: number, farewell: readonly string[] = []): void => {
-        ctx.shutdown();
-        const timer = setTimeout(() => {
-            void ctx.ui
-                .custom<void>((tui, _theme, _keys, done) => {
-                    tui.stop();
-                    done();
-                    return { render: () => [], handleInput: () => {} } as never;
-                })
-                .finally(() => {
-                    // After the terminal is its own again, so the lines stay
-                    // on screen rather than being wiped by the restore, and in
-                    // the shape pi leaves behind on its own exit.
-                    for (const line of farewell) process.stdout.write(`${line}\n`);
-                    process.exit(0);
-                });
-        }, after);
-        // A process that is on its way out anyway should not be held open by
-        // this timer alone.
-        timer.unref?.();
+    const howToLeave = async (ctx: ExtensionContext, asked: string | undefined): Promise<Leaving | null> => {
+        const joined = carryingBack();
+        const options = leavingOptions(joined);
+        if (asked !== undefined) {
+            const named = leavingNamed(asked);
+            if (named !== null && options.some((option) => option.id === named)) return named;
+            if (named !== null) {
+                ctx.ui.notify(
+                    `this conversation is not held on both sides, so there is nothing to ${named}. Leaving it there.`,
+                    'info',
+                );
+                return 'leave';
+            }
+        }
+        const preferred = config.remote.leaveDefault;
+        return chooseOne(ctx, {
+            title: leavingTitle(process.env.RHO_SESSION_NAME ?? 'this session', process.env.RHO_REMOTE_HOST),
+            options,
+            start: options.some((option) => option.id === preferred) ? preferred : options[0]?.id,
+        });
     };
 
     /**
@@ -183,6 +164,11 @@ export default function (pi: ExtensionAPI) {
 
     const detach = async (ctx: ExtensionContext, asked: string | undefined): Promise<void> => {
         if (attached()) {
+            const how = await howToLeave(ctx, asked);
+            if (how === null) return;
+            // The launcher does the carrying and the quitting: this process is
+            // an interface and has no local session to carry into.
+            sayLeaving(how);
             (globalThis as { __rho_detaching?: boolean }).__rho_detaching = true;
             leave(ctx, 1_000, resumeLines(ctx, process.env.RHO_SESSION_NAME));
             return;
@@ -329,7 +315,15 @@ export default function (pi: ExtensionAPI) {
     });
 
     pi.registerCommand('detach', {
-        description: 'leave this session running without an interface: /detach [name]',
+        description:
+            'leave this session running without an interface: /detach [name], or /detach carry|leave|exit while attached',
+        getArgumentCompletions: (text) =>
+            attached()
+                ? completeLastWord(
+                      text,
+                      leavingOptions(carryingBack()).map((option) => ({ value: option.tag, description: option.label })),
+                  )
+                : null,
         handler: async (args: string, ctx: ExtensionContext) => detach(ctx, args.trim() === '' ? undefined : args.trim()),
     });
 
@@ -380,7 +374,7 @@ export default function (pi: ExtensionAPI) {
                         done();
                         process.exit(ran.status ?? 0);
                     });
-                    return { render: () => [], handleInput: () => {} } as never;
+                    return { render: () => [], handleInput: () => {}, invalidate: () => {} };
                 },
                 { overlay: true },
             );
@@ -417,22 +411,38 @@ export default function (pi: ExtensionAPI) {
         // The interface for it is a separate process, as it is for a session
         // on another machine, and this one stands aside for it.
         const client = join(rhoRoot(fileURLToPath(import.meta.url)), 'bin', 'rho-remote');
+        // Why the interface closed, which this one would otherwise redraw over
+        // before it could be read. The session is held by a runner here and
+        // its transcript is one file, so nothing can be carried anywhere: the
+        // choice is between this session and the shell.
+        let said = '';
         await ctx.ui.custom<void>(
             (tui, _theme, _keys, done) => {
                 queueMicrotask(() => {
                     tui.stop();
                     try {
-                        spawnSync('bun', [client, 'local', name], { stdio: 'inherit' });
+                        const ran = spawnSync('bun', [client, 'local', name], {
+                            stdio: ['inherit', 'inherit', 'pipe'],
+                            encoding: 'utf8',
+                            env: { ...process.env, ...carryEnv(false) },
+                        });
+                        said = ran.stderr ?? '';
                     } finally {
                         tui.start();
                         tui.requestRender(true);
                         done();
                     }
                 });
-                return { render: () => [], handleInput: () => {} } as never;
+                return { render: () => [], handleInput: () => {}, invalidate: () => {} };
             },
             { overlay: true },
         );
+        if (leavingIn(said) === 'exit') {
+            leave(ctx, 300, [`${name} keeps running here.`, ...resumeLines(ctx, name)]);
+            return;
+        }
+        const trouble = withoutLeaving(said).trim();
+        if (trouble !== '') ctx.ui.notify(trouble.split('\n').pop() ?? '', 'error');
     };
 
     /**

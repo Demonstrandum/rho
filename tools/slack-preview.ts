@@ -16,6 +16,7 @@
 // the theme is pi's own, loaded by name through initTheme, so the colours are
 // the colours a session shows.
 
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Component } from '@earendil-works/pi-tui';
@@ -179,24 +180,83 @@ function flag(argv: readonly string[], name: string): string | null {
     return argv[at + 1] ?? null;
 }
 
+/** what pi's theme module offers that its package entry does not re-export. */
+interface ThemeModule {
+    readonly theme: Theme;
+    getThemeByName(name: string): Theme | undefined;
+    loadThemeFromPath(path: string, mode: 'light' | 'dark'): Theme;
+    setThemeInstance(theme: Theme): void;
+    detectTerminalBackgroundFromEnv(): { readonly theme: string };
+}
+
+/**
+ * Where a theme that is not built into pi lives.
+ *
+ * pi loads these through its resource loader and hands them to the theme
+ * module as registered themes; nothing does that outside a session, so a
+ * settings file naming `glenda` would silently draw in `dark`. The three
+ * directories are the ones a theme can be shipped from: this package, the
+ * user's agent directory, and the project.
+ */
+function themeDirs(): readonly string[] {
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+    return [join(root, 'themes'), join(getAgentDir(), 'themes'), join(process.cwd(), '.pi', 'themes')];
+}
+
+/** the file a theme of this name is in, by filename first and by the name inside second. */
+function themeFile(name: string): string | null {
+    for (const dir of themeDirs()) {
+        const direct = join(dir, `${name}.json`);
+        if (existsSync(direct)) return direct;
+    }
+    for (const dir of themeDirs()) {
+        if (!existsSync(dir)) continue;
+        for (const entry of readdirSync(dir)) {
+            if (!entry.endsWith('.json')) continue;
+            const path = join(dir, entry);
+            try {
+                const declared = (JSON.parse(readFileSync(path, 'utf8')) as { name?: string }).name;
+                if (declared === name) return path;
+            } catch {
+                // not a theme file; the next one may be
+            }
+        }
+    }
+    return null;
+}
+
 /**
  * The theme this machine's pi is set to.
  *
- * The same two calls pi makes at startup: the name from settings, and
- * initTheme to load it. getTheme answers undefined for an auto "light/dark"
- * setting, and initTheme then detects the terminal background, which is again
- * what a session does. --theme overrides both.
+ * The name comes from settings, as it does at startup, and getTheme answers
+ * undefined for an auto "light/dark" setting, which leaves initTheme to detect
+ * the terminal background. A name pi does not know built in is a theme shipped
+ * by a package or dropped in a config directory, and is loaded from its file;
+ * without that step every preview draws in the fallback theme rather than the
+ * one on screen. --theme overrides the setting.
  *
- * The object initTheme writes is not exported, only the function that writes
+ * The object these calls write is not exported, only the functions that write
  * it, so it is read from the module it was written to. That path is resolved
  * from the package entry rather than written out, because the entry has moved
  * between releases.
  */
-async function liveTheme(name: string | null): Promise<Theme> {
+async function liveTheme(asked: string | null): Promise<Theme> {
     const entry = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'));
-    const module = (await import(join(dirname(entry), 'modes/interactive/theme/theme.js'))) as { theme: Theme };
+    const module = (await import(join(dirname(entry), 'modes/interactive/theme/theme.js'))) as ThemeModule;
     const settings = SettingsManager.create(process.cwd(), getAgentDir());
-    initTheme(name ?? settings.getTheme());
+    const name = asked ?? settings.getTheme();
+
+    initTheme(name);
+    if (name === undefined || name === null) return module.theme;
+    if (module.getThemeByName(name) !== undefined) return module.theme;
+
+    const file = themeFile(name);
+    if (file === null) {
+        console.error(`no theme called "${name}" in ${themeDirs().join(', ')}; drawing in ${module.theme.name}`);
+        return module.theme;
+    }
+    const mode = module.detectTerminalBackgroundFromEnv().theme === 'light' ? 'light' : 'dark';
+    module.setThemeInstance(module.loadThemeFromPath(file, mode));
     return module.theme;
 }
 

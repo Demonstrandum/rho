@@ -29,11 +29,13 @@ import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { Type } from 'typebox';
-import type { ExtensionAPI, ExtensionCommandContext, MessageRenderer } from '@earendil-works/pi-coding-agent';
-import { Box, Text } from '@earendil-works/pi-tui';
+import type { ExtensionAPI, ExtensionCommandContext, MessageRenderer, Theme } from '@earendil-works/pi-coding-agent';
+import { Box, type Component, Text } from '@earendil-works/pi-tui';
+import type { RowTheme } from './lib/tool-row/theme';
+import { slackCall, slackResult } from './lib/slack-row';
 import { completeLastWord } from './lib/complete-words';
 import { PersistedState } from './lib/state-store';
-import { setNote } from './lib/tool-row/notes';
+import { noteFor, setNote } from './lib/tool-row/notes';
 import { loadMaxims } from './spinner';
 import { config } from './lib/config';
 import { quantity } from './lib/text';
@@ -155,6 +157,67 @@ const remember = (message: Incoming): void => {
 
 /** every tool here answers in one block of text. */
 const said = (text: string) => ({ content: [{ type: 'text' as const, text }], details: undefined });
+
+/**
+ * a component that draws whatever the width allows.
+ *
+ * pi calls render(width) on every layout pass, including a resize, so anything
+ * that depends on the width is decided there and not when the row is built.
+ */
+class Lines implements Component {
+    constructor(private readonly build: (width: number) => string[]) {}
+    render(width: number): string[] {
+        return this.build(width);
+    }
+    invalidate(): void {}
+}
+
+/** pi's Theme as the row modules take it; they draw no code, so highlight is identity. */
+const rowTheme = (theme: Theme): RowTheme => ({
+    fg: (color, value) => theme.fg(color, value),
+    bold: (value) => theme.bold(value),
+    highlight: (code) => code.split('\n'),
+});
+
+/** what an id in a tool's arguments is called: the name a message taught, or the id. */
+const named = (id: string): string => noteFor(id) ?? id;
+
+/**
+ * The call and result rows of one Slack tool.
+ *
+ * Spread into the tool's definition, so every tool here draws through
+ * lib/slack-row.ts rather than through the generic row, which reads `action`
+ * as one more argument to hide until the row is opened.
+ */
+const rowsFor = (tool: string) => ({
+    renderCall: (args: unknown, theme: Theme, context: { args?: unknown; expanded: boolean }) =>
+        new Lines((width) => {
+            const given = context.args ?? args;
+            return (
+                slackCall(tool, given, { theme: rowTheme(theme), width, expanded: context.expanded, named }) ?? []
+            );
+        }),
+    renderResult: (
+        result: { content?: readonly { readonly type: string; readonly text?: string }[] },
+        options: { expanded: boolean },
+        theme: Theme,
+        context: { args?: unknown },
+    ) =>
+        new Lines((width) => {
+            const answer = (result.content ?? [])
+                .filter((part) => part.type === 'text')
+                .map((part) => part.text ?? '')
+                .join('\n');
+            return (
+                slackResult(tool, context.args, answer, {
+                    theme: rowTheme(theme),
+                    width,
+                    expanded: options.expanded,
+                    named,
+                }) ?? []
+            );
+        }),
+});
 
 /** hh:mm of a Slack timestamp, in UTC, which is how every line here prints a time. */
 const clock = (ts: Timestamp): string => new Date(Number.parseFloat(ts) * 1000).toISOString().slice(11, 16);
@@ -282,11 +345,17 @@ const drawDelivery: MessageRenderer<Delivery> = (message, { expanded, outputPad 
 
     const box = new Box(1, 1, (text) => theme.bg('userMessageBg', text));
     const who = arrived.name === '' ? arrived.channel : arrived.name;
-    const files =
-        arrived.files.length === 0 ? '' : `  ${quantity(arrived.files.length, 'file')}`;
-    box.addChild(
-        new Text(`${theme.bold(theme.fg('customMessageLabel', 'slack'))} ${who}${theme.fg('dim', files)}`, outputPad, 0),
-    );
+    // A DM is the person, and anywhere else the row has to say where, or two
+    // messages from one person in two rooms read alike.
+    const where = arrived.channel.startsWith('D') ? '' : ` in ${noteFor(arrived.channel) ?? arrived.channel}`;
+    const parts = [
+        theme.bold(theme.fg('customMessageLabel', 'slack')),
+        theme.fg('dim', 'message from'),
+        `${who}${where}`,
+        theme.fg('dim', clock(arrived.ts)),
+        ...(arrived.files.length === 0 ? [] : [theme.fg('dim', `with ${quantity(arrived.files.length, 'file')}`)]),
+    ];
+    box.addChild(new Text(parts.join(' '), outputPad, 0));
     box.addChild(new Text(arrived.text, outputPad, 0));
 
     if (!expanded) return box;
@@ -447,6 +516,7 @@ export default function (pi: ExtensionAPI) {
         toolsRegistered = true;
 
         pi.registerTool({
+            ...rowsFor('slack_reply'),
             name: 'slack_reply',
             label: 'Slack reply',
             description:
@@ -486,6 +556,7 @@ export default function (pi: ExtensionAPI) {
         });
 
         pi.registerTool({
+            ...rowsFor('slack_send_file'),
             name: 'slack_send_file',
             label: 'Slack file',
             description:
@@ -532,6 +603,7 @@ export default function (pi: ExtensionAPI) {
         });
 
         pi.registerTool({
+            ...rowsFor('slack_read'),
             name: 'slack_read',
             label: 'Slack read',
             description:
@@ -574,6 +646,7 @@ export default function (pi: ExtensionAPI) {
         });
 
         pi.registerTool({
+            ...rowsFor('slack_done'),
             name: 'slack_done',
             label: 'Slack done',
             description:
@@ -596,6 +669,7 @@ export default function (pi: ExtensionAPI) {
         });
 
         pi.registerTool({
+            ...rowsFor('slack_directory'),
             name: 'slack_directory',
             label: 'Slack directory',
             description:
@@ -740,6 +814,7 @@ export default function (pi: ExtensionAPI) {
         });
 
         pi.registerTool({
+            ...rowsFor('slack_manage_message'),
             name: 'slack_manage_message',
             label: 'Slack manage message',
             description:
@@ -830,6 +905,7 @@ export default function (pi: ExtensionAPI) {
         });
 
         pi.registerTool({
+            ...rowsFor('slack_schedule'),
             name: 'slack_schedule',
             label: 'Slack schedule',
             description:

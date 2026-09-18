@@ -31,7 +31,8 @@ import {
 import slack from '../extensions/slack';
 import { adaptTheme, noteOn, rowTitle } from '../extensions/tool-rows';
 import { callPreview, resultPreview } from '../extensions/lib/tool-row/preview';
-import { setNote } from '../extensions/lib/tool-row/notes';
+import { slackCall, slackResult } from '../extensions/lib/slack-row';
+import { noteFor, setNote } from '../extensions/lib/tool-row/notes';
 
 const SAMUEL = 'D0C2SA7A1EY';
 const CHANNEL = 'C07J1N8Q0RH';
@@ -156,6 +157,22 @@ const ARRIVALS: readonly Arrival[] = [
         details: { name: 'Samuel', channel: SAMUEL, ts: TS, text: 'great', files: [] },
     },
     {
+        name: 'message-channel',
+        content: [
+            `A Slack message arrived.`,
+            `[17:08 UTC 1731000480.000100] Mathis Wellmann in ${CHANNEL}: <@U09L8EEPUTC> can you look at the arm calibration`,
+            '',
+            'Answer Mathis Wellmann in Slack: a line or two, as a colleague writes, and the detail stays in the terminal.',
+        ].join('\n'),
+        details: {
+            name: 'Mathis Wellmann',
+            channel: CHANNEL,
+            ts: '1731000480.000100',
+            text: 'can you look at the arm calibration',
+            files: [],
+        },
+    },
+    {
         name: 'message-files',
         content: [
             `A Slack message arrived.`,
@@ -178,6 +195,25 @@ function flag(argv: readonly string[], name: string): string | null {
     const at = argv.indexOf(`--${name}`);
     if (at < 0) return null;
     return argv[at + 1] ?? null;
+}
+
+/**
+ * the words that are not flags and not a flag's value.
+ *
+ * `--width 78` leaves 78 in the list under a plain filter, and every scenario
+ * is then filtered out by a number nobody typed as a name.
+ */
+function words(argv: readonly string[]): readonly string[] {
+    const out: string[] = [];
+    for (let i = 0; i < argv.length; i++) {
+        const word = argv[i] as string;
+        if (word.startsWith('--')) {
+            i += 1;
+            continue;
+        }
+        out.push(word);
+    }
+    return out;
 }
 
 /** what pi's theme module offers that its package entry does not re-export. */
@@ -289,7 +325,7 @@ async function main(): Promise<void> {
     const argv = process.argv.slice(2);
     const width = Number.parseInt(flag(argv, 'width') ?? '', 10) || process.stdout.columns || 80;
     const theme = await liveTheme(flag(argv, 'theme'));
-    const wanted = argv.filter((word) => !word.startsWith('--') && !['dark', 'light'].includes(word));
+    const wanted = words(argv);
     const chosen = (name: string): boolean => wanted.length === 0 || wanted.some((word) => name.includes(word));
 
     // the name behind a DM id, which slack.ts writes when a message arrives and
@@ -306,23 +342,29 @@ async function main(): Promise<void> {
         console.log(rule(`${row.name}  (${row.tool})`));
         for (const expanded of [false, true]) {
             console.log(theme.fg('muted', expanded ? '  expanded' : '  collapsed'));
-            const title = rowTitle(row.tool);
-            const call = callPreview({
-                title,
-                args: row.args,
-                note: noteOn(row.args),
-                expanded,
-                width: width - 4,
-                theme: rowTheme,
-            });
-            const answer = resultPreview({
-                text: row.result,
-                args: row.args,
-                note: noteOn(row.args),
-                expanded,
-                width: width - 4,
-                theme: rowTheme,
-            });
+            const room = { theme: rowTheme, width: width - 4, expanded, named: (id: string) => noteFor(id) ?? id };
+            // the tool's own renderers first, exactly as slack.ts installs
+            // them, and the generic row for anything they decline.
+            const call =
+                slackCall(row.tool, row.args, room) ??
+                callPreview({
+                    title: rowTitle(row.tool),
+                    args: row.args,
+                    note: noteOn(row.args),
+                    expanded,
+                    width: width - 4,
+                    theme: rowTheme,
+                });
+            const answer =
+                slackResult(row.tool, row.args, row.result, room) ??
+                resultPreview({
+                    text: row.result,
+                    args: row.args,
+                    note: noteOn(row.args),
+                    expanded,
+                    width: width - 4,
+                    theme: rowTheme,
+                });
             for (const line of [...call, ...answer]) console.log(`    ${line}`);
         }
         console.log('');

@@ -36,6 +36,7 @@
     "prompt:plain": "bun tools/prompt-explorer.ts --plain",
     "prompt:full": "bun tools/prompt-full.ts",
     "prompt:full:json": "bun tools/prompt-full.ts --json",
+    "slack:preview": "bun tools/slack-preview.ts",
     "unshitty": "bun tools/unshitty.ts",
     "unshitty:head": "bun tools/unshitty.ts --head",
     "init": "bun tools/init-config.ts",

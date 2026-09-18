@@ -107,16 +107,33 @@ type RenderShell = 'default' | 'self';
 /** the tools pi declares `renderShell: "self"` on. */
 const SELF_SHELL_TOOLS: ReadonlySet<string> = new Set(['edit']);
 
-if (titles || detail || execPreview) {
-    const titleOf = (name: string): string => (titles ? toolTitle(name, names) : name);
+// pi's Theme has fg and bold as methods, and highlightCode as a standalone
+// export rather than a method; this is that shape as RowTheme.
+// exported because tools/row-preview.ts draws rows outside a session, and a
+// preview that adapted the theme its own way would be previewing itself.
+export const adaptTheme = (theme: Theme): RowTheme => ({
+    fg: (color: RowColor, text: string) => theme.fg(color, text),
+    bold: (text: string) => theme.bold(text),
+    highlight: (code: string, language: string) => highlightCode(code, language),
+});
 
-    // pi's Theme has fg and bold as methods, and highlightCode as a standalone
-    // export rather than a method; this is that shape as RowTheme.
-    const adapt = (theme: Theme): RowTheme => ({
-        fg: (color: RowColor, text: string) => theme.fg(color, text),
-        bold: (text: string) => theme.bold(text),
-        highlight: (code: string, language: string) => highlightCode(code, language),
-    });
+/** what an identifier in the arguments stands for, e.g. who a channel is. */
+export const noteOn = (args: unknown): string | undefined => {
+    if (typeof args !== 'object' || args === null) return undefined;
+    for (const value of Object.values(args as Record<string, unknown>)) {
+        if (typeof value !== 'string') continue;
+        const note = noteFor(value);
+        if (note !== undefined) return note;
+    }
+    return undefined;
+};
+
+/** the name a row is drawn under, which `[tools] names` may override. */
+export const rowTitle = (name: string): string => (titles ? toolTitle(name, names) : name);
+
+if (titles || detail || execPreview) {
+    const titleOf = rowTitle;
+    const adapt = adaptTheme;
 
     /**
      * a tool's own call component, with the machine it acted on on the right.
@@ -181,17 +198,6 @@ if (titles || detail || execPreview) {
     }
 
     const proto = ToolExecutionComponent.prototype as unknown as ToolExecutionInternals;
-
-    /** what an identifier in the arguments stands for, e.g. who a channel is. */
-    const noteOn = (args: unknown): string | undefined => {
-        if (typeof args !== 'object' || args === null) return undefined;
-        for (const value of Object.values(args as Record<string, unknown>)) {
-            if (typeof value !== 'string') continue;
-            const note = noteFor(value);
-            if (note !== undefined) return note;
-        }
-        return undefined;
-    };
 
     /**
      * The machine a call acted on, when it is not the session's own.

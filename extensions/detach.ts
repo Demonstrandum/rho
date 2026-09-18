@@ -27,6 +27,7 @@ import { rhoRoot } from './lib/rho-root';
 import { chooseOne } from './lib/choice';
 import { config } from './lib/config';
 import { attachCommand, leaveTerminal as leave, resumeLines } from './lib/leave-terminal';
+import { releaseKey } from './lib/keybindings-store';
 import {
     carryEnv,
     carryingBack,
@@ -273,6 +274,14 @@ export default function (pi: ExtensionAPI) {
     });
 
     pi.on('session_start', async (_event, ctx: ExtensionContext) => {
+        // app.exit is one of pi's reserved bindings, so an extension shortcut
+        // on its key is skipped outright rather than winning: without this,
+        // ctrl+d exits instead of detaching, and startup says so. ctrl+d is
+        // app.exit's only key, so releasing it leaves the action on none, and
+        // /exit is how the session ends. After pi has installed the resolved
+        // keybindings; it applies from the next start.
+        releaseKey('app.exit', 'ctrl+d');
+
         const asked = pi.getFlag('attach');
         if (typeof asked !== 'string') return;
         // The bare flag when there is one candidate is that candidate: being

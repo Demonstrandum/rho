@@ -29,7 +29,8 @@ import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { Type } from 'typebox';
-import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionCommandContext, MessageRenderer } from '@earendil-works/pi-coding-agent';
+import { Box, Text } from '@earendil-works/pi-tui';
 import { completeLastWord } from './lib/complete-words';
 import { PersistedState } from './lib/state-store';
 import { setNote } from './lib/tool-row/notes';
@@ -45,6 +46,7 @@ import {
     type Incoming,
     type Person,
     type RawMessage,
+    type SavedFile,
     scheduleTime,
     SlackWeb,
     SocketMode,
@@ -216,6 +218,38 @@ const acknowledgement = (): Acknowledgement | null => {
     };
 };
 
+/** what the renderer draws, so it reads fields rather than parsing the text sent to the model. */
+interface Delivery {
+    readonly name: string;
+    readonly channel: ChannelId;
+    readonly ts: Timestamp;
+    readonly text: string;
+    readonly files: readonly SavedFile[];
+}
+
+const delivery = (message: Incoming): Delivery => ({
+    name: message.name,
+    channel: message.channel,
+    ts: message.ts,
+    text: message.text,
+    files: message.files,
+});
+
+/**
+ * What the model is told when a message arrives.
+ *
+ * Four lines, not fifteen. This text is paid for on every incoming message,
+ * and the tools it names carry the same rules in their descriptions, which the
+ * model already has in front of it: how a Slack reply is written belongs to
+ * slack_reply, and what to do when nothing needs saying belongs to slack_done.
+ * What cannot live in a tool description is the trap, because it is a property
+ * of the turn rather than of any call: the last text of the turn is sent
+ * whatever it says, so a sentence explaining that no answer is needed is
+ * itself the answer.
+ *
+ * The timestamp is in the header because a reaction needs something to point
+ * at, and without it the only available answer is words.
+ */
 const render = (message: Incoming): string => {
     const at = new Date(Number.parseFloat(message.ts) * 1000).toISOString().slice(11, 16);
     const attached =
@@ -224,31 +258,46 @@ const render = (message: Incoming): string => {
             : `\nFiles, already downloaded and readable at these paths:\n${message.files
                   .map((file) => `  ${file.path} (${file.name}, ${file.bytes} bytes)`)
                   .join('\n')}`;
-    // Only the first and the last reply of an exchange reach Slack, so the
-    // first should acknowledge rather than open the work: someone waiting on a
-    // phone wants to know the message landed and then wants the answer.
     const how = [
-        'Reply as a colleague would in Slack, not as a report.',
-        'A one-line question gets a one-line answer. Never several paragraphs.',
-        'No headings, no bullet lists, no preamble. Say the thing.',
-        // Said before the work, because the work can take minutes and the
-        // person is holding a phone. A turn that begins with tool calls and
-        // answers at the end leaves them with silence and no way to tell it
-        // from having been ignored.
-        'If anything here takes more than a moment, send a line with slack_reply before you start: "sure, one sec", "looking now", or what you are about to do.',
-        'Never leave a message unanswered while you work.',
-        'Your last reply of this turn is what Slack receives; the work in between stays in the terminal.',
-        // The turn's final text is forwarded whatever it says, so a model that
-        // decides no answer is needed says exactly that, to the person, as the
-        // answer. There is no silent ending without one of these two calls.
-        'There is no way to end a turn silently by writing about it: whatever you write last is sent, including a sentence saying no reply is needed.',
-        'When nothing needs saying, because the message was thanks or an acknowledgement, answer with a reaction instead: slack_message with action react and emoji +1, then slack_done. Write nothing after that.',
-        'If the full detail matters, it belongs in the terminal, and Slack gets the summary plus an offer.',
-        `Answer ${message.name}, and use slack_reply to write to anyone else.`,
+        `Answer ${message.name} in Slack: a line or two, as a colleague writes, and the detail stays in the terminal.`,
+        'The last text of this turn is sent to Slack whatever it says, so there is no silent ending by writing about one.',
+        'slack_reply says something sooner, slack_message reacts, slack_done ends the exchange without a word.',
     ].join(' ');
-    // The timestamp is in the header because a reaction needs it: without it
-    // the only answer available is words.
     return `A Slack message arrived.\n[${at} UTC ${message.ts}] ${message.name} in ${message.channel}: ${message.text}${attached}\n\n${how}`;
+};
+
+/**
+ * The arrived message, drawn as a message rather than as a briefing.
+ *
+ * pi's default draws a custom message's whole content, which here is the text
+ * plus the instructions written for the model. Those are not for the person
+ * sitting at the terminal, and they are the same on every message, so the row
+ * collapses to who wrote and what they said, and ctrl+o opens the rest.
+ */
+const drawDelivery: MessageRenderer<Delivery> = (message, { expanded, outputPad }, theme) => {
+    const arrived = message.details;
+    // No details means a message from an older session file; pi's own
+    // rendering is better than a box with nothing in it.
+    if (arrived === undefined) return undefined;
+
+    const box = new Box(1, 1, (text) => theme.bg('userMessageBg', text));
+    const who = arrived.name === '' ? arrived.channel : arrived.name;
+    const files =
+        arrived.files.length === 0 ? '' : `  ${quantity(arrived.files.length, 'file')}`;
+    box.addChild(
+        new Text(`${theme.bold(theme.fg('customMessageLabel', 'slack'))} ${who}${theme.fg('dim', files)}`, outputPad, 0),
+    );
+    box.addChild(new Text(arrived.text, outputPad, 0));
+
+    if (!expanded) return box;
+
+    const content = typeof message.content === 'string' ? message.content : '';
+    box.addChild(new Text(theme.fg('dim', `${arrived.channel} ${arrived.ts}`), outputPad, 1));
+    for (const file of arrived.files) {
+        box.addChild(new Text(theme.fg('dim', `${file.path} (${file.bytes} bytes)`), outputPad, 0));
+    }
+    box.addChild(new Text(theme.fg('dim', content), outputPad, 1));
+    return box;
 };
 
 export default function (pi: ExtensionAPI) {
@@ -261,6 +310,10 @@ export default function (pi: ExtensionAPI) {
     let exchange: Exchange | null = null;
     let typingTimer: ReturnType<typeof setInterval> | null = null;
     let toolsRegistered = false;
+
+    // Registered at load, not on attach: a renderer costs the model nothing,
+    // and a resumed session draws the messages of the session before it.
+    pi.registerMessageRenderer<Delivery>('slack', drawDelivery);
 
     const save = (next: Partial<SlackState>): void => {
         stored = { ...stored, ...next };
@@ -310,8 +363,8 @@ export default function (pi: ExtensionAPI) {
             repliedExplicitly: false,
         };
         save({ answering: { channel: message.channel, thread: message.threadTs } });
-        pi.sendMessage(
-            { customType: 'slack', content: render(message), display: true },
+        pi.sendMessage<Delivery>(
+            { customType: 'slack', content: render(message), display: true, details: delivery(message) },
             { deliverAs: 'followUp', triggerTurn: true },
         );
     };

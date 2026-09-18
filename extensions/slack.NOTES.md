@@ -69,7 +69,7 @@ Without that rule an app invited to a busy channel answers every line in it.
 
 An agent left to itself answers a one-line Slack question with five paragraphs, headings included.
 No colleague does that, and it reads as noise on a phone.
-The rules therefore live in the tool description and `promptGuidelines`, not only in the text injected with a delivered message, so they apply when the model calls `slack_reply` itself:
+The rules therefore live in the tool description and `promptGuidelines`, rather than in the text injected with a delivered message, so they apply when the model calls `slack_reply` itself:
 
 - reply as a colleague would, not as a report
 - a one-line question gets a one-line answer
@@ -83,6 +83,15 @@ Without that rule one question becomes a stream of narration in Slack, which is 
 `slack_reply` writes to Slack directly, and takes a channel, so the agent can answer someone other than whoever started the turn.
 `slack_done` closes the exchange when the rest of the work is only of interest here.
 Both are registered when a session attaches, not at load, so an unattached session pays nothing for them in its prompt.
+
+The text injected with an arriving message is three sentences, and was fifteen.
+It is paid for on every message, and everything in it that a tool description already carries was paid for twice.
+What stays is what no description can hold, because it is a property of the turn and not of a call: the last text of the turn is sent whatever it says, so a sentence explaining that no answer is needed is itself the answer, which is what an agent did when the instruction was absent.
+
+That message is also not for the person at the terminal, so it is not drawn to them in full.
+`registerMessageRenderer` draws it as a box like a user's own: a bold `slack`, who wrote, and what they said.
+The channel, the timestamp, the file paths, and the text the model was given open on ctrl+o.
+The renderer reads `details`, not the content string, so it parses nothing; a message from a session that predates `details` returns `undefined` and pi draws it the old way.
 
 ## Seven tools, and why not fifteen
 

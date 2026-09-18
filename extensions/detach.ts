@@ -40,6 +40,7 @@ import {
     withoutLeaving,
 } from './lib/remote/leaving';
 import { attachable, offers, publishedConnect, remember, runningHere } from './lib/remote/sessions';
+import { buildRunnerLocally } from './remote';
 import type { Kept } from './lib/remote/sessions';
 
 /** Where the runner lives on this machine. */
@@ -200,8 +201,13 @@ export default function (pi: ExtensionAPI) {
             return;
         }
         if (!existsSync(RUNNER)) {
-            ctx.ui.notify('The session runner is not built here yet: /remote create builds it.', 'error');
-            return;
+            ctx.ui.notify('building the session runner', 'info');
+            try {
+                await buildRunnerLocally();
+            } catch (error) {
+                ctx.ui.notify(`Could not build the session runner: ${(error as Error).message}`, 'error');
+                return;
+            }
         }
 
         // A name, because resuming by uuid is not resuming by hand.

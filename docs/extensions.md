@@ -448,7 +448,7 @@ the socket is held by the session and dies with it, so nothing receives DMs whil
 credentials belong to an app and an app is locked to one session, because Slack hands each payload to an arbitrary one of an app's open connections; two sessions on two apps are independent, which is what the named store is for.
 an incoming message gets a reaction as the read mark and a rotating status line (`code-bot is thinking...`) refreshed every 90 seconds, and only the turn that ends without tool calls is forwarded as the answer.
 it reaches the session as a custom message carrying the sender, the channel, the timestamp and the files in `details`, and a `registerMessageRenderer` draws it as a user-style box (bold `slack`, who wrote, what they said) with the rest on ctrl+o; the instructions to the model are three sentences, because the tool descriptions carry the same rules and the delivered text is paid for on every message.
-seven tools are registered on attach: `slack_reply`, `slack_send_file`, `slack_read`, `slack_done`, `slack_directory` (who and what the workspace holds, and the IDs that address them), `slack_message` (update, delete, react, unreact, reactions, permalink) and `slack_schedule` (send later, list, cancel).
+seven tools are registered on attach: `slack_reply`, `slack_send_file`, `slack_read`, `slack_done`, `slack_directory` (who and what the workspace holds, and the IDs that address them), `slack_manage_message` (update, delete, react, unreact, reactions, permalink) and `slack_schedule` (send later, list, cancel).
 a surface that operates on something rather than sending takes an action rather than a tool per Slack method, because every definition is paid for in the prompt of every attached session.
 `lib/slack-api.ts` holds the Web API calls, the cursor paging every listing needs, and the reconnecting Socket Mode client; `lib/slack-config.ts` the app store, the per-app lock, and the manifest.
 a user ID is an address everywhere, not only in `chat.postMessage`: `SlackWeb` opens the DM once per person and uses the channel it returns, so a `U...` from the directory works with reading and scheduling too.
@@ -502,6 +502,14 @@ the view can no longer read its tree off the session manager, because the buffer
 every private of pi's the file reaches is named one by one in an interface, so a release that moves one fails at the patch rather than at a keystroke, and `tests/session-tree.test.ts` drives the patched method through fakes to catch exactly that.
 
 `rho.ts` `/rho config` shows the live config as TOML, `/rho config overwrite` writes it to the XDG path, `/rho config write PATH` writes it elsewhere.
+
+`update.ts` `/update` runs the three things that can each leave a session behind, then reloads.
+`pi update --all` updates pi and reinstalls every package, which is the whole job for an rho installed from git under the agent directory; `--self` and `--extensions` are what `/update pi` and `/update rho` run instead.
+an rho installed as a local path is a working checkout that pi never touches, so the commits arrive here by `git merge --ff-only` against the tracked branch, and `bun install` follows only when the incoming range touched a manifest.
+nothing else moves the checkout: a divergence, an upstream that is not set, and a conflict with uncommitted work are reported rather than resolved, since a rebase rewrites history and a reset discards what is in the tree.
+git refuses a fast-forward exactly when the incoming commits touch a file with unstaged changes, so the merge is attempted and git's own refusal is the message.
+the third is the launcher's shebang, which a pi self-update rewrites back to node: rho's postinstall runs only for a package install, so `lib/bun-launcher.ts` repairs it again here.
+pi's new version is not this process's, which is already running the old bundle, so the report names the version change and leaves it to the next start; `/reload` picks up the extensions and resources, and runs only when a step moved something on disk.
 
 ## shared libraries
 

@@ -99,7 +99,7 @@ The first four could only answer a conversation that had already written: `slack
 A name was therefore not an address, and everything the agent could do was a reply.
 
 `slack_directory` is the missing half: `users.list` and `conversations.list` for the workspace, `users.conversations` for what this app is in, `conversations.info` and `conversations.members` for one of them, `users.info` and `conversations.open` for one person and the DM channel with them.
-`slack_message` acts on a message that exists, named by the timestamp `slack_read` prints: update, delete, react, unreact, reactions, permalink.
+`slack_manage_message` acts on a message that exists, named by the timestamp `slack_read` prints: update, delete, react, unreact, reactions, permalink.
 `slack_schedule` sends by Slack's clock: `chat.scheduleMessage` was in `SlackWeb` from the start and no tool reached it, so a message for someone's morning depended on this machine being awake.
 
 Those three carry an action rather than becoming a tool each.

@@ -260,8 +260,8 @@ const render = (message: Incoming): string => {
                   .join('\n')}`;
     const how = [
         `Answer ${message.name} in Slack: a line or two, as a colleague writes, and the detail stays in the terminal.`,
-        'The last text of this turn is sent to Slack whatever it says, so there is no silent ending by writing about one.',
-        'slack_reply says something sooner, slack_message reacts, slack_done ends the exchange without a word.',
+        'Whatever you write last in this turn is sent to Slack, including a sentence saying no reply is needed: to end without sending anything, react with slack_manage_message and call slack_done.',
+        'slack_reply sends sooner or to someone else, slack_manage_message reacts to or edits a message, slack_read and slack_directory look things up.',
     ].join(' ');
     return `A Slack message arrived.\n[${at} UTC ${message.ts}] ${message.name} in ${message.channel}: ${message.text}${attached}\n\n${how}`;
 };
@@ -535,7 +535,7 @@ export default function (pi: ExtensionAPI) {
             name: 'slack_read',
             label: 'Slack read',
             description:
-                "Read a conversation's recent messages, or one thread's replies. Use it to see what was said before this session attached, to re-read a thread that has scrolled out of the conversation, or to check a channel nobody has written in yet. Each line carries the message's timestamp, which slack_reply takes as a thread and slack_message takes as its target. Reading marks the conversation read.",
+                "Read a conversation's recent messages, or one thread's replies. Use it to see what was said before this session attached, to re-read a thread that has scrolled out of the conversation, or to check a channel nobody has written in yet. Each line carries the message's timestamp, which slack_reply takes as a thread and slack_manage_message takes as its target. Reading marks the conversation read.",
             promptSnippet: 'Read past Slack messages in a conversation or a thread',
             promptGuidelines: [
                 'Use slack_read when the answer depends on something said in Slack that is not in front of you.',
@@ -581,7 +581,7 @@ export default function (pi: ExtensionAPI) {
             promptSnippet: 'End the Slack exchange so further replies stay in the terminal',
             promptGuidelines: [
                 'Use slack_done once a Slack question has been answered and the rest of the work does not need reporting there.',
-                'A message that needs no answer ("great", "thanks", "ok") gets a reaction with slack_message and then slack_done, not a sentence saying it needs no answer.',
+                'A message that needs no answer ("great", "thanks", "ok") gets a reaction with slack_manage_message and then slack_done, not a sentence saying it needs no answer.',
             ],
             parameters: Type.Object({}),
             async execute() {
@@ -740,8 +740,8 @@ export default function (pi: ExtensionAPI) {
         });
 
         pi.registerTool({
-            name: 'slack_message',
-            label: 'Slack message',
+            name: 'slack_manage_message',
+            label: 'Slack manage message',
             description:
                 'Act on a message that already exists, named by its timestamp: correct one this app sent (update), take it back (delete), react to one with an emoji (react, unreact), read the reactions on one (reactions), or get its link (permalink). Timestamps come from slack_read and from slack_reply.',
             promptSnippet: 'Edit, delete, react to, or link a Slack message',

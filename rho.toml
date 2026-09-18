@@ -1,3 +1,6 @@
+# GENERATED FILE DO NOT EDIT
+# ... serves as example only!
+
 [spinner]
 categories = [ "chinese" ]  # which spinner sets to use (defined in extensions/assets/spinners.json)
 done = "完"  # glyph shown on the completion line when the agent finishes

@@ -10,6 +10,7 @@ import {
     isPosInt,
     isStringArray,
     isOneOf,
+    preamble,
     tomlName,
 } from '../extensions/lib/config';
 import { parse } from 'smol-toml';
@@ -233,9 +234,28 @@ test('defaults are not aliased, so a mutated config cannot reach them', () => {
 // this schema printed with its docs. a field added here without `bun run config`
 // leaves the two disagreeing, and a hand-written line there is lost on the next
 // run, so the file is pinned to what toToml emits.
-test('the rho.toml in the repo is what toToml generates', () => {
+//
+// the exception is a comment block at the top, which `save` carries across a
+// rewrite: it is the one part of the file a person wrote, and it is where the
+// file says it is generated.
+test('the rho.toml in the repo is what toToml generates, under whatever it opens with', () => {
     const root = join(import.meta.dir, '..');
-    expect(readFileSync(join(root, 'rho.toml'), 'utf8')).toBe(toToml(DEFAULTS));
+    const written = readFileSync(join(root, 'rho.toml'), 'utf8');
+    const opening = preamble(written);
+    expect(written.slice(opening.length)).toBe(toToml(DEFAULTS));
+    // a preamble is comments and blank lines and nothing else; anything with a
+    // value in it would be config the schema does not know about.
+    for (const line of opening.split('\n')) {
+        expect(line.trim() === '' || line.trimStart().startsWith('#')).toBe(true);
+    }
+});
+
+test('a rewrite keeps the note at the top and nothing else', () => {
+    const head = '# GENERATED FILE DO NOT EDIT\n# ... serves as example only!\n\n';
+    expect(preamble(`${head}${toToml(DEFAULTS)}`)).toBe(head);
+    expect(preamble(toToml(DEFAULTS))).toBe('');
+    // nothing but comments is not a config file with a note above it.
+    expect(preamble('# only a note\n')).toBe('');
 });
 
 test('what toToml writes, resolveConfig reads back unchanged', () => {

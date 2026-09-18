@@ -1234,7 +1234,30 @@ export function toToml(cfg: RhoConfig = config): string {
     return annotate(stringify(toRaw(cfg)));
 }
 
+/**
+ * The comment block a config file opens with, blank line included, or '' when
+ * it opens with a section.
+ *
+ * Everything below the first section header is generated and is replaced on
+ * every `bun run config`. A note put above it is the one part of the file a
+ * person wrote, so it is the one part a rewrite keeps.
+ */
+export function preamble(toml: string): string {
+    const lines = toml.split('\n');
+    let end = 0;
+    while (end < lines.length) {
+        const line = lines[end] as string;
+        if (line.trim() !== '' && !line.trimStart().startsWith('#')) break;
+        end += 1;
+    }
+    // A file that is nothing but comments has no generated part, so it has no
+    // preamble either; taking all of it would double the file on the rewrite.
+    if (end === lines.length) return '';
+    return end === 0 ? '' : `${lines.slice(0, end).join('\n')}\n`;
+}
+
 export function save(path: string = CONFIG_PATH, cfg: RhoConfig = config): void {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, toToml(cfg), 'utf8');
+    const kept = existsSync(path) ? preamble(readFileSync(path, 'utf8')) : '';
+    writeFileSync(path, `${kept}${toToml(cfg)}`, 'utf8');
 }

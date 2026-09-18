@@ -19,7 +19,14 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Component } from '@earendil-works/pi-tui';
-import { initTheme, type ExtensionAPI, type MessageRenderer, type Theme } from '@earendil-works/pi-coding-agent';
+import {
+    getAgentDir,
+    initTheme,
+    SettingsManager,
+    type ExtensionAPI,
+    type MessageRenderer,
+    type Theme,
+} from '@earendil-works/pi-coding-agent';
 import slack from '../extensions/slack';
 import { adaptTheme, noteOn, rowTitle } from '../extensions/tool-rows';
 import { callPreview, resultPreview } from '../extensions/lib/tool-row/preview';
@@ -173,16 +180,23 @@ function flag(argv: readonly string[], name: string): string | null {
 }
 
 /**
- * pi's live theme object.
+ * The theme this machine's pi is set to.
  *
- * initTheme is exported, and the object it sets is not, so it is read from the
- * module initTheme wrote it to. The path is resolved from the package entry
- * rather than written out, because the entry has moved between releases.
+ * The same two calls pi makes at startup: the name from settings, and
+ * initTheme to load it. getTheme answers undefined for an auto "light/dark"
+ * setting, and initTheme then detects the terminal background, which is again
+ * what a session does. --theme overrides both.
+ *
+ * The object initTheme writes is not exported, only the function that writes
+ * it, so it is read from the module it was written to. That path is resolved
+ * from the package entry rather than written out, because the entry has moved
+ * between releases.
  */
 async function liveTheme(name: string | null): Promise<Theme> {
     const entry = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'));
     const module = (await import(join(dirname(entry), 'modes/interactive/theme/theme.js'))) as { theme: Theme };
-    initTheme(name ?? undefined);
+    const settings = SettingsManager.create(process.cwd(), getAgentDir());
+    initTheme(name ?? settings.getTheme());
     return module.theme;
 }
 

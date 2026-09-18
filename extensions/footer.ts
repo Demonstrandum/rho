@@ -172,8 +172,13 @@ export default function (pi: ExtensionAPI) {
                     }
                     let rightSide = rightBase;
                     const minPadding = 2;
-                    if (footerData.getAvailableProviderCount() > 1 && model) {
-                        rightSide = `(${model.provider}) ${rightBase}`;
+                    if (model) {
+                        // name the provider and how the session authenticates to
+                        // it: `sub` when a subscription (OAuth) token pays for the
+                        // tokens, `api` when a stored api key does. reading the
+                        // model name alone leaves both unstated.
+                        const auth = usingSub ? 'sub' : 'api';
+                        rightSide = `(${model.provider} · ${auth}) ${rightBase}`;
                         if (statsLeftWidth + minPadding + visibleWidth(rightSide) > width) rightSide = rightBase;
                     }
 

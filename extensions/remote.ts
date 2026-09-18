@@ -18,7 +18,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
@@ -167,7 +167,7 @@ async function compile(platform: 'linux-x64' | 'linux-arm64'): Promise<{ path: s
 }
 
 /** The session runner as one file, cached by a hash of its source. */
-async function bundle(): Promise<{ path: string; hash: string }> {
+export async function bundle(): Promise<{ path: string; hash: string }> {
     const here = remoteDir();
     const hash = createHash('sha256')
         .update(readFileSync(join(here, 'session-main.ts')))
@@ -203,6 +203,27 @@ async function bundle(): Promise<{ path: string; hash: string }> {
  * here. A link rather than a copy: the same bytes, one place to look.
  */
 export const RUNNER_LINK = `${REMOTE_DIR}/session-runner.js`;
+
+/**
+ * Build the session runner on this machine and link it where /detach looks.
+ *
+ * /detach needs no host and no ssh, so it has never gone through create() or
+ * ensureRunner(): both write the link by shelling out to a machine this
+ * process already is. This is that link, made locally, so a first /detach
+ * builds the runner instead of naming the command that would.
+ */
+export async function buildRunnerLocally(): Promise<string> {
+    const { hash } = await bundle();
+    const link = join(CACHE, 'session-runner.js');
+    try {
+        symlinkSync(`session-${hash}.js`, link);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        unlinkSync(link);
+        symlinkSync(`session-${hash}.js`, link);
+    }
+    return link;
+}
 
 async function place(host: string, say: (note: string) => void): Promise<string> {
     const probe = await run('ssh', [...SSH_FLAGS, host, 'command -v bun || command -v node || true; echo ---; uname -m']);

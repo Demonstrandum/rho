@@ -124,7 +124,7 @@ export default function (pi: ExtensionAPI) {
      *
      * A session held on a server is drawn by an interface somewhere else, and
      * that interface forwards a socket back to itself while it is attached.
-     * Work that can only happen there goes through this: nodes reads the
+     * Work that can only happen there goes through this: the node allocator reads the
      * Tailscale identity of whoever opens the connection, so an allocation has
      * to be made from the machine that has one, and no credential can stand in
      * for that.

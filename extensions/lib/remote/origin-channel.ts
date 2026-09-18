@@ -2,7 +2,7 @@
  * The interface's machine, reached over the connection that already exists.
  *
  * A session on a server draws on a laptop, and some work can only happen on
- * that laptop: nodes reads the Tailscale identity of whoever opens the
+ * that laptop: the node allocator reads the Tailscale identity of whoever opens the
  * connection, so an allocation made from the server is refused however good its
  * credentials are.
  *

@@ -32,7 +32,7 @@ describe('the word being typed', () => {
 
 describe('completing it', () => {
     test('keeps everything typed before the word', () => {
-        const found = completeLastWord('project repo.git feature/remote samuel@rob', HOSTS);
+        const found = completeLastWord('project repo.git feature/remote samuel@dev', HOSTS);
         expect(found?.map((item) => item.value)).toEqual(['project repo.git feature/remote samuel@dev-box']);
         // and the list still reads as a list of choices
         expect(found?.map((item) => item.label)).toEqual(['samuel@dev-box']);

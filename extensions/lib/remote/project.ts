@@ -100,7 +100,7 @@ export function projectPlan(asked: ProjectAsked): ProjectPlan {
                   // A fetch that fails does not stop the checkout. The clone
                   // is already here, so the branch can be made from what it
                   // holds; refusing instead turned an expired credential, a
-                  // cloud that was down, and a machine with no network into
+                  // remote that was down, and a machine with no network into
                   // "could not check out", with nothing made.
                   'if [ -d "$checkout/.git" ]; then',
                   `  git -C "$checkout" fetch --all --prune || echo ${STALE} >&2;`,
@@ -140,7 +140,7 @@ export function projectPlan(asked: ProjectAsked): ProjectPlan {
 
     const script = [
         'set -e',
-        // The machine may never have spoken to this cloud before, and a first
+        // The machine may never have spoken to this git host before, and a first
         // clone otherwise dies on "Host key verification failed" with no way
         // to answer the prompt. accept-new trusts an unknown host once and
         // still refuses one whose key has changed.

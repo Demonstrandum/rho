@@ -1,6 +1,6 @@
 ---
 name: remote
-description: work on another machine, or run the session on one. use when asked to connect to a host, attach the execution environment to a rented or GPU node, allocate a nodes node and work on it, start or attach a long-lived session on the always-on host, or set up a project checkout and worktree there. loads the environment and remote_session tools.
+description: work on another machine, or run the session on one. use when asked to connect to a host, attach the execution environment to a rented or GPU node, allocate a node and work on it, start or attach a long-lived session on the always-on host, or set up a project checkout and worktree there. loads the environment and remote_session tools.
 ---
 
 # working somewhere else
@@ -57,17 +57,13 @@ session in that worktree.
 
 ## allocating a node and working on it
 
-the usual sequence when asked to work on rented hardware:
-
-```
-nodes create --profile cpu-small --name work --time 2
-nodes list                                   # for the tailnet address
-```
-
-then `environment connect ubuntu@<address>`, which is the case that does need
-a user because the address came from `nodes list` and not from the ssh config.
-do the work, and
-`nodes terminate <node id> --yes` when it is done.
+the allocator is whatever the site provides, so ask for its name rather than
+assuming one.
+the sequence it serves is always the same: allocate a node with a lease, read
+back its address, then `environment connect <user>@<address>`, which is the
+case that does need a user because the address came from the allocator and not
+from the ssh config.
+do the work, and release the node as soon as it is done.
 the node costs money for as long as it exists, so it is terminated rather than
 left running, and the session stays on the always-on host so that terminating
 the node loses nothing.

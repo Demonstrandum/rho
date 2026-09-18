@@ -270,7 +270,7 @@ if (trace !== undefined) {
 /**
  * This machine, offered to the session while this interface is attached.
  *
- * Work that can only happen where the person is -- nodes reads the Tailscale
+ * Work that can only happen where the person is -- the node allocator reads the Tailscale
  * identity of whoever opens the connection -- runs here, over the connection
  * that is already carrying prompts one way and events the other. The far side
  * opens a channel on its own session socket, the broker pairs it with this

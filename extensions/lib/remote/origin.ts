@@ -4,9 +4,10 @@
  * A session on a server can reach anywhere it has credentials for, and the one
  * machine it cannot reach is usually the laptop in front of the person: the
  * laptop has no fixed address, is often behind something, and is only awake
- * when somebody is using it. Some work has to happen there anyway. nodes is the
- * case that forced this: Cloud trusts the Tailscale identity of whoever opens
- * the connection, there is no credential to copy, and a tagged server has no
+ * when somebody is using it. Some work has to happen there anyway. Allocating a
+ * node is the case that forced this: the allocator trusts the Tailscale
+ * identity of whoever opens the connection, there is no credential to copy, and
+ * a tagged server has no
  * user identity, so an allocation has to be made from the laptop itself.
  *
  * ssh carries a unix socket in either direction, so when the interface attaches

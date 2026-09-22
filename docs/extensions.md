@@ -511,6 +511,29 @@ git refuses a fast-forward exactly when the incoming commits touch a file with u
 the third is the launcher's shebang, which a pi self-update rewrites back to node: rho's postinstall runs only for a package install, so `lib/bun-launcher.ts` repairs it again here.
 pi's new version is not this process's, which is already running the old bundle, so the report names the version change and leaves it to the next start; `/reload` picks up the extensions and resources, and runs only when a step moved something on disk.
 
+`colab.ts` puts the agent and the person in one marimo kernel.
+marimo (marimo.io) is a reactive Python notebook: a `.py` file of `@app.cell` functions, run by a kernel that knows which cell defines which name and reruns the readers when a definition changes.
+the kernel is a Starlette server (`marimo edit`), and everything the extension does goes through three of its endpoints: `/api/sessions` (which notebooks are open), `/ws?session_id&file` (the message stream a frontend holds), and `/api/kernel/execute` (run code in a session's scratchpad, results as server-sent events).
+the scratchpad sees the live namespace, and inside it a private module, `marimo._code_mode`, queues cell creates, edits, deletes, moves, runs, ui values and package installs, validates them against the graph rules, and applies them in one batch; that module is the whole editing surface, and `assets/colab_helper.py` is the code run there, returning json between markers so the tools can tell their answer from what the notebook printed.
+the helper is resent on every call because the scratchpad keeps nothing between calls; over loopback that is free.
+
+the session is the difficult part, and `lib/colab/session.ts` carries it.
+a marimo session is created by a websocket connection, and while an editor socket is open a second connection to the same file is a read-only viewer.
+so the agent creates the session with an editor socket, instantiates (runs every cell), and closes that socket; marimo keeps the orphaned session, and the next browser that opens the file resumes it, kernel state and all, as its editor.
+the agent watches through a kiosk socket instead, which receives the same stream (`kernel-ready`, `cell-op`, `variables`, document transactions) without taking the seat; `mirror.ts` folds that stream into cells with statuses and errors, which is what the footer line and the "meanwhile, edited in the browser" notes read.
+code runs by http with the session named in a header, and the id is looked up by file path on every call, since a browser resuming the session renames it.
+posts other than execute need the skew-protection token marimo prints into its page, so `client.ts` reads it from `/` first.
+
+servers: a `marimo edit --no-token` registers itself under `~/.local/state/marimo/servers`, and the extension joins one that already has the file open before starting anything, so a notebook the person has in a browser is the one the agent edits.
+a server it starts serves the working directory, headless, on the first free port from `[colab] port`, and every notebook under that directory shares it; a notebook with PEP 723 metadata gets its own server with `--sandbox`, since the environment that flag builds is the file's.
+which `marimo` runs is `marimo-cli.ts`: the project's `.venv`, then `uv run` in a project naming marimo, then PATH, then `uvx`.
+`--mcp` is passed when the extra is present (`[colab] mcp`), which puts marimo's own MCP tools at `/mcp/server` for any other agent; without the extra the flag is fatal, so the start is retried without it.
+servers this session started stop with it unless `[colab] keep`.
+
+the tools are views onto the helper, shaped so the model spends its calls on the notebook rather than on learning `cm`: `marimo_open`, `marimo_cells`, `marimo_run`, `marimo_edit`, `marimo_vars`, `marimo_ui`, and three file tools over the cli, `marimo_check`, `marimo_export`, `marimo_convert`.
+two things the traces of agents in mock repositories taught: optional arguments arrive as json `null` or the word `null`, so every tool drops both before validation; and outputs are frozen at scratchpad start, so an edit's touched cells are read again once the kernel settles, or the model sees no output from the cell it just ran.
+`skills/marimo/SKILL.md` carries the graph rules and the conventions, loaded on demand; the tool descriptions carry the two rules that cost the most turns when missed (one owner per name; edit through the kernel, not the file).
+
 ## shared libraries
 
 `lib/config.ts` the `rho.toml` loader: every `[section] key` named in these entries resolves through it.

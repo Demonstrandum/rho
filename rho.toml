@@ -85,6 +85,31 @@ bare-word = true
 # resume, when the directory still exists
 remember = true
 
+[colab]
+# which marimo starts a notebook server. auto prefers a .venv with marimo,
+# then uv run in a project that names marimo, then marimo on PATH, then
+# uvx. the others force one of those
+runner = "auto"
+port = 2718  # first port tried for a server this session starts; the next free one is used
+# pass --sandbox, which builds the notebook its own environment from its
+# inline (PEP 723) dependencies. auto does so when the file carries them
+sandbox = "auto"
+# start servers with --mcp, so other agents can attach to the same kernel
+# over http at <url>/mcp/server. needs the marimo[mcp] extra; a server
+# without it prints a warning and runs on
+mcp = true
+browser = true  # open the notebook in the browser when /colab attaches to it
+# leave servers this session started running when the session ends,
+# rather than stopping them
+keep = false
+# run every cell when a notebook is opened without a session, so the
+# first look at it shows outputs and errors. off leaves the cells unrun
+run-on-open = true
+# longest text a single cell output or stdout is passed to the model at;
+# the rest is counted, not sent
+output-chars = 4000
+status = true  # show the attached notebook, its cell count and errors in the footer
+
 [personality]
 # the file /personality reads from the working tree when no argument is
 # given and no personality is set. an empty string disables the lookup

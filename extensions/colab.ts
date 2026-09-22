@@ -1,0 +1,881 @@
+// /colab, and the marimo_* tools: the agent and the person in one notebook.
+//
+// marimo (marimo.io) is a reactive Python notebook stored as a plain .py file
+// and run by a kernel that knows the dataflow graph between cells. The kernel
+// is reached over HTTP, and it exposes a scratchpad in which arbitrary code
+// runs against the live namespace, with a private module (`marimo._code_mode`)
+// through which that code can add, edit, delete, move and run cells, set UI
+// values and install packages. That is the whole surface this extension uses;
+// the tools are shaped views onto it, so the model spends its calls on the
+// notebook rather than on learning the module.
+//
+//   marimo_open      find or start a server, attach to the notebook's session
+//                    (creating and running it when there is none), show the cells
+//   marimo_cells     the cell table, or named cells in full: code, output, errors
+//   marimo_run       run code in the scratchpad against the live namespace
+//   marimo_edit      create / edit / delete / move / run cells, in one batch
+//   marimo_vars      what the notebook's variables hold: type, shape, columns, value
+//   marimo_ui        set a UI element's value, as a person would in the browser
+//   marimo_check     `marimo check`: lint (and fix) notebook files
+//   marimo_export    a notebook as html, markdown, ipynb or a flat script
+//   marimo_convert   an .ipynb or .md into a marimo notebook
+//
+// Why not the marimo-pair skill as it ships: it needs a browser tab open to
+// have a session to talk to, passes every question through a shell script and
+// jq, and leaves the model to learn the `cm` module from `help()`. Here the
+// session is created headless (lib/colab/session.ts), the answers come back
+// structured, and the browser is where the person joins in: `/colab` opens
+// it on the same kernel, so what either party runs, the other sees.
+//
+// Servers this session starts are stopped with it unless `[colab] keep`.
+// Servers found running (any `marimo edit --no-token`, from the registry) are
+// used and left alone.
+
+import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { StringEnum } from '@earendil-works/pi-ai';
+import { Text } from '@earendil-works/pi-tui';
+import { Type } from 'typebox';
+import { config } from './lib/config';
+import { helperCall, readAnswer } from './lib/colab/helper';
+import { cellDetail, cellTable, clip, lintText, type CellRecord, type CellsAnswer } from './lib/colab/format';
+import { chooseRunner, isNotebook, parseLint, run as runMarimo, wantsSandbox, type Runner } from './lib/colab/marimo-cli';
+import { discover, start, type Started } from './lib/colab/server';
+import { NotebookSession } from './lib/colab/session';
+import type { ServerAddress } from './lib/colab/client';
+import { collapseHome, quantity, truncate } from './lib/text';
+
+interface Attached {
+    readonly session: NotebookSession;
+    readonly address: ServerAddress;
+    /** the child, when this session started the server. */
+    readonly started: Started | null;
+    readonly runner: Runner | null;
+    /** when a tool last reported on this notebook, for "meanwhile" notes. */
+    seenAt: number;
+}
+
+/**
+ * what changed in the browser since the model last looked. the person and the
+ * agent share the kernel, so an edit the person made between two tool calls
+ * is something the model has to be told, or it reasons from a stale table.
+ */
+function meanwhile(attached: Attached): string {
+    const since = attached.session.mirror.activitySince(attached.seenAt);
+    attached.seenAt = Date.now();
+    const theirs = since.filter((a) => a.source === 'frontend' || a.source === 'file-watch');
+    if (theirs.length === 0) return '';
+    const byCell = new Map<string, Set<string>>();
+    for (const a of theirs) {
+        const key = a.cellId ?? '(notebook)';
+        const kinds = byCell.get(key) ?? new Set<string>();
+        kinds.add(a.kind.replace(/-cell$/, '').replace(/^set-/, ''));
+        byCell.set(key, kinds);
+    }
+    const parts = [...byCell.entries()].map(([id, kinds]) => `${id}: ${[...kinds].join(', ')}`);
+    return `\nmeanwhile, edited in the browser: ${parts.join('; ')}`;
+}
+
+interface ToolText {
+    content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>;
+    details: Record<string, unknown>;
+}
+
+const EMPTY_NOTEBOOK = `import marimo
+
+app = marimo.App(width="medium")
+
+
+@app.cell
+def _():
+    import marimo as mo
+    return (mo,)
+
+
+if __name__ == "__main__":
+    app.run()
+`;
+
+const notebooks = new Map<string, Attached>();
+const started = new Map<string, Started>();
+let current: string | null = null;
+let uiHost: ExtensionContext['ui'] | null = null;
+
+const text = (body: string, details: Record<string, unknown> = {}): ToolText => ({ content: [{ type: 'text', text: body }], details });
+
+const fail = (message: string): never => {
+    throw new Error(message);
+};
+
+const openBrowser = (url: string): void => {
+    const [command, args] =
+        process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : ['xdg-open', [url]];
+    spawn(command, args, { stdio: 'ignore', detached: true }).unref();
+};
+
+const expand = (input: string, cwd: string): string => {
+    const p = input.trim().replace(/^~(?=$|\/)/, process.env.HOME ?? '~');
+    return isAbsolute(p) ? p : resolve(cwd, p);
+};
+
+/** whether the runner's python has the mcp extra, when that is cheap to see. */
+function mcpAvailable(runner: Runner): boolean {
+    if (runner.kind !== 'venv') return true; // unknown: try, and fall back on failure
+    const lib = join(dirname(dirname(runner.argv[0]!)), 'lib');
+    try {
+        return readdirSync(lib).some((py) => existsSync(join(lib, py, 'site-packages', 'mcp')));
+    } catch {
+        return true;
+    }
+}
+
+/**
+ * optional arguments as the model sends them when it means "none": json null,
+ * or the word null as a string. both read as absent, so a call that spells
+ * an omitted notebook as "null" does not fail on a notebook called null.
+ */
+function dropNulls<T>(args: unknown): T {
+    if (typeof args !== 'object' || args === null || Array.isArray(args)) return args as T;
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+        if (value === null || value === undefined) continue;
+        if (typeof value === 'string' && /^(null|none|undefined)$/i.test(value.trim()) && key !== 'code' && key !== 'value') continue;
+        out[key] = value;
+    }
+    return out as T;
+}
+
+/** notebooks in a directory, top level only: what `marimo_open` lists. */
+function notebooksIn(dir: string, limit = 40): string[] {
+    try {
+        return readdirSync(dir)
+            .filter((name) => name.endsWith('.py'))
+            .map((name) => join(dir, name))
+            .filter((path) => isNotebook(path))
+            .slice(0, limit);
+    } catch {
+        return [];
+    }
+}
+
+function refreshStatus(): void {
+    if (uiHost === null || !config.colab.status) return;
+    if (current === null) {
+        uiHost.setStatus('colab', '');
+        return;
+    }
+    const attached = notebooks.get(current);
+    if (attached === undefined) return;
+    const live = attached.session.watching ? '' : ' (feed lost)';
+    uiHost.setStatus('colab', `⬢ ${basename(current)} · ${attached.session.mirror.summary()}${live}`);
+}
+
+/** the attached notebook a tool call means: named, or the current one. */
+function attachedFor(notebook: string | undefined, cwd: string): Attached {
+    if (notebook !== undefined && notebook.trim() !== '') {
+        const path = expand(notebook, cwd);
+        const hit = notebooks.get(path);
+        if (hit !== undefined) return hit;
+        const byName = [...notebooks.entries()].filter(([p]) => basename(p) === notebook.trim());
+        if (byName.length === 1) return byName[0]![1];
+        return fail(`${notebook} is not open. open it with marimo_open first${notebooks.size > 0 ? `; open: ${[...notebooks.keys()].map((p) => collapseHome(p)).join(', ')}` : ''}`);
+    }
+    if (current === null) return fail('no notebook is open. call marimo_open with a path first.');
+    return notebooks.get(current) ?? fail('the current notebook is gone; open one with marimo_open');
+}
+
+/**
+ * attach to a notebook, starting a server when no running one has it.
+ * the whole of `marimo_open` and `/colab <path>`.
+ */
+async function open(pathInput: string, cwd: string, options: { run?: boolean; sandbox?: boolean } = {}): Promise<{ attached: Attached; note: string }> {
+    const path = expand(pathInput, cwd);
+    const known = notebooks.get(path);
+    if (known !== undefined) {
+        current = path;
+        refreshStatus();
+        return { attached: known, note: 'already open' };
+    }
+    let fresh = false;
+    if (!existsSync(path) || statSync(path).size === 0) {
+        // a notebook that does not exist yet. marimo would create an empty
+        // file and a kernel with one empty cell; writing the smallest valid
+        // notebook first gives the model a file it can read back and the
+        // kernel a cell that imports marimo, which every notebook wants.
+        if (!path.endsWith('.py')) fail(`${collapseHome(path)} does not exist, and a new notebook needs a .py name`);
+        if (!existsSync(dirname(path))) fail(`${collapseHome(dirname(path))} does not exist`);
+        writeFileSync(path, EMPTY_NOTEBOOK, 'utf8');
+        fresh = true;
+    } else if (statSync(path).isDirectory()) {
+        const found = notebooksIn(path);
+        fail(found.length > 0 ? `${collapseHome(path)} is a directory. notebooks in it:\n${found.map((p) => `  ${collapseHome(p)}`).join('\n')}` : `${collapseHome(path)} is a directory with no marimo notebooks at its top level`);
+    } else if (!isNotebook(path)) {
+        fail(`${collapseHome(path)} is not a marimo notebook (no marimo.App). for an .ipynb use marimo_convert first.`);
+    }
+
+    // a server that already has this file open, or any server that answers,
+    // is used before one is started: the person may have opened it.
+    let note = '';
+    let address: ServerAddress | null = null;
+    let child: Started | null = null;
+    let runner: Runner | null = null;
+    for (const server of await discover()) {
+        if (server.url === null) continue;
+        try {
+            const { listSessions } = await import('./lib/colab/client');
+            const sessions = await listSessions({ url: server.url });
+            if (sessions.some((s) => s.path === path)) {
+                address = { url: server.url };
+                note = `joined the session already open on ${server.url} (marimo ${server.version}, pid ${server.pid})`;
+                break;
+            }
+        } catch {
+            // a tokenised server refuses /api/sessions; not ours to use
+        }
+    }
+    let shared = false;
+    if (address === null) {
+        runner = chooseRunner(cwd, config.colab.runner);
+        const sandbox = options.sandbox ?? wantsSandbox(path, config.colab.sandbox);
+        // one server serves every notebook under a directory, so a project's
+        // second notebook joins the first's server rather than starting
+        // another. a sandboxed notebook gets its own: the environment
+        // --sandbox builds is the file's, not the directory's.
+        const reusable = sandbox ? undefined : [...started.values()].find((s) => !s.sandbox && (path.startsWith(`${s.target}/`) || dirname(path) === s.target));
+        if (reusable !== undefined) {
+            address = { url: reusable.url };
+            shared = true;
+            note = `on the server already running for ${collapseHome(reusable.target)} (${reusable.url})`;
+        } else {
+            const target = sandbox ? path : cwd;
+            let mcp = config.colab.mcp && mcpAvailable(runner);
+            try {
+                child = await start({ runner, cwd, target, port: config.colab.port, sandbox, mcp });
+            } catch (error) {
+                // the --mcp flag is fatal without the marimo[mcp] extra. the
+                // notebook matters more than the endpoint: start without it.
+                if (!mcp || !/MCP dependencies/i.test((error as Error).message)) throw new Error(`could not start marimo: ${(error as Error).message}`);
+                mcp = false;
+                child = await start({ runner, cwd, target, port: config.colab.port, sandbox, mcp });
+            }
+            started.set(child.url, child);
+            address = { url: child.url };
+            note += `started ${child.command} (pid ${child.pid})${mcp ? `; MCP endpoint at ${child.url}/mcp/server` : ''}`;
+        }
+    }
+    if (fresh) note = `created ${collapseHome(path)}; ${note}`;
+
+    let session: NotebookSession;
+    try {
+        session = await NotebookSession.attach(address, path, options.run ?? config.colab.runOnOpen);
+    } catch (error) {
+        // a server started for a session that never came up is a stray
+        if (child !== null) {
+            const tail = child.tail();
+            await child.stop();
+            started.delete(child.url);
+            throw new Error(`the server started but the session for ${collapseHome(path)} did not: ${(error as Error).message}${tail === '' ? '' : `\nserver said:\n${tail}`}`);
+        }
+        throw new Error(`could not open a session for ${collapseHome(path)} on ${address.url}: ${(error as Error).message}`);
+    }
+    if (shared) child = [...started.values()].find((s) => s.url === address!.url) ?? null;
+    const attached: Attached = { session, address, started: child, runner, seenAt: Date.now() };
+    notebooks.set(path, attached);
+    current = path;
+    session.onChange(refreshStatus);
+    refreshStatus();
+    if (session.created) note += `; created the kernel session${options.run ?? config.colab.runOnOpen ? ' and ran every cell' : ''}`;
+    return { attached, note };
+}
+
+async function closeNotebook(path: string): Promise<string> {
+    const attached = notebooks.get(path);
+    if (attached === undefined) return `${collapseHome(path)} is not open`;
+    attached.session.close();
+    notebooks.delete(path);
+    let note = `detached from ${collapseHome(path)}`;
+    // the server goes when the last notebook on it goes, and only if we started it
+    if (attached.started !== null && !config.colab.keep) {
+        const stillUsed = [...notebooks.values()].some((a) => a.address.url === attached.address.url);
+        if (!stillUsed) {
+            await attached.started.stop();
+            started.delete(attached.started.url);
+            note += `; stopped the server on ${attached.address.url}`;
+        }
+    }
+    if (current === path) current = notebooks.size > 0 ? [...notebooks.keys()].at(-1)! : null;
+    refreshStatus();
+    return note;
+}
+
+/** run a helper function in the notebook and hand back its json. */
+async function ask<T>(attached: Attached, fn: string, args: Record<string, unknown>, signal?: AbortSignal) {
+    const execution = await attached.session.execute(helperCall(fn, args), signal);
+    const answer = readAnswer<T>(execution);
+    if (answer.data === null) {
+        const why = [answer.stderr.trim(), answer.stdout.trim()].filter((s) => s !== '').join('\n');
+        fail(`the notebook did not answer${why === '' ? '' : `:\n${clip(why, 3000)}`}`);
+    }
+    return answer;
+}
+
+const outputImages = (cells: readonly CellRecord[]): ToolText['content'] => {
+    const images: ToolText['content'] = [];
+    for (const cell of cells) {
+        const out = cell.output;
+        if (out?.image !== undefined) images.push({ type: 'image', data: out.image, mimeType: out.mimetype.startsWith('image/') ? out.mimetype : 'image/png' });
+    }
+    return images;
+};
+
+const header = (attached: Attached, count: number, errored: number): string => {
+    const parts = [collapseHome(attached.session.path), quantity(count, 'cell')];
+    if (errored > 0) parts.push(`${errored} with errors`);
+    parts.push(attached.address.url);
+    return parts.join(' · ');
+};
+
+/** the cell table, as `marimo_open` and `marimo_cells` both show it. */
+async function overview(attached: Attached, signal?: AbortSignal): Promise<{ body: string; data: CellsAnswer }> {
+    const answer = await ask<CellsAnswer>(attached, 'colab_cells', { ids: null, limit: config.colab.outputChars }, signal);
+    const data = answer.data!;
+    const stale = data.stale ?? [];
+    // a joined session may never have run: a person opened the file and
+    // left, or the browser has run-on-startup off. say so, and how to run.
+    const staleNote = stale.length > 0 ? `\n${quantity(stale.length, 'cell')} stale (not run since last changed): marimo_edit with {op: "run", id: "stale"} runs them` : '';
+    const body = `${header(attached, data.count, data.errored.length)}\n${cellTable(data)}${staleNote}${meanwhile(attached)}`;
+    return { body, data };
+}
+
+/** named cells in full, outputs included. */
+async function readCells(attached: Attached, ids: readonly string[], signal?: AbortSignal): Promise<CellRecord[]> {
+    const answer = await ask<CellsAnswer>(attached, 'colab_cells', { ids, limit: config.colab.outputChars }, signal);
+    const data = answer.data!;
+    if (data.error !== undefined) fail(`${data.error}. cells: ${(data as unknown as { cells: string[] }).cells.join(', ')}`);
+    return [...data.cells];
+}
+
+export default function (pi: ExtensionAPI) {
+    pi.on('session_start', (_event, ctx) => {
+        uiHost = ctx.ui;
+        refreshStatus();
+    });
+
+    pi.on('session_shutdown', async () => {
+        for (const attached of notebooks.values()) attached.session.close();
+        notebooks.clear();
+        current = null;
+        if (config.colab.keep) return;
+        await Promise.all([...started.values()].map((s) => s.stop()));
+        started.clear();
+    });
+
+    // the model is told which notebooks are attached, and at which url a
+    // person can look, on every turn. stable text: the cell states change
+    // every call and live in tool results, not here.
+    pi.on('before_agent_start', (event) => {
+        if (notebooks.size === 0) return;
+        const lines = [...notebooks.entries()].map(([path, a]) => `- ${collapseHome(path)} on ${a.address.url}${path === current ? ' (current)' : ''}`);
+        const options = event.systemPromptOptions;
+        if (options === undefined) return;
+        options.sections ??= {};
+        options.sections.marimo = `Notebooks open in a live marimo kernel (use the marimo_* tools on them, not file edits; the kernel writes the file):\n${lines.join('\n')}`;
+    });
+
+    // ------------------------------------------------------------ tools --
+
+    pi.registerTool({
+        name: 'marimo_open',
+        label: 'marimo open',
+        prepareArguments: dropNulls,
+        description:
+            'Open a marimo notebook (.py) in a live kernel: joins the session a running marimo server already has for it, or starts a headless server and creates one, running every cell. Returns the cell table (ids, status, first line, defined and referenced names, errors). Later marimo_* calls default to the notebook opened last. With no path, lists the notebooks in the working directory, the servers running, and what is open. A path that does not exist yet is created as an empty notebook.',
+        promptSnippet: 'Open a marimo notebook in a live kernel and see its cells',
+        promptGuidelines: [
+            'A file that imports marimo and builds marimo.App is a marimo notebook: work on it through marimo_open and the other marimo_* tools, whose edits go through the running kernel and are written to the file by marimo. Editing the .py directly while it is open is lost or overwritten.',
+        ],
+        parameters: Type.Object({
+            path: Type.Optional(Type.String({ description: 'notebook file, relative to the working directory. omit to list.' })),
+            run: Type.Optional(Type.Boolean({ description: 'run every cell when the session is created (default from [colab] run-on-open). a found session is left as is.' })),
+            sandbox: Type.Optional(Type.Boolean({ description: 'force --sandbox on or off for a server this starts; default reads the file for PEP 723 metadata.' })),
+            close: Type.Optional(Type.Boolean({ description: 'detach from the notebook instead, stopping the server if this session started it and nothing else uses it.' })),
+        }),
+        async execute(_id, params, signal, _update, ctx) {
+            const cwd = ctx.cwd;
+            if (params.close === true) {
+                const path = params.path === undefined ? current : expand(params.path, cwd);
+                if (path === null) return text('nothing is open');
+                return text(await closeNotebook(path));
+            }
+            if (params.path === undefined || params.path.trim() === '') {
+                const lines: string[] = [];
+                const here = notebooksIn(cwd);
+                lines.push(here.length === 0 ? `no marimo notebooks at the top level of ${collapseHome(cwd)}` : `notebooks in ${collapseHome(cwd)}:\n${here.map((p) => `  ${basename(p)}`).join('\n')}`);
+                const servers = await discover();
+                if (servers.length > 0) lines.push(`marimo servers running:\n${servers.map((s) => `  ${s.url ?? s.id} (marimo ${s.version}, pid ${s.pid}${s.url === null ? ', not answering' : ''})`).join('\n')}`);
+                if (notebooks.size > 0) lines.push(`open here:\n${[...notebooks.entries()].map(([p, a]) => `  ${collapseHome(p)} on ${a.address.url}${p === current ? ' (current)' : ''} · ${a.session.mirror.summary()}`).join('\n')}`);
+                return text(lines.join('\n\n'), { listing: true });
+            }
+            const { attached, note } = await open(params.path, cwd, { run: params.run, sandbox: params.sandbox });
+            const { body, data } = await overview(attached, signal);
+            const browser = `a person can join at ${attached.session.browserUrl}`;
+            return text(`${note}\n${browser}\n\n${body}`, { count: data.count, errored: data.errored.length, url: attached.address.url });
+        },
+        renderCall(args, theme) {
+            const a = args as { path?: string; close?: boolean };
+            const verb = a.close === true ? 'close' : a.path === undefined ? 'list' : 'open';
+            return new Text(`${theme.fg('toolTitle', theme.bold('marimo'))} ${theme.fg('muted', verb)} ${theme.fg('dim', a.path ?? '')}`, 0, 0);
+        },
+        renderResult(result, { expanded }, theme) {
+            const first = result.content.find((c) => c.type === 'text');
+            const body = first !== undefined && first.type === 'text' ? first.text : '';
+            const lines = body.split('\n');
+            return new Text(expanded ? body : theme.fg('dim', truncate(lines[0] ?? '', 120)), 0, 0);
+        },
+    });
+
+    pi.registerTool({
+        name: 'marimo_cells',
+        label: 'marimo cells',
+        prepareArguments: dropNulls,
+        description:
+            'The open notebook, cell by cell. Without ids: one line per cell, in notebook order (id, status, first line, +extra lines, names defined and referenced), errors under the cells that have them. With ids (cell ids or cell names): each cell in full, with its code, its output as text (images attached), console output and errors.',
+        promptSnippet: 'List the cells of the open marimo notebook, or read some in full',
+        parameters: Type.Object({
+            ids: Type.Optional(Type.Array(Type.String(), { description: 'cell ids or names to read in full. omit for the table.' })),
+            notebook: Type.Optional(Type.String({ description: 'which open notebook, when more than one is. default: the current one.' })),
+        }),
+        async execute(_id, params, signal, _update, ctx) {
+            const attached = attachedFor(params.notebook, ctx.cwd);
+            if (params.ids === undefined || params.ids.length === 0) {
+                const { body, data } = await overview(attached, signal);
+                return text(body, { count: data.count, errored: data.errored.length });
+            }
+            const cells = await readCells(attached, params.ids, signal);
+            const body = `${cells.map(cellDetail).join('\n\n')}${meanwhile(attached)}`;
+            return { content: [{ type: 'text', text: body }, ...outputImages(cells)], details: { ids: params.ids } };
+        },
+        renderCall(args, theme) {
+            const a = args as { ids?: string[] };
+            const what = a.ids === undefined || a.ids.length === 0 ? 'table' : a.ids.join(' ');
+            return new Text(`${theme.fg('toolTitle', theme.bold('marimo cells'))} ${theme.fg('dim', what)}`, 0, 0);
+        },
+        renderResult(result, { expanded }, theme) {
+            const first = result.content.find((c) => c.type === 'text');
+            const body = first !== undefined && first.type === 'text' ? first.text : '';
+            const d = result.details as { count?: number; errored?: number; ids?: string[] } | undefined;
+            const line = d?.count !== undefined ? `${quantity(d.count, 'cell')}${(d.errored ?? 0) > 0 ? `, ${d.errored} with errors` : ''}` : `${quantity(d?.ids?.length ?? 0, 'cell')} read`;
+            return new Text(expanded ? body : theme.fg('dim', line), 0, 0);
+        },
+    });
+
+    pi.registerTool({
+        name: 'marimo_run',
+        label: 'marimo run',
+        prepareArguments: dropNulls,
+        description:
+            "Run Python in the open notebook's scratchpad: the live namespace is visible by name (every variable a cell defines), top-level `await` works, and the value of the last expression is returned along with stdout and stderr. Assignments made here do not persist and do not create cells: use marimo_edit for that. Good for looking at data, trying a transformation before committing it to a cell, calling functions the notebook defines, and installing packages (`import marimo._code_mode as cm` then `async with cm.get_context() as ctx: ctx.packages.add('polars')`).",
+        promptSnippet: 'Run Python against the live namespace of the open marimo notebook',
+        promptGuidelines: [
+            'To inspect or try something in an open marimo notebook, use marimo_run rather than a bash python call: the notebook variables are only alive in the kernel.',
+        ],
+        parameters: Type.Object({
+            code: Type.String({ description: 'python source. the last expression is the result.' }),
+            notebook: Type.Optional(Type.String({ description: 'which open notebook. default: the current one.' })),
+            timeout: Type.Optional(Type.Integer({ description: 'seconds to wait before interrupting. default 600.' })),
+        }),
+        async execute(_id, params, signal, _update, ctx) {
+            const attached = attachedFor(params.notebook, ctx.cwd);
+            const before = attached.session.mirror.version;
+            const execution = await attached.session.execute(params.code, signal, (params.timeout ?? 600) * 1000);
+            const parts: string[] = [];
+            const limit = config.colab.outputChars;
+            if (execution.stdout.trim() !== '') parts.push(clip(execution.stdout.replace(/\n$/, ''), limit));
+            if (execution.result.trim() !== '') parts.push(`=> ${clip(execution.result, limit)}`);
+            if (execution.stderr.trim() !== '') parts.push(`stderr:\n${clip(execution.stderr.replace(/\n$/, ''), limit)}`);
+            if (parts.length === 0) parts.push(execution.ok ? '(no output)' : '(failed with no output)');
+            // cells the code caused to run (through cm) show in the feed; say
+            // which ones now error so the model does not have to ask.
+            if (attached.session.mirror.version !== before) {
+                await new Promise((r) => setTimeout(r, 200));
+                const errored = attached.session.mirror.errored;
+                if (errored.length > 0) parts.push(`cells with errors now: ${errored.map((c) => `${c.id} (${truncate(c.error ?? '', 160)})`).join('; ')}`);
+            }
+            const body = `${parts.join('\n')}${meanwhile(attached)}`;
+            if (!execution.ok) fail(body);
+            return text(body, { ok: execution.ok, ms: Math.round(execution.ms) });
+        },
+        renderCall(args, theme) {
+            const a = args as { code?: string };
+            const first = (a.code ?? '').split('\n').find((l) => l.trim() !== '') ?? '';
+            const more = (a.code ?? '').split('\n').length - 1;
+            return new Text(`${theme.fg('toolTitle', theme.bold('marimo run'))} ${theme.fg('dim', truncate(first, 100))}${more > 0 ? theme.fg('muted', ` +${more}`) : ''}`, 0, 0);
+        },
+        renderResult(result, { expanded }, theme) {
+            const first = result.content.find((c) => c.type === 'text');
+            const body = first !== undefined && first.type === 'text' ? first.text : '';
+            const d = result.details as { ms?: number } | undefined;
+            const lines = body.split('\n');
+            const head = `${truncate(lines[0] ?? '', 110)}${lines.length > 1 ? ` … ${quantity(lines.length, 'line')}` : ''}${d?.ms !== undefined ? theme.fg('muted', ` ${d.ms}ms`) : ''}`;
+            return new Text(expanded ? body : theme.fg('dim', head), 0, 0);
+        },
+    });
+
+    const opSchema = Type.Object({
+        op: StringEnum(['create', 'edit', 'delete', 'move', 'run'] as const),
+        id: Type.Optional(Type.String({ description: 'cell id or name (edit, delete, move, run); or a ref given to an earlier create in this batch. for run: "stale" runs every stale or errored cell, "all" every cell.' })),
+        code: Type.Optional(Type.String({ description: 'cell body (create, edit). the contents, not an @app.cell wrapper. for edit: the whole new body.' })),
+        after: Type.Optional(Type.String({ description: 'place after this cell id (create, move). default for create: the end.' })),
+        before: Type.Optional(Type.String({ description: 'place before this cell id (create, move).' })),
+        name: Type.Optional(Type.String({ description: 'a name for the cell (create), usable as an id later.' })),
+        ref: Type.Optional(Type.String({ description: 'a label for a created cell, so later ops in the same batch can refer to it.' })),
+        run: Type.Optional(Type.Boolean({ description: 'run the cell after create/edit. default true.' })),
+        hide_code: Type.Optional(Type.Boolean({ description: 'collapse the code editor in the browser (create). default false.' })),
+    });
+
+    pi.registerTool({
+        name: 'marimo_edit',
+        label: 'marimo edit',
+        prepareArguments: dropNulls,
+        description:
+            "Change the open notebook's cells through the kernel, in one validated batch: create, edit (replace the whole body), delete, move, run. Cells created or edited run by default; their dependents rerun reactively. marimo rejects a batch that breaks its graph rules (a public name defined in two cells, a cycle, `import *`) and says why; nothing is applied then. Returns the touched cells with status, output and errors, plus any other cell now erroring. The kernel saves the file.",
+        promptSnippet: 'Create, edit, delete, move or run cells in the open marimo notebook',
+        promptGuidelines: [
+            'Each public name in a marimo notebook is defined by exactly one cell. To change a value, edit the owning cell (marimo_cells shows defs) or use a new name; names starting with _ are private to their cell.',
+        ],
+        parameters: Type.Object({
+            ops: Type.Array(opSchema, { description: 'applied in order, all or nothing.' }),
+            notebook: Type.Optional(Type.String({ description: 'which open notebook. default: the current one.' })),
+        }),
+        async execute(_id, params, signal, _update, ctx) {
+            const attached = attachedFor(params.notebook, ctx.cwd);
+            if (params.ops.length === 0) fail('no ops given');
+            for (const op of params.ops) {
+                if ((op.op === 'create' || op.op === 'edit') && (op.code === undefined || op.code.trim() === '')) fail(`${op.op} needs code`);
+                if (op.op !== 'create' && (op.id === undefined || op.id === '')) fail(`${op.op} needs an id`);
+            }
+            interface EditAnswer {
+                applied: boolean;
+                error?: string;
+                traceback?: string;
+                created?: Record<string, string>;
+                touched?: CellRecord[];
+                other_errors?: CellRecord[];
+                count?: number;
+            }
+            const answer = await ask<EditAnswer>(attached, 'colab_edit', { ops: params.ops, limit: config.colab.outputChars }, signal);
+            const data = answer.data!;
+            if (!data.applied) {
+                fail(`nothing applied: ${data.error ?? 'unknown error'}${data.traceback !== undefined && !/Multiply|cycle|not allowed|Validation/i.test(data.error ?? '') ? `\n${clip(data.traceback, 2000)}` : ''}`);
+            }
+            // outputs are frozen at scratchpad start, so the cells that just
+            // ran show none in the same call: read them again for what they
+            // produced, once the kernel has settled.
+            let touched = data.touched ?? [];
+            if (touched.length > 0) {
+                await attached.session.settle(600_000, signal);
+                try {
+                    touched = await readCells(attached, touched.map((c) => c.id), signal);
+                } catch {
+                    // deleted between the two calls, or the kernel is busy: the first answer stands
+                }
+            }
+            const parts: string[] = [];
+            const created = Object.entries(data.created ?? {});
+            if (created.length > 0) parts.push(`created: ${created.map(([ref, id]) => (ref.startsWith('new') ? id : `${ref}=${id}`)).join(', ')}`);
+            parts.push(`${quantity(data.count ?? 0, 'cell')} in the notebook now`);
+            if (touched.length > 0) parts.push(touched.map(cellDetail).join('\n\n'));
+            const others = data.other_errors ?? [];
+            if (others.length > 0) parts.push(`other cells with errors:\n${cellTable({ count: 0, cells: others, errored: [] })}`);
+            if (answer.stdout.trim() !== '') parts.push(`stdout while applying:\n${clip(answer.stdout, 1500)}`);
+            return { content: [{ type: 'text', text: `${parts.join('\n\n')}${meanwhile(attached)}` }, ...outputImages(touched)], details: { touched: touched.length, errors: touched.filter((c) => c.errors.length > 0).length + others.length } };
+        },
+        renderCall(args, theme) {
+            const a = args as { ops?: Array<{ op: string; id?: string; ref?: string }> };
+            const ops = a.ops ?? [];
+            const summary = ops.map((o) => `${o.op}${o.id !== undefined ? ` ${o.id}` : o.ref !== undefined ? ` ${o.ref}` : ''}`).join(', ');
+            return new Text(`${theme.fg('toolTitle', theme.bold('marimo edit'))} ${theme.fg('dim', truncate(summary, 110))}`, 0, 0);
+        },
+        renderResult(result, { expanded }, theme) {
+            const first = result.content.find((c) => c.type === 'text');
+            const body = first !== undefined && first.type === 'text' ? first.text : '';
+            const d = result.details as { touched?: number; errors?: number } | undefined;
+            const line = d === undefined ? truncate(body.split('\n')[0] ?? '', 110) : `${quantity(d.touched ?? 0, 'cell')} touched${(d.errors ?? 0) > 0 ? theme.fg('error', `, ${quantity(d.errors ?? 0, 'error')}`) : ''}`;
+            return new Text(expanded ? body : theme.fg('dim', line), 0, 0);
+        },
+    });
+
+    pi.registerTool({
+        name: 'marimo_vars',
+        label: 'marimo vars',
+        prepareArguments: dropNulls,
+        description:
+            "The open notebook's variables: type, and for each what is most telling (shape and columns with dtypes for a dataframe or array, length for a collection, the current value of a UI element, a clipped repr otherwise), and the cell that defines it. Without names: every public name. Cheaper than marimo_run when the question is what a variable is.",
+        promptSnippet: 'Summarise the variables in the open marimo notebook',
+        parameters: Type.Object({
+            names: Type.Optional(Type.Array(Type.String(), { description: 'variables to describe. omit for all public names.' })),
+            notebook: Type.Optional(Type.String({ description: 'which open notebook. default: the current one.' })),
+            chars: Type.Optional(Type.Integer({ description: 'repr length per variable. default 300.' })),
+        }),
+        async execute(_id, params, signal, _update, ctx) {
+            const attached = attachedFor(params.notebook, ctx.cwd);
+            interface VarsAnswer {
+                variables: Record<string, Record<string, unknown>>;
+                missing: string[];
+            }
+            const answer = await ask<VarsAnswer>(attached, 'colab_vars', { names: params.names ?? null, limit: params.chars ?? 300 }, signal);
+            const data = answer.data!;
+            const lines: string[] = [];
+            for (const [name, info] of Object.entries(data.variables)) {
+                const bits: string[] = [String(info.type)];
+                if (info.shape !== undefined) bits.push(`shape ${JSON.stringify(info.shape)}`);
+                if (info.len !== undefined) bits.push(`len ${String(info.len)}`);
+                if (info.cell !== undefined) bits.push(`cell ${String(info.cell)}`);
+                lines.push(`${name}: ${bits.join(', ')}`);
+                if (Array.isArray(info.columns)) {
+                    const dtypes = (info.dtypes ?? {}) as Record<string, string>;
+                    lines.push(`  columns: ${(info.columns as string[]).map((c) => (dtypes[c] !== undefined ? `${c} (${dtypes[c]})` : c)).join(', ')}`);
+                }
+                if (info.value !== undefined) lines.push(`  value: ${String(info.value)}`);
+                else if (info.repr !== undefined) lines.push(`  ${String(info.repr).replace(/\n/g, '\n  ')}`);
+                if (info.repr_error !== undefined) lines.push(`  (repr failed: ${String(info.repr_error)})`);
+            }
+            if (data.missing.length > 0) lines.push(`not defined: ${data.missing.join(', ')}`);
+            if (lines.length === 0) lines.push('no public variables yet');
+            return text(lines.join('\n'), { count: Object.keys(data.variables).length });
+        },
+        renderCall(args, theme) {
+            const a = args as { names?: string[] };
+            return new Text(`${theme.fg('toolTitle', theme.bold('marimo vars'))} ${theme.fg('dim', a.names?.join(' ') ?? 'all')}`, 0, 0);
+        },
+        renderResult(result, { expanded }, theme) {
+            const first = result.content.find((c) => c.type === 'text');
+            const body = first !== undefined && first.type === 'text' ? first.text : '';
+            const d = result.details as { count?: number } | undefined;
+            return new Text(expanded ? body : theme.fg('dim', quantity(d?.count ?? 0, 'variable')), 0, 0);
+        },
+    });
+
+    pi.registerTool({
+        name: 'marimo_ui',
+        label: 'marimo ui',
+        prepareArguments: dropNulls,
+        description:
+            'Set the value of a UI element in the open notebook (a mo.ui.slider, dropdown, text, switch, ...), as a person would in the browser: the cells that read it rerun. `element` is a Python expression naming it, usually the variable (`slider`, or `form.value["name"]` style attribute paths are not settable: name the element itself). Returns the value it holds afterwards and any cells now erroring.',
+        promptSnippet: 'Set a UI element value in the open marimo notebook',
+        parameters: Type.Object({
+            element: Type.String({ description: 'python expression for the element, evaluated in the notebook namespace.' }),
+            value: Type.Unknown({
+                description:
+                    'the new value in its natural form, not a string of json: a number for a slider or number input, the option (as shown) for a dropdown or radio, a list of options for a multiselect, a boolean for a switch or checkbox, a string for text.',
+            }),
+            notebook: Type.Optional(Type.String({ description: 'which open notebook. default: the current one.' })),
+        }),
+        async execute(_id, params, signal, _update, ctx) {
+            const attached = attachedFor(params.notebook, ctx.cwd);
+            interface UiAnswer {
+                applied: boolean;
+                error?: string;
+                value?: string;
+                unchanged?: boolean;
+                errored?: string[];
+            }
+            const answer = await ask<UiAnswer>(attached, 'colab_set_ui', { expression: params.element, value: params.value }, signal);
+            const data = answer.data!;
+            if (!data.applied) fail(data.error ?? 'could not set the value');
+            await attached.session.settle(120_000, signal);
+            const errored = attached.session.mirror.errored;
+            let body = `${params.element}.value is now ${data.value ?? '?'}${data.unchanged === true ? ' (unchanged: the element did not accept the value)' : ''}`;
+            if (errored.length > 0) body += `\ncells with errors: ${errored.map((c) => `${c.id} (${truncate(c.error ?? '', 160)})`).join('; ')}`;
+            return text(body);
+        },
+        renderCall(args, theme) {
+            const a = args as { element?: string; value?: unknown };
+            return new Text(`${theme.fg('toolTitle', theme.bold('marimo ui'))} ${theme.fg('dim', `${a.element ?? ''} = ${truncate(JSON.stringify(a.value) ?? '', 60)}`)}`, 0, 0);
+        },
+    });
+
+    pi.registerTool({
+        name: 'marimo_check',
+        label: 'marimo check',
+        prepareArguments: dropNulls,
+        description:
+            'Lint marimo notebook files with `marimo check`: graph breakers (multiply defined names, cycles, import *), runtime hazards and formatting, each with the rule code, line, and a hint. `fix` rewrites the files for the fixable ones (`unsafe` also removes empty cells). Works on files on disk, open or not; for a notebook open in a kernel, prefer marimo_cells for errors, since the kernel knows more than the linter.',
+        promptSnippet: 'Lint marimo notebook files with marimo check',
+        parameters: Type.Object({
+            paths: Type.Optional(Type.Array(Type.String(), { description: 'files or directories. default: the open notebook, else the working directory.' })),
+            fix: Type.Optional(StringEnum(['no', 'safe', 'unsafe'] as const)),
+            select: Type.Optional(Type.String({ description: 'comma-separated rule codes or prefixes to enable, e.g. MB,MR001' })),
+            ignore: Type.Optional(Type.String({ description: 'comma-separated rule codes or prefixes to ignore' })),
+        }),
+        async execute(_id, params, signal, _update, ctx) {
+            const cwd = ctx.cwd;
+            const targets = params.paths !== undefined && params.paths.length > 0 ? params.paths.map((p) => expand(p, cwd)) : current !== null ? [current] : [cwd];
+            const runner = notebooks.get(current ?? '')?.runner ?? chooseRunner(cwd, config.colab.runner);
+            const args = ['check', '--format', 'json', '--ignore-scripts'];
+            if (params.fix === 'safe' || params.fix === 'unsafe') args.push('--fix');
+            if (params.fix === 'unsafe') args.push('--unsafe-fixes');
+            if (params.select !== undefined) args.push('--select', params.select);
+            if (params.ignore !== undefined) args.push('--ignore', params.ignore);
+            const result = await runMarimo(runner, [...args, ...targets], cwd, { signal, timeoutMs: 120_000 });
+            if (result.stdout.trim() === '' && result.code !== 0) fail(`marimo check failed (${String(result.code)}):\n${clip(result.stderr, 2000)}`);
+            const report = parseLint(result.stdout);
+            return text(lintText(report, params.fix !== undefined && params.fix !== 'no'), { issues: report.findings.length, fixed: report.fixed });
+        },
+        renderCall(args, theme) {
+            const a = args as { paths?: string[]; fix?: string };
+            return new Text(`${theme.fg('toolTitle', theme.bold('marimo check'))} ${theme.fg('dim', `${a.paths?.join(' ') ?? ''}${a.fix !== undefined && a.fix !== 'no' ? ` --fix${a.fix === 'unsafe' ? ' --unsafe-fixes' : ''}` : ''}`)}`, 0, 0);
+        },
+        renderResult(result, { expanded }, theme) {
+            const first = result.content.find((c) => c.type === 'text');
+            const body = first !== undefined && first.type === 'text' ? first.text : '';
+            const d = result.details as { issues?: number; fixed?: number } | undefined;
+            const line = d === undefined ? body.split('\n')[0] ?? '' : `${quantity(d.issues ?? 0, 'issue')}${(d.fixed ?? 0) > 0 ? `, ${d.fixed} fixed` : ''}`;
+            return new Text(expanded ? body : theme.fg('dim', line), 0, 0);
+        },
+    });
+
+    pi.registerTool({
+        name: 'marimo_export',
+        label: 'marimo export',
+        prepareArguments: dropNulls,
+        description:
+            'Export a marimo notebook file with `marimo export`: html (runs the notebook, outputs included), html-wasm (runs in the browser), md (markdown with code fences), ipynb (Jupyter), script (a flat python script in dataflow order), pdf. Writes next to the notebook unless `output` is given.',
+        promptSnippet: 'Export a marimo notebook to html, markdown, ipynb, or a script',
+        parameters: Type.Object({
+            path: Type.Optional(Type.String({ description: 'the notebook. default: the open one.' })),
+            format: StringEnum(['html', 'html-wasm', 'md', 'ipynb', 'script', 'pdf'] as const),
+            output: Type.Optional(Type.String({ description: 'output file (or directory for html-wasm).' })),
+            include_outputs: Type.Optional(Type.Boolean({ description: 'for ipynb: run the notebook and include outputs. default false.' })),
+        }),
+        async execute(_id, params, signal, _update, ctx) {
+            const cwd = ctx.cwd;
+            const path = params.path !== undefined ? expand(params.path, cwd) : current ?? fail('no notebook given and none open');
+            if (!existsSync(path)) fail(`${collapseHome(path)} does not exist`);
+            const runner = notebooks.get(path)?.runner ?? chooseRunner(cwd, config.colab.runner);
+            const ext: Record<string, string> = { html: '.html', 'html-wasm': '', md: '.md', ipynb: '.ipynb', script: '.script.py', pdf: '.pdf' };
+            const output = params.output !== undefined ? expand(params.output, cwd) : path.replace(/\.py$/, '') + ext[params.format];
+            const args = ['export', params.format, path, '-o', output];
+            if (params.format === 'ipynb' && params.include_outputs === true) args.push('--include-outputs');
+            if (wantsSandbox(path, config.colab.sandbox) && (params.format === 'html' || params.format === 'ipynb' || params.format === 'pdf')) args.push('--sandbox');
+            const result = await runMarimo(runner, args, cwd, { signal, timeoutMs: 600_000 });
+            if (result.code !== 0) fail(`marimo export failed (${String(result.code)}):\n${clip(`${result.stdout}\n${result.stderr}`.trim(), 3000)}`);
+            const size = existsSync(output) && statSync(output).isFile() ? ` (${statSync(output).size} bytes)` : '';
+            return text(`wrote ${collapseHome(output)}${size}${result.stderr.trim() !== '' ? `\n${clip(result.stderr.trim(), 1000)}` : ''}`, { output });
+        },
+        renderCall(args, theme) {
+            const a = args as { path?: string; format?: string };
+            return new Text(`${theme.fg('toolTitle', theme.bold('marimo export'))} ${theme.fg('dim', `${a.format ?? ''} ${a.path ?? ''}`)}`, 0, 0);
+        },
+    });
+
+    pi.registerTool({
+        name: 'marimo_convert',
+        label: 'marimo convert',
+        prepareArguments: dropNulls,
+        description:
+            'Convert a Jupyter notebook (.ipynb), a markdown notebook (.md) or a plain python script into a marimo notebook file with `marimo convert`. The result is checked with `marimo check` and its findings returned, since converted cells often redefine names that marimo needs unique. Then open it with marimo_open.',
+        promptSnippet: 'Convert an .ipynb or .md into a marimo notebook',
+        parameters: Type.Object({
+            path: Type.String({ description: 'the .ipynb, .md, or .py to convert' }),
+            output: Type.Optional(Type.String({ description: 'the marimo notebook to write. default: same name with .py' })),
+        }),
+        async execute(_id, params, signal, _update, ctx) {
+            const cwd = ctx.cwd;
+            const path = expand(params.path, cwd);
+            if (!existsSync(path)) fail(`${collapseHome(path)} does not exist`);
+            const output = params.output !== undefined ? expand(params.output, cwd) : path.replace(/\.(ipynb|md|py)$/, '') + (path.endsWith('.py') ? '.marimo.py' : '.py');
+            if (existsSync(output) && statSync(output).size > 0) fail(`${collapseHome(output)} exists; give another output or remove it first`);
+            const runner = chooseRunner(cwd, config.colab.runner);
+            const result = await runMarimo(runner, ['convert', path, '-o', output], cwd, { signal, timeoutMs: 120_000 });
+            if (result.code !== 0) fail(`marimo convert failed (${String(result.code)}):\n${clip(`${result.stdout}\n${result.stderr}`.trim(), 3000)}`);
+            const lint = await runMarimo(runner, ['check', '--format', 'json', output], cwd, { signal, timeoutMs: 120_000 });
+            const report = parseLint(lint.stdout);
+            return text(`wrote ${collapseHome(output)}\n${lintText(report, false)}`, { output, issues: report.findings.length });
+        },
+        renderCall(args, theme) {
+            const a = args as { path?: string };
+            return new Text(`${theme.fg('toolTitle', theme.bold('marimo convert'))} ${theme.fg('dim', a.path ?? '')}`, 0, 0);
+        },
+    });
+
+    // ---------------------------------------------------------- command --
+
+    const VERBS = ['stop', 'status', 'open', 'mcp', 'list', 'close'] as const;
+
+    pi.registerCommand('colab', {
+        description: 'pair with the agent on a marimo notebook: /colab <notebook.py> opens it in a shared kernel and in the browser',
+        getArgumentCompletions: (prefix) => {
+            const items = VERBS.filter((v) => v.startsWith(prefix)).map((v) => ({ value: v, label: v }));
+            const here = notebooksIn(process.cwd()).map((p) => basename(p)).filter((n) => n.startsWith(prefix));
+            return [...items, ...here.map((n) => ({ value: n, label: n }))].length > 0 ? [...items, ...here.map((n) => ({ value: n, label: n }))] : null;
+        },
+        handler: async (args, ctx) => {
+            uiHost = ctx.ui;
+            const arg = args.trim();
+            const cwd = ctx.cwd;
+            const [verb, ...rest] = arg.split(/\s+/);
+            const say = (message: string, level: 'info' | 'error' | 'warning' = 'info') => ctx.ui.notify(message, level);
+            try {
+                if (arg === '' || verb === 'status' || verb === 'list') {
+                    if (notebooks.size === 0) {
+                        const here = notebooksIn(cwd);
+                        const servers = await discover();
+                        say(`nothing open. ${here.length > 0 ? `notebooks here: ${here.map((p) => basename(p)).join(', ')}` : 'no notebooks in this directory'}${servers.length > 0 ? `; servers running: ${servers.map((s) => s.url ?? s.id).join(', ')}` : ''}`);
+                        return;
+                    }
+                    for (const [path, a] of notebooks) say(`${collapseHome(path)}${path === current ? ' (current)' : ''} · ${a.session.mirror.summary()} · ${a.session.browserUrl}`);
+                    return;
+                }
+                if (verb === 'stop' || verb === 'close') {
+                    const target = rest[0] !== undefined ? expand(rest[0], cwd) : current;
+                    if (target === null) return say('nothing to stop', 'warning');
+                    say(await closeNotebook(target));
+                    return;
+                }
+                if (verb === 'open') {
+                    const a = attachedFor(rest[0], cwd);
+                    openBrowser(a.session.browserUrl);
+                    say(`opened ${a.session.browserUrl}`);
+                    return;
+                }
+                if (verb === 'mcp') {
+                    const a = attachedFor(rest[0], cwd);
+                    const url = `${a.address.url}/mcp/server`;
+                    say(`marimo MCP (tools mode): ${url}\nclaude mcp add --transport http marimo ${url}${a.started === null ? '\n(this server was not started here; --mcp may be off)' : config.colab.mcp ? '' : '\n([colab] mcp is off, so the endpoint is not served)'}`);
+                    return;
+                }
+                // a path: open it, for the person in the browser and for the agent
+                ctx.ui.setStatus('colab', `⬢ opening ${basename(arg)}…`);
+                const { attached, note } = await open(arg, cwd);
+                if (config.colab.browser) openBrowser(attached.session.browserUrl);
+                say(`${note}\n${attached.session.browserUrl}`);
+                const { body } = await overview(attached);
+                // the agent learns what the person opened, the same way it
+                // learns a cwd change: a message after the person's, not a
+                // prompt rewrite.
+                pi.sendMessage(
+                    {
+                        customType: 'colab',
+                        content: `The person opened a marimo notebook with /colab; it is now the current notebook for the marimo_* tools, and they are looking at it in the browser on the same kernel.\n${note}\n\n${body}`,
+                        display: true,
+                        details: { path: attached.session.path, url: attached.address.url },
+                    },
+                    { deliverAs: 'followUp' },
+                );
+            } catch (error) {
+                refreshStatus();
+                say((error as Error).message, 'error');
+            }
+        },
+    });
+
+    pi.registerMessageRenderer('colab', (message, options, theme) => {
+        const details = message.details as { path?: string; url?: string } | undefined;
+        const line = `${theme.fg('accent', 'colab')}  ${theme.fg('text', collapseHome(details?.path ?? ''))}  ${theme.fg('dim', details?.url ?? '')}`;
+        const content = typeof message.content === 'string' ? message.content : '';
+        return new Text(options.expanded ? `${line}\n${theme.fg('dim', content)}` : line, options.outputPad, 0);
+    });
+}

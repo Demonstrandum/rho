@@ -529,6 +529,8 @@ a server it starts serves the working directory, headless, on the first free por
 which `marimo` runs is `marimo-cli.ts`: the project's `.venv`, then `uv run` in a project naming marimo, then PATH, then `uvx`.
 `--mcp` is passed when the extra is present (`[colab] mcp`), which puts marimo's own MCP tools at `/mcp/server` for any other agent; without the extra the flag is fatal, so the start is retried without it.
 servers this session started stop with it unless `[colab] keep`.
+a server with a token is reached by url (`marimo_open http://host:port/?access_token=...`), the token going as a bearer header on http and as `access_token` on the socket; the same route reaches a server on another machine through an ssh forward, since the tools themselves act on this machine only and refuse a file path while an environment is attached.
+the notebooks a session had open are kept in session-scoped state, and a resume rejoins those whose servers still have them, so a person's server survives the agent restarting.
 
 the tools are views onto the helper, shaped so the model spends its calls on the notebook rather than on learning `cm`: `marimo_open`, `marimo_cells`, `marimo_run`, `marimo_edit`, `marimo_vars`, `marimo_ui`, and three file tools over the cli, `marimo_check`, `marimo_export`, `marimo_convert`.
 two things the traces of agents in mock repositories taught: optional arguments arrive as json `null` or the word `null`, so every tool drops both before validation; and outputs are frozen at scratchpad start, so an edit's touched cells are read again once the kernel settles, or the model sees no output from the cell it just ran.

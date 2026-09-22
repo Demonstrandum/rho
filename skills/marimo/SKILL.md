@@ -88,8 +88,10 @@ some libraries cache what they found at import time; if a fresh install is not s
 - a notebook with a `# /// script` header (PEP 723) is self-contained: `marimo_open` starts it with `--sandbox`, which builds its environment from that header.
   add dependencies through `ctx.packages.add`, which updates the header.
 - a project with `pyproject.toml` naming marimo runs with its `.venv`; `marimo_open` finds it.
-- `marimo_open` with no path lists the notebooks here and the servers already running.
+- `marimo_open` with no path lists the notebooks here and the servers already running, with what each has open.
   a server the person started (`marimo edit --no-token`) is joined, not duplicated; what you change, they see.
+- a server with a token, or one the registry does not know (another machine through `ssh -L`), is opened by url: `marimo_open http://localhost:2718/?access_token=...&file=nb.py`.
+- with an environment attached (another machine), the marimo tools still act on this one; say so rather than opening a notebook there by file path.
 
 ## when things look wrong
 

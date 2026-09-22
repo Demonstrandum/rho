@@ -49,8 +49,11 @@ import { cellDetail, cellTable, clip, lintText, runLength, type CellRecord, type
 import { chooseRunner, isNotebook, parseLint, run as runMarimo, wantsSandbox, type Runner } from './lib/colab/marimo-cli';
 import { discover, start, type Started } from './lib/colab/server';
 import { NotebookSession } from './lib/colab/session';
-import type { ServerAddress } from './lib/colab/client';
+import { healthy, type ServerAddress } from './lib/colab/client';
 import { collapseHome, quantity, truncate } from './lib/text';
+import { currentEnvironment } from './environment';
+import { listSessions } from './lib/colab/client';
+import { PersistedState } from './lib/state-store';
 
 interface Attached {
     readonly session: NotebookSession;
@@ -107,6 +110,25 @@ const notebooks = new Map<string, Attached>();
 const started = new Map<string, Started>();
 let current: string | null = null;
 let uiHost: ExtensionContext['ui'] | null = null;
+
+// which notebooks this session had open, so a resume finds them again when
+// their servers are still up (a person's, or ours under [colab] keep).
+const OPEN_VERSION = 1;
+interface OpenState {
+    readonly version: typeof OPEN_VERSION;
+    readonly paths: readonly string[];
+    readonly current: string | null;
+}
+const parseOpenState = (raw: unknown): OpenState | null => {
+    if (typeof raw !== 'object' || raw === null) return null;
+    const r = raw as Record<string, unknown>;
+    if (r.version !== OPEN_VERSION || !Array.isArray(r.paths)) return null;
+    return { version: OPEN_VERSION, paths: r.paths.filter((p): p is string => typeof p === 'string'), current: typeof r.current === 'string' ? r.current : null };
+};
+let openStore: PersistedState<OpenState> | null = null;
+const remember = (): void => {
+    openStore?.write({ version: OPEN_VERSION, paths: [...notebooks.keys()], current });
+};
 
 const text = (body: string, details: Record<string, unknown> = {}): ToolText => ({ content: [{ type: 'text', text: body }], details });
 
@@ -196,6 +218,14 @@ function attachedFor(notebook: string | undefined, cwd: string): Attached {
  * the whole of `marimo_open` and `/colab <path>`.
  */
 async function open(pathInput: string, cwd: string, options: { run?: boolean; sandbox?: boolean } = {}): Promise<{ attached: Attached; note: string }> {
+    // the tools here reach a server over loopback and read files on this
+    // machine; an attached environment is another machine, and a notebook
+    // opened there would be a different one from what the model reads.
+    const remote = currentEnvironment();
+    if (remote !== undefined && remote.alive) {
+        fail(`an environment is attached (${remote.host}); the marimo tools act on this machine only. detach it, or give a url to a marimo server reachable from here (ssh -L forwards one).`);
+    }
+    if (/^https?:\/\//.test(pathInput.trim())) return openUrl(pathInput.trim(), options);
     const path = expand(pathInput, cwd);
     const known = notebooks.get(path);
     if (known !== undefined) {
@@ -229,7 +259,6 @@ async function open(pathInput: string, cwd: string, options: { run?: boolean; sa
     for (const server of await discover()) {
         if (server.url === null) continue;
         try {
-            const { listSessions } = await import('./lib/colab/client');
             const sessions = await listSessions({ url: server.url });
             if (sessions.some((s) => s.path === path)) {
                 address = { url: server.url };
@@ -291,8 +320,49 @@ async function open(pathInput: string, cwd: string, options: { run?: boolean; sa
     current = path;
     session.onChange(refreshStatus);
     refreshStatus();
+    remember();
     if (session.created) note += `; created the kernel session${options.run ?? config.colab.runOnOpen ? ' and ran every cell' : ''}`;
     return { attached, note };
+}
+
+/**
+ * attach by url: a server someone started, with a token when they gave one
+ * (`http://host:port/?access_token=...&file=...`). the session it holds is
+ * the notebook; with several, `file` picks.
+ */
+async function openUrl(raw: string, options: { run?: boolean }): Promise<{ attached: Attached; note: string }> {
+    const url = new URL(raw);
+    const token = url.searchParams.get('access_token') ?? undefined;
+    const file = url.searchParams.get('file');
+    const address: ServerAddress = { url: `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}`, token };
+    if (!(await healthy(address.url))) fail(`nothing marimo answers at ${address.url}`);
+    const sessions = await listSessions(address);
+    let path: string | null = null;
+    if (file !== null) {
+        path = sessions.find((s) => s.path === file || s.filename === file || basename(s.path ?? '') === file)?.path ?? file;
+    } else if (sessions.length === 1) {
+        path = sessions[0]!.path;
+    } else if (sessions.length === 0) {
+        fail(`${address.url} has no notebook open; open one in the browser there, or give ?file=<path>`);
+    } else {
+        fail(`${address.url} has several notebooks open; add ?file= one of:\n${sessions.map((s) => `  ${s.path ?? s.filename ?? s.id}`).join('\n')}`);
+    }
+    if (path === null) return fail('no notebook path');
+    const found: string = path;
+    const known = notebooks.get(found);
+    if (known !== undefined) {
+        current = found;
+        refreshStatus();
+        return { attached: known, note: 'already open' };
+    }
+    const session = await NotebookSession.attach(address, found, options.run ?? false);
+    const attached: Attached = { session, address, started: null, runner: null, seenAt: Date.now() };
+    notebooks.set(found, attached);
+    current = found;
+    session.onChange(refreshStatus);
+    refreshStatus();
+    remember();
+    return { attached, note: `${session.created ? 'created a session' : 'joined the session'} for ${found} on ${address.url}` };
 }
 
 async function closeNotebook(path: string): Promise<string> {
@@ -312,6 +382,7 @@ async function closeNotebook(path: string): Promise<string> {
     }
     if (current === path) current = notebooks.size > 0 ? [...notebooks.keys()].at(-1)! : null;
     refreshStatus();
+    remember();
     return note;
 }
 
@@ -412,9 +483,34 @@ async function readCells(attached: Attached, ids: readonly string[], signal?: Ab
 }
 
 export default function (pi: ExtensionAPI) {
-    pi.on('session_start', (_event, ctx) => {
+    pi.on('session_start', async (_event, ctx) => {
         uiHost = ctx.ui;
+        openStore = PersistedState.open({ name: 'colab', scope: 'session', parse: parseOpenState }, { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() });
+        const stored = openStore.read();
         refreshStatus();
+        if (stored === null || stored.paths.length === 0) return;
+        // servers outlive a session only when kept or when a person owns
+        // them; whichever still has one of our notebooks open is rejoined,
+        // and the rest are forgotten without a word.
+        const servers = (await discover()).filter((s) => s.url !== null);
+        for (const path of stored.paths) {
+            for (const server of servers) {
+                try {
+                    const sessions = await listSessions({ url: server.url! });
+                    if (!sessions.some((s) => s.path === path)) continue;
+                    const session = await NotebookSession.attach({ url: server.url! }, path, false);
+                    notebooks.set(path, { session, address: { url: server.url! }, started: null, runner: null, seenAt: Date.now() });
+                    session.onChange(refreshStatus);
+                    break;
+                } catch {
+                    // not this one
+                }
+            }
+        }
+        current = stored.current !== null && notebooks.has(stored.current) ? stored.current : ([...notebooks.keys()].at(-1) ?? null);
+        remember();
+        refreshStatus();
+        if (notebooks.size > 0) ctx.ui.notify(`colab: rejoined ${[...notebooks.keys()].map((p) => basename(p)).join(', ')}`, 'info');
     });
 
     pi.on('session_shutdown', async () => {
@@ -451,7 +547,7 @@ export default function (pi: ExtensionAPI) {
             'A file that imports marimo and builds marimo.App is a marimo notebook: work on it through marimo_open and the other marimo_* tools, whose edits go through the running kernel and are written to the file by marimo. Editing the .py directly while it is open is lost or overwritten.',
         ],
         parameters: Type.Object({
-            path: Type.Optional(Type.String({ description: 'notebook file, relative to the working directory. omit to list.' })),
+            path: Type.Optional(Type.String({ description: 'notebook file, relative to the working directory; or the url of a running marimo server (with ?access_token= when it has one, and ?file= when it has several notebooks open). omit to list.' })),
             run: Type.Optional(Type.Boolean({ description: 'run every cell when the session is created (default from [colab] run-on-open). a found session is left as is.' })),
             sandbox: Type.Optional(Type.Boolean({ description: 'force --sandbox on or off for a server this starts; default reads the file for PEP 723 metadata.' })),
             close: Type.Optional(Type.Boolean({ description: 'detach from the notebook instead, stopping the server if this session started it and nothing else uses it.' })),
@@ -468,7 +564,22 @@ export default function (pi: ExtensionAPI) {
                 const here = notebooksIn(cwd);
                 lines.push(here.length === 0 ? `no marimo notebooks at the top level of ${collapseHome(cwd)}` : `notebooks in ${collapseHome(cwd)}:\n${here.map((p) => `  ${basename(p)}`).join('\n')}`);
                 const servers = await discover();
-                if (servers.length > 0) lines.push(`marimo servers running:\n${servers.map((s) => `  ${s.url ?? s.id} (marimo ${s.version}, pid ${s.pid}${s.url === null ? ', not answering' : ''})`).join('\n')}`);
+                if (servers.length > 0) {
+                    const described: string[] = [];
+                    for (const s of servers) {
+                        let open = '';
+                        if (s.url !== null) {
+                            try {
+                                const sessions = await listSessions({ url: s.url });
+                                open = sessions.length === 0 ? ', no notebook open' : `, open: ${sessions.map((x) => collapseHome(x.path ?? x.filename ?? x.id)).join(', ')}`;
+                            } catch {
+                                open = ', sessions not readable (token?)';
+                            }
+                        }
+                        described.push(`  ${s.url ?? s.id} (marimo ${s.version}, pid ${s.pid}${s.url === null ? ', not answering' : ''}${open})`);
+                    }
+                    lines.push(`marimo servers running:\n${described.join('\n')}`);
+                }
                 if (notebooks.size > 0) lines.push(`open here:\n${[...notebooks.entries()].map(([p, a]) => `  ${collapseHome(p)} on ${a.address.url}${p === current ? ' (current)' : ''} · ${a.session.mirror.summary()}`).join('\n')}`);
                 return text(lines.join('\n\n'), { listing: true });
             }

@@ -225,7 +225,11 @@ async def colab_edit(ops, limit=4000):
     touched = []
     created = {}
     try:
-        async with _cm.get_context() as ctx:
+        # marimo's own staleness check compares against reads made through
+        # this module, which every call here starts afresh; the guard against
+        # overwriting a cell the person changed is on the caller's side, from
+        # the live feed, so the check is skipped rather than tripped.
+        async with _cm.get_context(skip_staleness_check=True) as ctx:
             for op in ops:
                 kind = op["op"]
                 if kind == "create":

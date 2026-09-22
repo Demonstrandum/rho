@@ -533,6 +533,7 @@ a server with a token is reached by url (`marimo_open http://host:port/?access_t
 the notebooks a session had open are kept in session-scoped state, and a resume rejoins those whose servers still have them, so a person's server survives the agent restarting.
 
 the tools are views onto the helper, shaped so the model spends its calls on the notebook rather than on learning `cm`: `marimo_open`, `marimo_cells`, `marimo_run`, `marimo_edit`, `marimo_vars`, `marimo_ui`, and three file tools over the cli, `marimo_check`, `marimo_export`, `marimo_convert`.
+the person's edits are guarded from the feed rather than by marimo's own staleness check: that check compares against reads made through the code-mode module, and every call here opens a fresh one, so it trips on nothing the model did; instead an edit to a cell the browser changed since the model's last tool result is refused with the code as it now stands.
 two things the traces of agents in mock repositories taught: optional arguments arrive as json `null` or the word `null`, so every tool drops both before validation; and outputs are frozen at scratchpad start, so an edit's touched cells are read again once the kernel settles, or the model sees no output from the cell it just ran.
 `skills/marimo/SKILL.md` carries the graph rules and the conventions, loaded on demand; the tool descriptions carry the two rules that cost the most turns when missed (one owner per name; edit through the kernel, not the file).
 

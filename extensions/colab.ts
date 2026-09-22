@@ -758,6 +758,19 @@ export default function (pi: ExtensionAPI) {
                 other_errors?: CellRecord[];
                 count?: number;
             }
+            // a cell the person changed since the model last looked is not
+            // overwritten on the strength of the old body: the edit is refused
+            // with the current code, and the model resends against that.
+            const targets = new Set(params.ops.filter((op) => op.op === 'edit').map((op) => op.id ?? ''));
+            const changed = attached.session.mirror
+                .activitySince(attached.seenAt)
+                .filter((a) => (a.source === 'frontend' || a.source === 'file-watch') && a.cellId !== null && targets.has(a.cellId) && a.kind === 'set-code');
+            if (changed.length > 0) {
+                const ids = [...new Set(changed.map((a) => a.cellId!))];
+                const now = ids.map((id) => `${id}:\n${(attached.session.mirror.cell(id)?.code ?? '').split('\n').map((l) => `    ${l}`).join('\n')}`).join('\n');
+                attached.seenAt = Date.now();
+                fail(`not applied: ${ids.join(', ')} ${ids.length === 1 ? 'was' : 'were'} edited in the browser since you last looked. the code now:\n${now}\nresend the edit against this, keeping what the person changed.`);
+            }
             const startedAt = Date.now();
             const answer = await ask<EditAnswer>(attached, 'colab_edit', { ops: params.ops, limit: config.colab.outputChars }, signal);
             const data = answer.data!;

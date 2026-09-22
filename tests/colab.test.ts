@@ -196,3 +196,29 @@ test('a helper answer is cut out of stdout and the rest kept', () => {
 test('an async helper is awaited', () => {
     expect(helperCall('colab_edit', { ops: [] })).toContain('await colab_edit(**_args)');
 });
+
+test('an interruption reads as one word, and a structured error keeps its fields', () => {
+    const m = new NotebookMirror();
+    m.apply(ready);
+    m.apply({ op: 'cell-op', data: { cell_id: 'A', output: { mimetype: 'application/vnd.marimo+error', data: [{ type: 'interruption' }] } } });
+    expect(m.cell('A')?.error).toBe('interrupted');
+    m.apply({ op: 'cell-op', data: { cell_id: 'B', output: { mimetype: 'application/vnd.marimo+error', data: [{ type: 'ancestor-prevented', msg: 'An ancestor raised', raising_cell: 'A' }] } } });
+    expect(m.cell('B')?.error).toBe('ancestor-prevented: An ancestor raised');
+});
+
+test('a running cell is timed from its cell-op, and its run length kept when it ends', () => {
+    const m = new NotebookMirror();
+    m.apply(ready);
+    m.apply({ op: 'cell-op', data: { cell_id: 'A', status: 'running', timestamp: 100 } });
+    expect(m.cell('A')?.runningSince).toBe(100_000);
+    m.apply({ op: 'cell-op', data: { cell_id: 'A', status: 'idle', timestamp: 102.5 } });
+    expect(m.cell('A')?.runMs).toBe(2500);
+    expect(m.cell('A')?.runningSince).toBeNull();
+});
+
+test('a slow cell shows its run length in the table, a running one how long so far', () => {
+    const base = { id: 'A', name: null, status: 'idle', lines: 1, defs: [], refs: [], errors: [], preview: 'x' };
+    expect(cellLine({ ...base, runMs: 152_000 })).toContain('(2m 32s)');
+    expect(cellLine({ ...base, runMs: 300 })).not.toContain('ms');
+    expect(cellLine({ ...base, status: 'running', runMs: 4200 })).toContain('(running for 4.2s)');
+});

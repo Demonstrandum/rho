@@ -16,7 +16,8 @@ personal [pi](https://pi.dev) dotfiles, packaged as a pi package (Bun + TypeScri
 - **prose audit**: `/audit` sends the last reply to a second model (haiku by default) to be reviewed against the writing rules, outside the conversation.
   findings render in the transcript; sending a correction back to the agent is offered, never automatic, with the option to edit it first.
 - **editor**: `ctrl+s` parks a prompt on a stack and `ctrl+r` pops it, prompt history that survives a restart, `ctrl+enter` cuts into a running turn.
-- **commands**: `/audit` (prose review), `/cwd` (change directory mid-session), `/stash`, `/history`, `/search` (pi's own commands and docs), `/context`, `/rho config`, `/web` (launch pi-web UI).
+- **commands**: `/audit` (prose review), `/cwd` (change directory mid-session), `/stash`, `/history`, `/search` (pi's own commands and docs), `/context`, `/rho config`, `/web` (launch pi-web UI), `/colab` (pair with the agent on a marimo notebook).
+- **marimo**: `/colab notebook.py` opens a [marimo](https://marimo.io) notebook in a kernel the agent and the person share, the person in the browser and the agent through `marimo_open`, `marimo_cells`, `marimo_run`, `marimo_edit`, `marimo_vars`, `marimo_ui`, `marimo_check`, `marimo_export`, `marimo_convert`; edits go through the kernel and both sides see them.
 - **settings**: auto-configures terminal and display preferences on first run.
 - **bundled packages**: web browsing and librarian (pi-web-access), session rewind (pi-rewind), FTS5 knowledge base (context-mode), output speed display (token-rate-pi), subagent delegation (pi-subagents).
 - **themes**: plan9 and plan9-dark.
@@ -35,6 +36,7 @@ bundles my:
   - `stash.ts`, `prompt-history.ts`, `send-now.ts` editor stack, persistent history, and a key that cuts into a running turn.
   - `search.ts` adds `/search` and a `pi_search` tool over pi's own commands and documentation.
   - `web.ts` adds `/web` to launch the [pi-web](https://github.com/jmfederico/pi-web) UI as a background service (and `/web status|stop|logs|...` passthrough).
+  - `colab.ts` + `lib/colab/` add `/colab` and the `marimo_*` tools: a marimo notebook's kernel session created headless (no browser needed), watched over a read-only socket, and edited through marimo's code-mode module, so a browser the person opens joins the same kernel; configured under `[colab]` in `rho.toml`.
   - `agentica.ts` adds an `agentica` tool (runs python that can call MCP tools via the Agentica MCP Runtime), ported from [MathisWellmann/nixos-config](https://github.com/MathisWellmann/nixos-config)'s `pi-agent.nix`.
     off by default: only registers when `RHO_AGENTICA_RUNTIME` points at an agentica-mcp-runtime checkout (`RHO_AGENTICA_PYTHON` overrides the interpreter, default `<runtime>/.venv/bin/python`); with the env unset it is a no-op
 - **system/**: the system prompt fragments (`personal-rules.md`, `writer-rules.md`, `orthography.md`, `prose-style.md`, `vocabulary.md`)

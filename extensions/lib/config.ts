@@ -386,6 +386,14 @@ const SCHEMA = {
             'the rest is counted, not sent',
         ),
         status: field('status', isBool, true, 'show the attached notebook, its cell count and errors in the footer'),
+        waitSeconds: field(
+            'wait-seconds',
+            isPosInt,
+            60,
+            'how long marimo_open and marimo_edit wait for cells to finish running',
+            'before answering with what has run so far. a cell still running is',
+            'reported with how long it has been at it',
+        ),
     },
     personality: {
         projectFile: field(

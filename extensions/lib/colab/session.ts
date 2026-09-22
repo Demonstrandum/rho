@@ -114,12 +114,12 @@ export class NotebookSession {
      * it when there is none. `run` says whether a created session runs its
      * cells; a found one is left as it is.
      */
-    static async attach(address: ServerAddress, path: string, run = true): Promise<NotebookSession> {
+    static async attach(address: ServerAddress, path: string, run = true, waitMs = OPEN_RUN_WAIT_MS): Promise<NotebookSession> {
         const session = new NotebookSession(address, path);
         if (address.serverToken === undefined) await serverToken(address);
         const existing = await session.lookup();
         if (existing === null) {
-            await session.create(run);
+            await session.create(run, waitMs);
             session.created = true;
         }
         await session.watch();
@@ -134,13 +134,13 @@ export class NotebookSession {
         return this.sessionId;
     }
 
-    private async create(run: boolean): Promise<void> {
+    private async create(run: boolean, waitMs: number): Promise<void> {
         const id = `rho-${randomUUID().slice(0, 8)}`;
         const editor = await connect(wsUrl(this.address, { session_id: id, file: this.path }), this.mirror, () => undefined);
         try {
             await instantiate(this.address, id, run);
             this.sessionId = id;
-            if (run) await this.settle(OPEN_RUN_WAIT_MS);
+            if (run) await this.settle(waitMs);
         } finally {
             editor.close();
             // marimo marks the session orphaned when the socket goes; give it

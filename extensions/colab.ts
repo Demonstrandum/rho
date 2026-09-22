@@ -187,16 +187,20 @@ function notebooksIn(dir: string, limit = 40): string[] {
     }
 }
 
+let lastStatus = '';
+
+/** the footer line, redrawn only when it would read differently. */
 function refreshStatus(): void {
     if (uiHost === null || !config.colab.status) return;
-    if (current === null) {
-        uiHost.setStatus('colab', '');
-        return;
+    let text = '';
+    const attached = current === null ? undefined : notebooks.get(current);
+    if (current !== null && attached !== undefined) {
+        const live = attached.session.watching ? '' : ' (feed lost)';
+        text = `⬢ ${basename(current)} · ${attached.session.mirror.summary()}${live}`;
     }
-    const attached = notebooks.get(current);
-    if (attached === undefined) return;
-    const live = attached.session.watching ? '' : ' (feed lost)';
-    uiHost.setStatus('colab', `⬢ ${basename(current)} · ${attached.session.mirror.summary()}${live}`);
+    if (text === lastStatus) return;
+    lastStatus = text;
+    uiHost.setStatus('colab', text);
 }
 
 /** the attached notebook a tool call means: named, or the current one. */
@@ -303,7 +307,7 @@ async function open(pathInput: string, cwd: string, options: { run?: boolean; sa
 
     let session: NotebookSession;
     try {
-        session = await NotebookSession.attach(address, path, options.run ?? config.colab.runOnOpen);
+        session = await NotebookSession.attach(address, path, options.run ?? config.colab.runOnOpen, config.colab.waitSeconds * 1000);
     } catch (error) {
         // a server started for a session that never came up is a stray
         if (child !== null) {
@@ -765,7 +769,7 @@ export default function (pi: ExtensionAPI) {
             // produced, once the kernel has settled.
             let touched = data.touched ?? [];
             if (touched.length > 0) {
-                await attached.session.settle(600_000, signal);
+                await attached.session.settle(config.colab.waitSeconds * 1000, signal);
                 try {
                     touched = await readCells(attached, touched.map((c) => c.id), signal);
                 } catch {
@@ -780,6 +784,8 @@ export default function (pi: ExtensionAPI) {
             if (touched.length > 0) parts.push(touched.map(cellDetail).join('\n\n'));
             const others = data.other_errors ?? [];
             if (others.length > 0) parts.push(`other cells with errors:\n${cellTable({ count: 0, cells: others, errored: [] })}`);
+            const running = attached.session.busyWith;
+            if (running.length > 0) parts.push(`still running after ${config.colab.waitSeconds}s: ${running.join(', ')}. marimo_cells shows them later; marimo_run with interrupt stops them.`);
             if (answer.stdout.trim() !== '') parts.push(`stdout while applying:\n${clip(answer.stdout, 1500)}`);
             return { content: [{ type: 'text', text: `${parts.join('\n\n')}${meanwhile(attached)}` }, ...outputImages(touched)], details: { touched: touched.length, errors: touched.filter((c) => c.errors.length > 0).length + others.length } };
         },

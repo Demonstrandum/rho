@@ -166,6 +166,10 @@ function renderEntry(entry: SessionEntry): string | null {
         case 'branchSummary':
         case 'compactionSummary':
             return `<summary>\n${clip(message.summary)}\n</summary>`;
+        // the instructions the session runs under, not evidence of the
+        // condition, and the judge is given the condition directly.
+        case 'system':
+            return null;
     }
 }
 

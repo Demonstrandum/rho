@@ -79,6 +79,7 @@ if an entry here is growing past two lines, that is the signal to move it.
 - `rho.toml` generated output, never hand-edited: the schema in `extensions/lib/config.ts` printed with its docs.
   change the schema, then run `bun run config`; `tests/config.test.ts` fails while the two disagree.
 - `package.json` the `pi` manifest declaring resource paths.
+- `.npmrc` turns off npm peer resolution for the install `pi install` runs; pi's own packages are symlinked from the installed pi by `tools/link-pi-packages.ts`, never fetched.
 - bundled third-party packages (in `dependencies` + `bundledDependencies`, referenced via `node_modules/...` in the `pi` manifest): `pi-web-access`, `@ayulab/pi-rewind`, `context-mode`, `token-rate-pi` (shows average output tokens/sec in the footer status line), `pi-subagents` (subagent delegation; also contributes its own skills and prompts).
   they install and load automatically with rho.
 
@@ -88,8 +89,9 @@ one line each; the detail is in `docs/extensions.md`.
 
 - `ci/mock-provider.ts` a local openai-completions server standing in for a model, scripted by turn.
 - `ci/smoke.ts` (`bun run smoke`) end-to-end check in a temporary tree: no api key, no network, nothing written outside it.
+- `ci/install-check.ts` (`bun run install:check`) runs `npm install --omit=dev` on a tree with no `node_modules`, which is what `pi install` does and what the smoke test cannot see.
 - `ci/Dockerfile` (`bun run smoke:docker`) node 24 slim plus bun, rho installed as a user package so the install path is covered.
-- `.github/workflows/ci.yml` `checks` (typecheck + `bun test`) and `smoke`, on push, pull request, dispatch, and daily.
+- `.github/workflows/ci.yml` `checks` (typecheck + `bun test`), `install` (`ci/install-check.ts`), and `smoke`, on push, pull request, dispatch, and daily.
 - `tools/init-config.ts` (`bun run config`, `bun run init`) writes `rho.toml` from the schema; the repo copy is regenerated, never edited.
 - `tools/version-gate.mjs`, `tools/preflight.ts` (`bun run doctor`), `tools/pi-location.ts` install-time checks and pi discovery.
 - `tools/bun-shebang.ts` (`bun run bun-shebang`) points pi's launcher at bun; runs from `postinstall`, since `pi update` restores the node shebang.

@@ -13,8 +13,13 @@
  */
 
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
-import type { AssistantMessage, TextContent, ThinkingContent, ToolCall } from '@earendil-works/pi-ai';
+import type { AssistantMessage, JsonObject, JsonValue, TextContent, ThinkingContent, ToolCall } from '@earendil-works/pi-ai';
 import type { RpcEvent } from './rpc-link';
+
+/** A parsed json document that is an object, which is what a call's arguments are. */
+function asJsonObject(value: JsonValue): JsonObject | null {
+    return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as JsonObject : null;
+}
 
 /** A tool call whose arguments are still arriving keeps the json text so far. */
 interface ArrivingToolCall extends ToolCall {
@@ -117,10 +122,8 @@ export class StreamingMessage {
                 // The arguments arrive as json text; a half-written object is
                 // not parseable, and the row shows what it can until it is.
                 try {
-                    const parsed: unknown = JSON.parse(grown);
-                    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-                        call.arguments = parsed as Record<string, unknown>;
-                    }
+                    const parsed = asJsonObject(JSON.parse(grown) as JsonValue);
+                    if (parsed !== null) call.arguments = parsed;
                 } catch {
                     // still arriving
                 }

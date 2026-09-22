@@ -3,13 +3,27 @@
 // share module identity. without this, a class imported here (Box,
 // ToolExecutionComponent) is a *different* class from the one pi
 // instantiates, and prototype patches silently apply to nothing.
-import { existsSync, lstatSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
+//
+// the links are also how these packages arrive at all for a registry install.
+// `pi install` runs `npm install --omit=dev`, which omits rho's dev copies,
+// and .npmrc turns off peer resolution, so nothing fetches pi's packages from
+// the registry. fetching them would be wrong anyway: a second pi-ai is a
+// second typebox registry, and a schema built against one is rejected by the
+// other.
+import { existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { findPiScope } from './pi-location';
 
-const PACKAGES = ['pi-tui', 'pi-coding-agent'];
+/** every package an extension imports at run time and pi already ships. */
+const PACKAGES = [
+    '@earendil-works/pi-agent-core',
+    '@earendil-works/pi-ai',
+    '@earendil-works/pi-coding-agent',
+    '@earendil-works/pi-tui',
+    'typebox',
+] as const;
 
-const localScope = join(import.meta.dir, '..', 'node_modules', '@earendil-works');
+const localModules = join(import.meta.dir, '..', 'node_modules');
 
 function warn(msg: string): void {
     console.error(`[link-pi-packages] ${msg}`);
@@ -21,9 +35,12 @@ if (!scope) {
     process.exit(0);
 }
 
+// pi's node_modules root, so an unscoped package (typebox) resolves too.
+const piModules = dirname(scope);
+
 for (const pkg of PACKAGES) {
-    const target = join(scope, pkg);
-    const link = join(localScope, pkg);
+    const target = join(piModules, pkg);
+    const link = join(localModules, pkg);
     if (!existsSync(target)) {
         warn(`global ${pkg} not found at ${target}; skipping.`);
         continue;
@@ -50,6 +67,7 @@ for (const pkg of PACKAGES) {
     } catch { /* not present yet */ }
 
     try {
+        mkdirSync(dirname(link), { recursive: true });
         rmSync(link, { recursive: true, force: true });
         symlinkSync(target, link);
     } catch (err) {

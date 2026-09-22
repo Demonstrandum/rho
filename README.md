@@ -78,6 +78,9 @@ run `bun run doctor` at any time for the same report.
 this registers the package in `~/.pi/agent/settings.json`.
 from now on, running `pi` anywhere loads rho's extensions, skills, prompts, and rules automatically.
 
+pi must be installed before rho, as step 2 has it: rho's extensions import pi's own packages, and the install symlinks them to the pi found on `PATH` rather than fetching a second copy from the registry.
+installing rho first prints a warning from `tools/link-pi-packages.ts` and leaves the extensions unable to load; `bun run doctor` says the same thing, and re-running `pi install` after pi is there repairs it.
+
 4. select the theme once (persists in settings):
 
    ```bash
@@ -115,6 +118,9 @@ it verifies that every extension loads, the system prompt is assembled and sent,
 no API key and no network are used, and nothing outside the temporary directory is read or written.
 
 `bun run smoke:docker` runs the same checks in a clean container (`ci/Dockerfile`), which is what `.github/workflows/ci.yml` does on every push and once a day, so a pi release that breaks rho shows up there first.
+
+`bun run install:check` runs `npm install --omit=dev` on a copy of the tracked tree with no `node_modules`, which is the command `pi install` runs.
+the smoke test cannot catch a failure there, since its image runs `bun install` first and bun does not enforce peer ranges.
 
 `bun run link` installs the working checkout project-locally, `bun run link:global` installs it globally.
 `/reload` in a session picks up changes without a restart.

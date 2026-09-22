@@ -32,6 +32,25 @@ jobs:
       - run: bun run typecheck
       - run: bun test tests/
 
+  # the smoke job runs `bun install` before pi ever sees the package, and bun
+  # does not enforce peer ranges. this job meets npm cold, the way a user
+  # installing from git does.
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # rho's runtime packages are linked from the installed pi, so pi has to
+      # be there before the install runs.
+      - run: bun install -g @earendil-works/pi-coding-agent
+      - run: bun ci/install-check.ts
+        timeout-minutes: 10
+
   smoke:
     runs-on: ubuntu-latest
     strategy:

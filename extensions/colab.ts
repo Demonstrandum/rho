@@ -75,15 +75,25 @@ function meanwhile(attached: Attached): string {
     attached.seenAt = Date.now();
     const theirs = since.filter((a) => a.source === 'frontend' || a.source === 'file-watch');
     if (theirs.length === 0) return '';
+    const WORDS: Record<string, string> = {
+        'set-code': 'code changed',
+        'create-cell': 'created',
+        'delete-cell': 'deleted',
+        'move-cell': 'moved',
+        'reorder-cells': 'reordered',
+        'set-name': 'renamed',
+        'set-config': 'config changed',
+    };
     const byCell = new Map<string, Set<string>>();
     for (const a of theirs) {
         const key = a.cellId ?? '(notebook)';
         const kinds = byCell.get(key) ?? new Set<string>();
-        kinds.add(a.kind.replace(/-cell$/, '').replace(/^set-/, ''));
+        kinds.add(WORDS[a.kind] ?? a.kind);
         byCell.set(key, kinds);
     }
-    const parts = [...byCell.entries()].map(([id, kinds]) => `${id}: ${[...kinds].join(', ')}`);
-    return `\nmeanwhile, edited in the browser: ${parts.join('; ')}`;
+    const parts = [...byCell.entries()].map(([id, kinds]) => `${id} ${[...kinds].join(', ')}`);
+    const where = theirs.some((a) => a.source === 'file-watch') ? 'in the browser or on disk' : 'in the browser';
+    return `\nmeanwhile, edited ${where}: ${parts.join('; ')}. read a changed cell again before editing it.`;
 }
 
 interface ToolText {

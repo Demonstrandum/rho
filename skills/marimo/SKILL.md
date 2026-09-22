@@ -100,6 +100,9 @@ some libraries cache what they found at import time; if a fresh install is not s
 - **`Ancestor raised`** is not the cell's own fault: fix the ancestor.
 - **an edit is rejected**: the message names the rule; re-read the owning cell's defs, do not add `_` or a new import to sidestep it.
 - **outputs missing right after an edit**: the kernel may still be running; `marimo_cells ids=[...]` a moment later shows them.
+- **a cell runs long**: the table says `running for 1m 20s` beside it; the kernel is one thread, so nothing else runs until it ends.
+  `marimo_run interrupt=true` stops it; then fix the cell and run again.
+  a batch whose cells are still running after the configured wait answers early and says so; look again later.
 - **the person is in the browser too**: tool results say `meanwhile, edited in the browser: ...` when they changed a cell between your calls.
   read that cell again before editing it.
 

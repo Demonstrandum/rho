@@ -40,7 +40,7 @@ import { Text } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import { config } from './lib/config';
 import { helperCall, readAnswer } from './lib/colab/helper';
-import { cellDetail, cellTable, clip, lintText, type CellRecord, type CellsAnswer } from './lib/colab/format';
+import { cellDetail, cellTable, clip, lintText, runLength, type CellRecord, type CellsAnswer } from './lib/colab/format';
 import { chooseRunner, isNotebook, parseLint, run as runMarimo, wantsSandbox, type Runner } from './lib/colab/marimo-cli';
 import { discover, start, type Started } from './lib/colab/server';
 import { NotebookSession } from './lib/colab/session';
@@ -337,15 +337,61 @@ const header = (attached: Attached, count: number, errored: number): string => {
     return parts.join(' · ');
 };
 
+/**
+ * the table as the live feed knows it, for when the kernel cannot answer:
+ * a cell that is running holds the one thread, and the helper would queue
+ * behind it. codes come from kernel-ready and the transactions since; defs
+ * and refs from the variables message; outputs are not known here.
+ */
+function mirrorTable(attached: Attached): CellsAnswer {
+    const mirror = attached.session.mirror;
+    const defs = new Map<string, string[]>();
+    const refs = new Map<string, string[]>();
+    for (const v of mirror.vars()) {
+        for (const id of v.declaredBy) defs.set(id, [...(defs.get(id) ?? []), v.name]);
+        for (const id of v.usedBy) refs.set(id, [...(refs.get(id) ?? []), v.name]);
+    }
+    const cells: CellRecord[] = mirror.list().map((c) => ({
+        id: c.id,
+        name: c.name === '_' ? null : c.name,
+        status: c.status,
+        lines: c.code === '' ? 0 : c.code.split('\n').length,
+        defs: (defs.get(c.id) ?? []).sort(),
+        refs: (refs.get(c.id) ?? []).sort(),
+        errors: c.error === null ? [] : [{ kind: 'runtime', msg: c.error }],
+        preview: c.code.split('\n', 1)[0] ?? '',
+        has_output: c.hasOutput,
+        runMs: c.runMs,
+    }));
+    return { count: cells.length, cells, errored: cells.filter((c) => c.errors.length > 0).map((c) => c.id) };
+}
+
+/** helper records with what only the feed knows: how long each cell ran. */
+function withTimings(attached: Attached, cells: readonly CellRecord[]): CellRecord[] {
+    return cells.map((c) => {
+        const seen = attached.session.mirror.cell(c.id);
+        return seen === undefined || seen.runMs === null ? c : { ...c, runMs: seen.runMs };
+    });
+}
+
 /** the cell table, as `marimo_open` and `marimo_cells` both show it. */
 async function overview(attached: Attached, signal?: AbortSignal): Promise<{ body: string; data: CellsAnswer }> {
-    const answer = await ask<CellsAnswer>(attached, 'colab_cells', { ids: null, limit: config.colab.outputChars }, signal);
-    const data = answer.data!;
+    let data: CellsAnswer;
+    const busy = attached.session.busyWith;
+    if (busy.length > 0) {
+        // do not queue a question behind a running cell: answer from the feed
+        data = mirrorTable(attached);
+    } else {
+        const answer = await ask<CellsAnswer>(attached, 'colab_cells', { ids: null, limit: config.colab.outputChars }, signal);
+        data = { ...answer.data!, cells: withTimings(attached, answer.data!.cells) };
+    }
     const stale = data.stale ?? [];
     // a joined session may never have run: a person opened the file and
     // left, or the browser has run-on-startup off. say so, and how to run.
     const staleNote = stale.length > 0 ? `\n${quantity(stale.length, 'cell')} stale (not run since last changed): marimo_edit with {op: "run", id: "stale"} runs them` : '';
-    const body = `${header(attached, data.count, data.errored.length)}\n${cellTable(data)}${staleNote}${meanwhile(attached)}`;
+    const running = data.cells.filter((c) => c.status === 'running' || c.status === 'queued').map((c) => c.id);
+    const runningNote = running.length > 0 ? `\nstill running: ${running.join(', ')}. outputs arrive when they finish; marimo_cells shows the state later` : '';
+    const body = `${header(attached, data.count, data.errored.length)}\n${cellTable(data)}${staleNote}${runningNote}${meanwhile(attached)}`;
     return { body, data };
 }
 
@@ -354,7 +400,7 @@ async function readCells(attached: Attached, ids: readonly string[], signal?: Ab
     const answer = await ask<CellsAnswer>(attached, 'colab_cells', { ids, limit: config.colab.outputChars }, signal);
     const data = answer.data!;
     if (data.error !== undefined) fail(`${data.error}. cells: ${(data as unknown as { cells: string[] }).cells.join(', ')}`);
-    return [...data.cells];
+    return withTimings(attached, data.cells);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -476,18 +522,25 @@ export default function (pi: ExtensionAPI) {
         label: 'marimo run',
         prepareArguments: dropNulls,
         description:
-            "Run Python in the open notebook's scratchpad: the live namespace is visible by name (every variable a cell defines), top-level `await` works, and the value of the last expression is returned along with stdout and stderr. Assignments made here do not persist and do not create cells: use marimo_edit for that. Good for looking at data, trying a transformation before committing it to a cell, calling functions the notebook defines, and installing packages (`import marimo._code_mode as cm` then `async with cm.get_context() as ctx: ctx.packages.add('polars')`).",
+            "Run Python in the open notebook's scratchpad: the live namespace is visible by name (every variable a cell defines), top-level `await` works, and the value of the last expression is returned along with stdout and stderr. Assignments made here do not persist and do not create cells: use marimo_edit for that. Good for looking at data, trying a transformation before committing it to a cell, and calling functions the notebook defines. Packages are installed with marimo_edit's install op.",
         promptSnippet: 'Run Python against the live namespace of the open marimo notebook',
         promptGuidelines: [
-            'To inspect or try something in an open marimo notebook, use marimo_run rather than a bash python call: the notebook variables are only alive in the kernel.',
+            'To inspect or try something in an open marimo notebook, use marimo_run rather than a bash python call: the notebook variables are only alive in the kernel. To install a package into it, use marimo_edit with an install op, not pip or uv.',
         ],
         parameters: Type.Object({
-            code: Type.String({ description: 'python source. the last expression is the result.' }),
+            code: Type.String({ description: 'python source. the last expression is the result. may be empty with interrupt.' }),
             notebook: Type.Optional(Type.String({ description: 'which open notebook. default: the current one.' })),
-            timeout: Type.Optional(Type.Integer({ description: 'seconds to wait before interrupting. default 600.' })),
+            timeout: Type.Optional(Type.Integer({ description: 'seconds to wait before interrupting the kernel. default 600.' })),
+            interrupt: Type.Optional(Type.Boolean({ description: 'stop whatever the kernel is running first. the kernel is one thread: code sent while a cell runs waits for it.' })),
         }),
         async execute(_id, params, signal, _update, ctx) {
             const attached = attachedFor(params.notebook, ctx.cwd);
+            if (params.interrupt === true) {
+                const was = attached.session.busyWith;
+                await attached.session.interrupt();
+                await attached.session.settle(10_000, signal);
+                if (params.code.trim() === '') return text(was.length > 0 ? `interrupted ${was.join(', ')}` : 'nothing was running');
+            }
             const before = attached.session.mirror.version;
             const execution = await attached.session.execute(params.code, signal, (params.timeout ?? 600) * 1000);
             const parts: string[] = [];
@@ -524,7 +577,7 @@ export default function (pi: ExtensionAPI) {
     });
 
     const opSchema = Type.Object({
-        op: StringEnum(['create', 'edit', 'delete', 'move', 'run'] as const),
+        op: StringEnum(['create', 'edit', 'delete', 'move', 'run', 'install', 'uninstall'] as const),
         id: Type.Optional(Type.String({ description: 'cell id or name (edit, delete, move, run); or a ref given to an earlier create in this batch. for run: "stale" runs every stale or errored cell, "all" every cell.' })),
         code: Type.Optional(Type.String({ description: 'cell body (create, edit). the contents, not an @app.cell wrapper. for edit: the whole new body.' })),
         after: Type.Optional(Type.String({ description: 'place after this cell id (create, move). default for create: the end.' })),
@@ -533,6 +586,7 @@ export default function (pi: ExtensionAPI) {
         ref: Type.Optional(Type.String({ description: 'a label for a created cell, so later ops in the same batch can refer to it.' })),
         run: Type.Optional(Type.Boolean({ description: 'run the cell after create/edit. default true.' })),
         hide_code: Type.Optional(Type.Boolean({ description: 'collapse the code editor in the browser (create). default false.' })),
+        packages: Type.Optional(Type.Array(Type.String(), { description: 'package names (install, uninstall): installed into the kernel environment, and into the inline metadata of a sandboxed notebook, before the cell ops apply.' })),
     });
 
     pi.registerTool({
@@ -540,7 +594,7 @@ export default function (pi: ExtensionAPI) {
         label: 'marimo edit',
         prepareArguments: dropNulls,
         description:
-            "Change the open notebook's cells through the kernel, in one validated batch: create, edit (replace the whole body), delete, move, run. Cells created or edited run by default; their dependents rerun reactively. marimo rejects a batch that breaks its graph rules (a public name defined in two cells, a cycle, `import *`) and says why; nothing is applied then. Returns the touched cells with status, output and errors, plus any other cell now erroring. The kernel saves the file.",
+            "Change the open notebook's cells through the kernel, in one validated batch: create, edit (replace the whole body), delete, move, run, install/uninstall packages. Cells created or edited run by default; their dependents rerun reactively. marimo rejects a batch that breaks its graph rules (a public name defined in two cells, a cycle, `import *`) and says why; nothing is applied then. Returns the touched cells with status, output and errors, plus any other cell now erroring. The kernel saves the file.",
         promptSnippet: 'Create, edit, delete, move or run cells in the open marimo notebook',
         promptGuidelines: [
             'Each public name in a marimo notebook is defined by exactly one cell. To change a value, edit the owning cell (marimo_cells shows defs) or use a new name; names starting with _ are private to their cell.',
@@ -554,7 +608,9 @@ export default function (pi: ExtensionAPI) {
             if (params.ops.length === 0) fail('no ops given');
             for (const op of params.ops) {
                 if ((op.op === 'create' || op.op === 'edit') && (op.code === undefined || op.code.trim() === '')) fail(`${op.op} needs code`);
-                if (op.op !== 'create' && (op.id === undefined || op.id === '')) fail(`${op.op} needs an id`);
+                if (op.op === 'install' || op.op === 'uninstall') {
+                    if (op.packages === undefined || op.packages.length === 0) fail(`${op.op} needs packages`);
+                } else if (op.op !== 'create' && (op.id === undefined || op.id === '')) fail(`${op.op} needs an id`);
             }
             interface EditAnswer {
                 applied: boolean;
@@ -565,6 +621,7 @@ export default function (pi: ExtensionAPI) {
                 other_errors?: CellRecord[];
                 count?: number;
             }
+            const startedAt = Date.now();
             const answer = await ask<EditAnswer>(attached, 'colab_edit', { ops: params.ops, limit: config.colab.outputChars }, signal);
             const data = answer.data!;
             if (!data.applied) {
@@ -585,7 +642,8 @@ export default function (pi: ExtensionAPI) {
             const parts: string[] = [];
             const created = Object.entries(data.created ?? {});
             if (created.length > 0) parts.push(`created: ${created.map(([ref, id]) => (ref.startsWith('new') ? id : `${ref}=${id}`)).join(', ')}`);
-            parts.push(`${quantity(data.count ?? 0, 'cell')} in the notebook now`);
+            const took = Date.now() - startedAt;
+            parts.push(`${quantity(data.count ?? 0, 'cell')} in the notebook now${took >= 2000 ? ` (applied and ran in ${runLength(took)})` : ''}`);
             if (touched.length > 0) parts.push(touched.map(cellDetail).join('\n\n'));
             const others = data.other_errors ?? [];
             if (others.length > 0) parts.push(`other cells with errors:\n${cellTable({ count: 0, cells: others, errored: [] })}`);

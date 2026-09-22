@@ -22,6 +22,10 @@ export interface MirrorCell {
     /** whether the last op left a non-empty display output. */
     hasOutput: boolean;
     stale: boolean;
+    /** when the current run began, kernel clock in ms; null when idle. */
+    runningSince: number | null;
+    /** how long the last run took, from the cell-op timestamps. */
+    runMs: number | null;
 }
 
 export interface Variable {
@@ -43,6 +47,8 @@ interface CellOp {
     status?: CellStatus | null;
     output?: { mimetype?: string; data?: unknown; channel?: string } | null;
     stale_inputs?: boolean | null;
+    /** seconds, kernel clock */
+    timestamp?: number | null;
 }
 
 /** who changed the document: the browser, the kernel, an agent through cm, the file on disk. */
@@ -121,7 +127,7 @@ export class NotebookMirror {
             const code = ready.codes?.[index] ?? '';
             const name = ready.names?.[index] ?? '';
             if (known === undefined) {
-                this.cells.set(id, { id, code, name, status: 'idle', error: null, hasOutput: false, stale: false });
+                this.cells.set(id, { id, code, name, status: 'idle', error: null, hasOutput: false, stale: false, runningSince: null, runMs: null });
             } else {
                 known.code = code;
                 known.name = name;
@@ -136,7 +142,15 @@ export class NotebookMirror {
         // or a cell mid-creation; the transaction that follows will add it.
         const cell = this.cells.get(op.cell_id);
         if (cell === undefined) return;
-        if (op.status !== undefined && op.status !== null) cell.status = op.status;
+        if (op.status !== undefined && op.status !== null) {
+            const at = typeof op.timestamp === 'number' ? op.timestamp * 1000 : Date.now();
+            if (op.status === 'running' && cell.status !== 'running') cell.runningSince = at;
+            else if (op.status !== 'running' && op.status !== 'queued' && cell.runningSince !== null) {
+                cell.runMs = Math.max(0, at - cell.runningSince);
+                cell.runningSince = null;
+            }
+            cell.status = op.status;
+        }
         if (op.stale_inputs !== undefined && op.stale_inputs !== null) cell.stale = op.stale_inputs;
         if (op.output !== undefined && op.output !== null) {
             const error = errorText(op.output);
@@ -170,6 +184,8 @@ export class NotebookMirror {
                         error: null,
                         hasOutput: false,
                         stale: false,
+                        runningSince: null,
+                        runMs: null,
                     };
                     this.cells.set(cellId, cell);
                     this.place(cellId, change);

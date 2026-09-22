@@ -211,13 +211,27 @@ export async function execute(
     const started = performance.now();
     const timeout = AbortSignal.timeout(timeoutMs);
     const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
-    const response = await fetch(`${trimSlash(address.url)}/api/kernel/execute`, {
-        method: 'POST',
-        headers: headers(address, sessionId),
-        body: JSON.stringify({ code }),
-        signal: combined,
-    });
-    const text = await response.text();
+    let response: Response;
+    let text: string;
+    try {
+        response = await fetch(`${trimSlash(address.url)}/api/kernel/execute`, {
+            method: 'POST',
+            headers: headers(address, sessionId),
+            body: JSON.stringify({ code }),
+            signal: combined,
+        });
+        text = await response.text();
+    } catch (error) {
+        // dropping the request is how the kernel is told to stop: marimo
+        // interrupts on disconnect. say which of the two signals fired.
+        const ms = performance.now() - started;
+        const why = timeout.aborted
+            ? `interrupted after ${Math.round(ms / 1000)}s (the timeout); the kernel was told to stop`
+            : signal?.aborted === true
+              ? 'cancelled; the kernel was told to stop'
+              : `could not reach ${address.url}: ${(error as Error).message}`;
+        return { ok: false, stdout: '', stderr: why, result: '', ms };
+    }
     const parsed = parseExecuteStream(text);
     if (!response.ok && parsed.stderr === '') {
         return { ok: false, stdout: '', stderr: `execute answered ${response.status}: ${text.slice(0, 500)}`, result: '', ms: performance.now() - started };

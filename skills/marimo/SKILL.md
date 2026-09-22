@@ -77,15 +77,8 @@ plotly, seaborn, bokeh display the same way: last expression.
 
 ## packages
 
-inside `marimo_run`:
-
-```python
-import marimo._code_mode as cm
-async with cm.get_context() as ctx:
-    ctx.packages.add("polars")
-```
-
-installs into the kernel's environment (and into the inline metadata of a sandboxed notebook).
+`marimo_edit ops=[{op: "install", packages: ["polars"]}]` installs into the kernel's environment (and into the inline metadata of a sandboxed notebook), with the kernel's own package manager.
+combine it with the cell that needs the package in the same batch; packages go first.
 some libraries cache what they found at import time; if a fresh install is not seen, say so rather than looping.
 
 ## environments

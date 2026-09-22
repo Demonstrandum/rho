@@ -251,6 +251,14 @@ async def colab_edit(ops, limit=4000):
                         if op.get(key) is not None:
                             where[key] = created.get(op[key], op[key])
                     ctx.move_cell(created.get(op["id"], op["id"]), **where)
+                elif kind in ("install", "uninstall"):
+                    names = op.get("packages") or []
+                    if not names:
+                        raise ValueError(f"{kind} needs packages")
+                    if kind == "install":
+                        ctx.packages.add(*names)
+                    else:
+                        ctx.packages.remove(*names)
                 elif kind == "run":
                     target = created.get(op["id"], op["id"])
                     # `stale` and `all` name groups: what a person's "run all"

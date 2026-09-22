@@ -26,6 +26,7 @@ import { randomUUID } from 'node:crypto';
 import {
     execute,
     instantiate,
+    interrupt,
     kernelStatus,
     listSessions,
     serverToken,
@@ -36,6 +37,12 @@ import {
 import { NotebookMirror } from './mirror';
 
 const READY_TIMEOUT_MS = 30_000;
+/**
+ * how long an open waits for the first run before answering anyway. a
+ * notebook that trains a model on open is still a notebook to look at, and
+ * the table says which cells are running.
+ */
+export const OPEN_RUN_WAIT_MS = 45_000;
 const RUN_SETTLE_MS = 300;
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000];
 
@@ -133,7 +140,7 @@ export class NotebookSession {
         try {
             await instantiate(this.address, id, run);
             this.sessionId = id;
-            if (run) await this.settle(600_000);
+            if (run) await this.settle(OPEN_RUN_WAIT_MS);
         } finally {
             editor.close();
             // marimo marks the session orphaned when the socket goes; give it
@@ -203,10 +210,41 @@ export class NotebookSession {
         }
     }
 
-    /** run code in the scratchpad, with a fresh look at which session the file has. */
-    async execute(code: string, signal?: AbortSignal, timeoutMs?: number): Promise<Execution> {
+    /** what the kernel is running now, by cell id. */
+    get busyWith(): string[] {
+        return this.mirror.list().filter((c) => c.status === 'running' || c.status === 'queued').map((c) => c.id);
+    }
+
+    /** stop whatever the kernel is running. */
+    async interrupt(): Promise<void> {
+        const id = this.sessionId ?? (await this.lookup());
+        if (id !== null) await interrupt(this.address, id);
+    }
+
+    /**
+     * run code in the scratchpad, with a fresh look at which session the file has.
+     *
+     * the kernel is one thread: code sent while a cell runs waits for it, and
+     * a request dropped while waiting interrupts the kernel, cell and all. so
+     * a busy kernel is given `busyWaitMs` to finish and then declined, rather
+     * than joined and later cut short.
+     */
+    async execute(code: string, signal?: AbortSignal, timeoutMs?: number, busyWaitMs = 20_000): Promise<Execution> {
         let id = this.sessionId ?? (await this.lookup());
         if (id === null) throw new Error(`no session for ${this.path} on ${this.address.url}; open it again`);
+        if (this.busyWith.length > 0) {
+            await this.settle(busyWaitMs, signal);
+            const still = this.busyWith;
+            if (still.length > 0) {
+                return {
+                    ok: false,
+                    stdout: '',
+                    stderr: `the kernel is busy running ${still.join(', ')}; code waits behind a running cell. try again when it finishes, or interrupt it first.`,
+                    result: '',
+                    ms: busyWaitMs,
+                };
+            }
+        }
         let result = await execute(this.address, id, code, signal, timeoutMs);
         // a browser resumed the session under a new id between calls: the
         // old id gets a 4xx or an empty stream. look it up once and retry.

@@ -20,6 +20,17 @@ export interface CellRecord {
     readonly has_output?: boolean;
     readonly output?: OutputRecord | null;
     readonly console?: readonly { channel: string; text: string | null }[];
+    /** the last run's length, from the feed; absent when never seen running. */
+    readonly runMs?: number | null;
+}
+
+/** "1.2s", "340ms", "2m 05s": a run's length, at the grain that reads. */
+export function runLength(ms: number): string {
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+    const minutes = Math.floor(ms / 60_000);
+    const seconds = Math.round((ms % 60_000) / 1000);
+    return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
 
 export interface OutputRecord {
@@ -48,7 +59,9 @@ export function cellLine(cell: CellRecord): string {
     if (cell.defs.length > 0) names.push(`defs ${cell.defs.join(', ')}`);
     if (cell.refs.length > 0) names.push(`refs ${cell.refs.join(', ')}`);
     const tail = names.length > 0 ? `    ${names.join('; ')}` : '';
-    return `${pad(cell.id, 5)} ${pad(status, 8)} ${preview}${more}${name}${tail}`;
+    // a run over a second is worth a word: it is what makes a notebook slow
+    const took = cell.runMs !== undefined && cell.runMs !== null && cell.runMs >= 1000 ? `  (${runLength(cell.runMs)})` : '';
+    return `${pad(cell.id, 5)} ${pad(status, 8)} ${preview}${more}${name}${tail}${took}`;
 }
 
 export function errorLines(cell: CellRecord): string[] {

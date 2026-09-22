@@ -15,7 +15,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createServer } from 'node:net';
 import { healthy } from './client';
 import { run, type Runner } from './marimo-cli';
@@ -92,6 +92,16 @@ export async function discover(): Promise<RegisteredServer[]> {
     return found;
 }
 
+/** the uv executable on PATH, or null. */
+function whichUv(): string | null {
+    for (const dir of (process.env.PATH ?? '').split(':')) {
+        if (dir === '') continue;
+        const candidate = join(dir, 'uv');
+        if (existsSync(candidate)) return candidate;
+    }
+    return null;
+}
+
 export function freePort(from: number, tries = 50): Promise<number> {
     const attempt = (port: number, left: number): Promise<number> =>
         new Promise((resolve, reject) => {
@@ -146,9 +156,22 @@ export async function start(options: StartOptions): Promise<Started> {
     args.push(...(options.extraArgs ?? []));
     const [command, ...prefix] = options.runner.argv;
     const argv = [...prefix, ...args];
+    // marimo picks its package manager from the environment: `UV` set means
+    // uv, which is also what created a .venv that has no pip in it. a venv
+    // runner therefore names uv and its venv, so the kernel's installs land
+    // where its imports look.
+    const env: NodeJS.ProcessEnv = { ...process.env, MARIMO_SKIP_UPDATE_CHECK: '1' };
+    if (options.runner.kind === 'venv') {
+        const venv = dirname(dirname(command!));
+        const uv = whichUv();
+        if (uv !== null) {
+            env.UV = uv;
+            env.VIRTUAL_ENV = venv;
+        }
+    }
     const child = spawn(command!, argv, {
         cwd: options.cwd,
-        env: { ...process.env, MARIMO_SKIP_UPDATE_CHECK: '1' },
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: false,
     });

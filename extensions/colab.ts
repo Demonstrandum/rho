@@ -401,14 +401,15 @@ async function closeNotebook(path: string): Promise<string> {
 }
 
 /** run a helper function in the notebook and hand back its json. */
-async function ask<T>(attached: Attached, fn: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    const execution = await attached.session.execute(helperCall(fn, args), signal);
+async function ask<T>(attached: Attached, fn: string, args: Record<string, unknown>, signal?: AbortSignal, detachAfterMs: number | null = null) {
+    const execution = await attached.session.executeOrDetach(helperCall(fn, args), signal, undefined, 20_000, detachAfterMs);
+    if (execution.pending === true) return { data: null, stdout: '', stderr: '', ok: true, ms: execution.ms, pending: true as const };
     const answer = readAnswer<T>(execution);
     if (answer.data === null) {
         const why = [answer.stderr.trim(), answer.stdout.trim()].filter((s) => s !== '').join('\n');
         fail(`the notebook did not answer${why === '' ? '' : `:\n${clip(why, 3000)}`}`);
     }
-    return answer;
+    return { ...answer, pending: false as const };
 }
 
 const outputImages = (cells: readonly CellRecord[]): ToolText['content'] => {
@@ -782,7 +783,17 @@ export default function (pi: ExtensionAPI) {
                 fail(`not applied: ${ids.join(', ')} ${ids.length === 1 ? 'was' : 'were'} edited in the browser since you last looked. the code now:\n${now}\nresend the edit against this, keeping what the person changed.`);
             }
             const startedAt = Date.now();
-            const answer = await ask<EditAnswer>(attached, 'colab_edit', { ops: params.ops, limit: config.colab.outputChars }, signal);
+            const answer = await ask<EditAnswer>(attached, 'colab_edit', { ops: params.ops, limit: config.colab.outputChars }, signal, config.colab.waitSeconds * 1000);
+            if (answer.pending) {
+                // the batch is in the kernel and a cell is taking its time;
+                // the request stays open behind us so the cell is not cut
+                await new Promise((r) => setTimeout(r, 300));
+                const running = attached.session.busyWith.map((id) => {
+                    const c = attached.session.mirror.cell(id);
+                    return c?.runningSince !== null && c?.runningSince !== undefined ? `${id} (running for ${runLength(Date.now() - c.runningSince)})` : id;
+                });
+                return text(`the batch was applied and its cells are still running after ${config.colab.waitSeconds}s: ${running.length > 0 ? running.join(', ') : 'the kernel is busy'}. marimo_cells shows them when they finish; marimo_run with interrupt stops them.`, { touched: 0, errors: 0, pending: true });
+            }
             const data = answer.data!;
             if (!data.applied) {
                 fail(`nothing applied: ${data.error ?? 'unknown error'}${data.traceback !== undefined && !/Multiply|cycle|not allowed|Validation/i.test(data.error ?? '') ? `\n${clip(data.traceback, 2000)}` : ''}`);

@@ -230,6 +230,17 @@ export class NotebookSession {
      * than joined and later cut short.
      */
     async execute(code: string, signal?: AbortSignal, timeoutMs?: number, busyWaitMs = 20_000): Promise<Execution> {
+        return this.executeOrDetach(code, signal, timeoutMs, busyWaitMs, null);
+    }
+
+    /**
+     * the same, but answer after `detachAfterMs` when the kernel is still at
+     * it: the request stays open (closing it would interrupt the kernel), the
+     * cells keep running, and the answer says so instead of what they made.
+     * code-mode runs a batch's cells before its exit returns, so a slow cell
+     * holds the whole call, and the model should not be held with it.
+     */
+    async executeOrDetach(code: string, signal: AbortSignal | undefined, timeoutMs: number | undefined, busyWaitMs: number, detachAfterMs: number | null): Promise<Execution & { pending?: boolean }> {
         let id = this.sessionId ?? (await this.lookup());
         if (id === null) throw new Error(`no session for ${this.path} on ${this.address.url}; open it again`);
         if (this.busyWith.length > 0) {
@@ -245,7 +256,16 @@ export class NotebookSession {
                 };
             }
         }
-        let result = await execute(this.address, id, code, signal, timeoutMs);
+        const first = execute(this.address, id, code, signal, timeoutMs);
+        if (detachAfterMs !== null) {
+            const timer = new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), detachAfterMs));
+            const won = await Promise.race([first, timer]);
+            if (won === 'timeout') {
+                first.catch(() => undefined);
+                return { ok: true, stdout: '', stderr: '', result: '', ms: detachAfterMs, pending: true };
+            }
+        }
+        let result = await first;
         // a browser resumed the session under a new id between calls: the
         // old id gets a 4xx or an empty stream. look it up once and retry.
         if (!result.ok && result.stdout === '' && /answered 4\d\d|without a result|session/i.test(result.stderr)) {

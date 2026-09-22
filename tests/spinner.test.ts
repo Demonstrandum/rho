@@ -6,6 +6,7 @@ import type { Rgb } from '../extensions/lib/utils';
 import { toFrames, playFrames, parseVerb, formatVerb } from '../extensions/spinner';
 
 const show = (s: string) => s.replaceAll('\x1b', '\\e');
+const stripAnsi = (s: string) => s.replaceAll(/\x1b\[[0-9;]*m/g, '');
 
 function fakeTheme(roles: Record<string, Rgb>): Theme {
     return {
@@ -81,6 +82,33 @@ test('parseVerb pulls sigil, preposition and trail', () => {
     });
     // the earlier comma case: trail keeps leading punctuation.
     expect(parseVerb('xyz <in>, really I did').trail).toBe(', really I did');
+});
+
+test('formatVerb joins a punctuation trail to the duration with no space', () => {
+    const theme = fakeTheme({ dim: [100, 100, 100], text: [220, 220, 220] });
+    const line = (source: string) => stripAnsi(formatVerb(theme, parseVerb(source), 12000));
+
+    expect(line("Didn't cry <>, really I didn't")).toBe("完 Didn't cry for 12s, really I didn't");
+    expect(line('Waited <for> and then some')).toBe('完 Waited for 12s and then some');
+    expect(line('Toiled')).toBe('完 Toiled for 12s');
+});
+
+// every verb in the asset renders as a line, so a new one with a stray space
+// before its comma fails here rather than in a session.
+test('no verb in verbs.txt renders a space before its punctuation', () => {
+    const theme = fakeTheme({ dim: [100, 100, 100], text: [220, 220, 220] });
+    const path = join(import.meta.dir, '..', 'extensions', 'assets', 'verbs.txt');
+    const sources = readFileSync(path, 'utf8')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l !== '' && !l.startsWith(';'));
+
+    expect(sources.length).toBeGreaterThan(0);
+    const bad = sources
+        .map((source) => stripAnsi(formatVerb(theme, parseVerb(source), 12000)))
+        .filter((line) => /\s[,.;:!?%]/.test(line));
+    console.log(`verbs.txt: ${sources.length} lines, ${bad.length} with loose punctuation`);
+    expect(bad).toEqual([]);
 });
 
 test('formatVerb colours sigil brighter than the rest, plain in palette mode', () => {

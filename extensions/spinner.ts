@@ -45,6 +45,10 @@ const DOTS_MAX = 3;
 // token to swap it, e.g. "[₿] Mined Bitcoin" -> "₿ Mined Bitcoin for 12s", and
 // may end with a `<preposition>` token to swap the default 'for', e.g.
 // "Solved a Rubiks cube <in only>" -> "... in only 12s".
+// text after the `<...>` token trails the duration: "Didn't cry <>, really I
+// didn't" -> "... for 12s, really I didn't". a trail opening with closing
+// punctuation joins the duration with no space (o4.(ii)), since the comma
+// belongs to the word before it.
 
 
 // the completion line renders through pi's status color (`dim`), which is low
@@ -59,6 +63,8 @@ const SIGIL_INTENSITY = 0.9;
 // dark/light extreme, a touch heavier than the verb but not full black. with no
 // rgb at all the theme's own `dim`/`text` ansi escapes are used verbatim.
 const SIGIL_FALLBACK_DARKEN = 0.4;
+// a trail starting with one of these attaches to the duration without a space.
+const CLOSING_PUNCTUATION = /^[,.;:!?)\]}]/;
 const SHIMMER_BAND = 4;
 
 // how the frame list is played each loop. 'repeat' runs start -> end and jumps
@@ -159,9 +165,8 @@ export function parseVerb(line: string): Verb {
 // on the heavier `text` role, rather than collapsing to the plain terminal fg.
 export function formatVerb(theme: Theme, verb: Verb, duration: number | string): string {
     duration = typeof duration === 'number' ? formatDuration(duration) : duration;
-    const words = [verb.text, verb.preposition, duration];
-    if (verb.trail) words.push(verb.trail);
-    const rest = words.join(' ');
+    let rest = [verb.text, verb.preposition, duration].join(' ');
+    if (verb.trail) rest += (CLOSING_PUNCTUATION.test(verb.trail) ? '' : ' ') + verb.trail;
 
     const lum = (c: Rgb) => c[0] + c[1] + c[2];
     const dim = themeRgb(theme, 'dim');

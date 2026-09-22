@@ -20,6 +20,11 @@
 //   marimo_export    a notebook as html, markdown, ipynb or a flat script
 //   marimo_convert   an .ipynb or .md into a marimo notebook
 //
+// And for the person: /colab <notebook.py> opens it for both, in the browser
+// and for the tools; /colab status, /colab open, /colab app (the notebook as a
+// read-only app, through `marimo run`), /colab mcp (the endpoint other agents
+// can attach to), /colab stop.
+//
 // Why not the marimo-pair skill as it ships: it needs a browser tab open to
 // have a session to talk to, passes every question through a shell script and
 // jq, and leaves the model to learn the `cm` module from `help()`. Here the
@@ -361,7 +366,7 @@ function mirrorTable(attached: Attached): CellsAnswer {
         errors: c.error === null ? [] : [{ kind: 'runtime', msg: c.error }],
         preview: c.code.split('\n', 1)[0] ?? '',
         has_output: c.hasOutput,
-        runMs: c.runMs,
+        runMs: c.runningSince !== null ? Date.now() - c.runningSince : c.runMs,
     }));
     return { count: cells.length, cells, errored: cells.filter((c) => c.errors.length > 0).map((c) => c.id) };
 }
@@ -370,7 +375,10 @@ function mirrorTable(attached: Attached): CellsAnswer {
 function withTimings(attached: Attached, cells: readonly CellRecord[]): CellRecord[] {
     return cells.map((c) => {
         const seen = attached.session.mirror.cell(c.id);
-        return seen === undefined || seen.runMs === null ? c : { ...c, runMs: seen.runMs };
+        if (seen === undefined) return c;
+        // a cell still running is timed from when it began
+        if (seen.runningSince !== null) return { ...c, runMs: Date.now() - seen.runningSince };
+        return seen.runMs === null ? c : { ...c, runMs: seen.runMs };
     });
 }
 
@@ -487,11 +495,12 @@ export default function (pi: ExtensionAPI) {
         label: 'marimo cells',
         prepareArguments: dropNulls,
         description:
-            'The open notebook, cell by cell. Without ids: one line per cell, in notebook order (id, status, first line, +extra lines, names defined and referenced), errors under the cells that have them. With ids (cell ids or cell names): each cell in full, with its code, its output as text (images attached), console output and errors.',
+            'The open notebook, cell by cell. Without ids: one line per cell, in notebook order (id, status, first line, +extra lines, names defined and referenced, how long a slow cell ran), errors under the cells that have them. With ids (cell ids or cell names): each cell in full, with its code, its output as text (images attached), console output and errors. With screenshot: the named cells rendered as a person sees them, as PNGs, for outputs that have no text form (altair, plotly, tables, widgets); needs playwright and chromium in the kernel environment, and says so if they are missing.',
         promptSnippet: 'List the cells of the open marimo notebook, or read some in full',
         parameters: Type.Object({
             ids: Type.Optional(Type.Array(Type.String(), { description: 'cell ids or names to read in full. omit for the table.' })),
             notebook: Type.Optional(Type.String({ description: 'which open notebook, when more than one is. default: the current one.' })),
+            screenshot: Type.Optional(Type.Boolean({ description: 'with ids: also render each cell output through a headless browser and attach the PNGs.' })),
         }),
         async execute(_id, params, signal, _update, ctx) {
             const attached = attachedFor(params.notebook, ctx.cwd);
@@ -500,8 +509,21 @@ export default function (pi: ExtensionAPI) {
                 return text(body, { count: data.count, errored: data.errored.length });
             }
             const cells = await readCells(attached, params.ids, signal);
-            const body = `${cells.map(cellDetail).join('\n\n')}${meanwhile(attached)}`;
-            return { content: [{ type: 'text', text: body }, ...outputImages(cells)], details: { ids: params.ids } };
+            let body = cells.map(cellDetail).join('\n\n');
+            const images = outputImages(cells);
+            if (params.screenshot === true) {
+                interface Shots {
+                    shots: { id: string; image: string }[];
+                    errors: { id: string; error: string }[];
+                }
+                const answer = await ask<Shots>(attached, 'colab_screenshot', { targets: params.ids, file: attached.session.path }, signal);
+                const data = answer.data!;
+                for (const shot of data.shots) images.push({ type: 'image', data: shot.image, mimeType: 'image/png' });
+                if (data.shots.length > 0) body += `\n\n${quantity(data.shots.length, 'screenshot')} attached: ${data.shots.map((s) => s.id).join(', ')}`;
+                if (data.errors.length > 0) body += `\n\nscreenshots failed:\n${data.errors.map((e) => `  ${e.id}: ${e.error}`).join('\n')}`;
+            }
+            body += meanwhile(attached);
+            return { content: [{ type: 'text', text: body }, ...images], details: { ids: params.ids } };
         },
         renderCall(args, theme) {
             const a = args as { ids?: string[] };
@@ -861,7 +883,9 @@ export default function (pi: ExtensionAPI) {
 
     // ---------------------------------------------------------- command --
 
-    const VERBS = ['stop', 'status', 'open', 'mcp', 'list', 'close'] as const;
+    const VERBS = ['stop', 'status', 'open', 'mcp', 'list', 'close', 'app'] as const;
+    /** `marimo run` children, by notebook path: the app view of a notebook. */
+    const apps = new Map<string, Started>();
 
     pi.registerCommand('colab', {
         description: 'pair with the agent on a marimo notebook: /colab <notebook.py> opens it in a shared kernel and in the browser',
@@ -897,6 +921,24 @@ export default function (pi: ExtensionAPI) {
                     const a = attachedFor(rest[0], cwd);
                     openBrowser(a.session.browserUrl);
                     say(`opened ${a.session.browserUrl}`);
+                    return;
+                }
+                if (verb === 'app') {
+                    // the notebook as its readers see it: code hidden, outputs
+                    // live, on its own server since `marimo run` is a mode
+                    const path = rest[0] !== undefined ? expand(rest[0], cwd) : current;
+                    if (path === null) return say('which notebook? /colab app <notebook.py>', 'warning');
+                    const running = apps.get(path);
+                    if (running !== undefined) {
+                        openBrowser(running.url);
+                        return say(`app already running at ${running.url}`);
+                    }
+                    const runner = notebooks.get(path)?.runner ?? chooseRunner(cwd, config.colab.runner);
+                    const child = await start({ runner, cwd, target: path, port: config.colab.port + 100, sandbox: wantsSandbox(path, config.colab.sandbox), mcp: false, mode: 'run' });
+                    apps.set(path, child);
+                    started.set(child.url, child);
+                    openBrowser(child.url);
+                    say(`app at ${child.url} (${child.command})`);
                     return;
                 }
                 if (verb === 'mcp') {

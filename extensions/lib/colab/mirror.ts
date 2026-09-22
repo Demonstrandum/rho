@@ -71,9 +71,15 @@ const errorText = (output: CellOp['output']): string | null => {
         return data
             .map((entry) => {
                 const e = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
+                if (e.type === 'interruption') return 'interrupted';
                 const type = typeof e.exception_type === 'string' ? e.exception_type : typeof e.type === 'string' ? e.type : 'error';
-                const msg = typeof e.msg === 'string' ? e.msg : JSON.stringify(entry);
-                return `${type}: ${msg}`;
+                if (typeof e.msg === 'string') return `${type}: ${e.msg}`;
+                // marimo's structured errors: what they carry beside the type
+                const rest = Object.entries(e)
+                    .filter(([k]) => k !== 'type')
+                    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+                    .join(', ');
+                return rest === '' ? type : `${type}: ${rest}`;
             })
             .join('\n');
     }

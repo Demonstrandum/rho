@@ -75,6 +75,12 @@ def _output_json(out, limit):
             return entry
         entry["text"] = _clip(_strip_html(text), limit)
         return entry
+    if "vega" in mimetype or "plotly" in mimetype or "bokeh" in mimetype:
+        # a chart spec is data and drawing instructions, of no use as text;
+        # say what it is and how to look at it
+        size = len(data) if isinstance(data, str) else len(_json.dumps(data, default=str))
+        entry["text"] = f"a chart ({mimetype}, {size} chars of spec); see it with screenshot=true"
+        return entry
     if mimetype in ("application/json", "application/vnd.marimo+error"):
         try:
             parsed = data if not isinstance(data, str) else _json.loads(data)
@@ -406,3 +412,70 @@ def colab_graph(cell_id=None):
             "descendants": sorted(graph.descendants(cid)),
         }
     _emit(payload)
+
+
+async def colab_screenshot(targets, file=None, timeout_ms=30000):
+    """Render cells' outputs as PNGs through marimo's headless browser.
+    Needs playwright and its chromium in the kernel's environment.
+
+    marimo's own screenshot session opens the server root in kiosk mode,
+    which names no file, so it finds no cells on a server that serves a
+    directory. The session used here adds the notebook's file key."""
+    from urllib.parse import quote
+    from marimo._code_mode import screenshot as _shot
+    from marimo._messaging.context import HTTP_REQUEST_CTX
+    from marimo._code_mode.screenshot_meta import SCREENSHOT_SERVER_URL_KEY, SCREENSHOT_AUTH_TOKEN_KEY
+
+    class _FiledSession(_shot._ScreenshotSession):
+        def __init__(self, url, token, file_key):
+            super().__init__(url, token)
+            self._file_key = file_key
+
+        async def _navigate(self, *, initial):
+            params = "kiosk=true"
+            if self._file_key:
+                params += "&file=" + quote(self._file_key, safe="")
+            if self._screenshot_auth_token:
+                params += f"&access_token={self._screenshot_auth_token}"
+            page_url = f"{self._server_url}?{params}"
+            if initial:
+                await self._page.goto(page_url, wait_until="domcontentloaded")
+            else:
+                await self._page.reload(wait_until="domcontentloaded")
+            try:
+                await self._page.wait_for_function(
+                    getattr(_shot, "WAIT_FOR_PAGE_READY", "() => true"),
+                    timeout=getattr(_shot, "_READINESS_TIMEOUT_MS", 15000),
+                )
+            except Exception:
+                pass
+            try:
+                await self._page.wait_for_load_state(
+                    "networkidle", timeout=getattr(_shot, "_NETWORK_IDLE_TIMEOUT_MS", 5000)
+                )
+            except Exception:
+                pass
+
+    ctx = _cm.get_context()
+    shots = []
+    errors = []
+    request = HTTP_REQUEST_CTX.get(None)
+    server_url = request.meta.get(SCREENSHOT_SERVER_URL_KEY) if request is not None else None
+    if server_url is None:
+        _emit({"shots": [], "errors": [{"id": "*", "error": "no server url in the request context; screenshots need the execute endpoint"}]})
+        return
+    session = _FiledSession(server_url, request.meta.get(SCREENSHOT_AUTH_TOKEN_KEY), file)
+    try:
+        for target in targets:
+            try:
+                cid = ctx.cells[target].id
+                png = await session.capture(cid, timeout_ms=timeout_ms)
+                shots.append({"id": cid, "image": _shot._to_data_url(png).split(",", 1)[1]})
+            except Exception as exc:
+                errors.append({"id": target, "error": f"{type(exc).__name__}: {exc}"})
+    finally:
+        try:
+            await session.close()
+        except Exception:
+            pass
+    _emit({"shots": shots, "errors": errors})

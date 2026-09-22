@@ -60,7 +60,8 @@ export function cellLine(cell: CellRecord): string {
     if (cell.refs.length > 0) names.push(`refs ${cell.refs.join(', ')}`);
     const tail = names.length > 0 ? `    ${names.join('; ')}` : '';
     // a run over a second is worth a word: it is what makes a notebook slow
-    const took = cell.runMs !== undefined && cell.runMs !== null && cell.runMs >= 1000 ? `  (${runLength(cell.runMs)})` : '';
+    const live = cell.status === 'running' || cell.status === 'queued';
+    const took = cell.runMs !== undefined && cell.runMs !== null && (live || cell.runMs >= 1000) ? `  (${live ? 'running for ' : ''}${runLength(cell.runMs)})` : '';
     return `${pad(cell.id, 5)} ${pad(status, 8)} ${preview}${more}${name}${tail}${took}`;
 }
 

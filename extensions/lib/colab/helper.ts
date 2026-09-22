@@ -29,7 +29,8 @@ export function helperCall(fn: string, args: Record<string, unknown>): string {
     // json.loads keeps the argument round-trip exact: no repr of a js object,
     // no true/True mismatch.
     const call = `_args = _json.loads(${JSON.stringify(literal)})\n`;
-    const invoke = fn.startsWith('colab_edit') || fn.startsWith('colab_set_ui') || fn.startsWith('colab_packages') ? `await ${fn}(**_args)` : `${fn}(**_args)`;
+    const ASYNC = new Set(['colab_edit', 'colab_set_ui', 'colab_packages', 'colab_screenshot']);
+    const invoke = ASYNC.has(fn) ? `await ${fn}(**_args)` : `${fn}(**_args)`;
     return `${helperSource()}\n${call}${invoke}\n`;
 }
 

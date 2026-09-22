@@ -128,6 +128,8 @@ export interface StartOptions {
     readonly port: number;
     readonly sandbox: boolean;
     readonly mcp: boolean;
+    /** `edit` (the default) or `run`, which serves the notebook as a read-only app. */
+    readonly mode?: 'edit' | 'run';
     readonly extraArgs?: readonly string[];
 }
 
@@ -150,9 +152,9 @@ const START_TIMEOUT_MS = 90_000;
 /** start `marimo edit` headless and wait until it answers. */
 export async function start(options: StartOptions): Promise<Started> {
     const port = await freePort(options.port);
-    const args = ['edit', options.target, '--headless', '--no-token', '--port', String(port), '--skip-update-check'];
+    const args = [options.mode ?? 'edit', options.target, '--headless', '--no-token', '--port', String(port), '--skip-update-check'];
     if (options.sandbox) args.push('--sandbox');
-    if (options.mcp) args.push('--mcp');
+    if (options.mcp && (options.mode ?? 'edit') === 'edit') args.push('--mcp');
     args.push(...(options.extraArgs ?? []));
     const [command, ...prefix] = options.runner.argv;
     const argv = [...prefix, ...args];

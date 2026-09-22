@@ -74,6 +74,8 @@ the f-string is how marimo recognises the cell as SQL in the browser.
 matplotlib: end the cell with the axes or figure (`ax`, or `plt.gca()`); the output arrives as an image and `marimo_cells` attaches it, so you can see what the person sees.
 altair: `mo.ui.altair_chart(chart)` makes it selectable; a bare `chart` displays too.
 plotly, seaborn, bokeh display the same way: last expression.
+a chart with no image form (altair, plotly, a table, a widget) is seen with `marimo_cells ids=[...] screenshot=true`, which renders it in a headless browser; it needs `playwright` and its chromium in the kernel environment (`marimo_edit` install op, then `python -m playwright install chromium` once), and says so when they are missing.
+when asked what a chart looks like, look: do not describe it from the code.
 
 ## packages
 

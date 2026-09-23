@@ -18,6 +18,20 @@ the tools act on a live kernel, not on the file.
 editing the .py with `edit` or `write` while it is open is lost when the kernel saves, so do not.
 when no kernel is wanted (a quick lint, a conversion), `marimo_check` and `marimo_convert` work on files.
 
+## the project's own layer comes first
+
+a project that has lived with marimo has a layer of its own: a module the agent acts through (it imports `marimo._code_mode` and wraps it in named calls), a skill stating the conventions, a launch script, custom widgets, a notebooks directory per person.
+`marimo_open` reports that layer when it finds one, and prints the module's `state()` when it has one.
+when it does:
+
+- read the project's skill and the agent module before the first edit, and follow them over this file where they differ.
+- act through the module's calls (its knobs, pickers, `add_cell`, `undo`), not through raw `cm` and not through `marimo_edit` on cells the module owns.
+- a view that exists is extended, not rebuilt: a dashboard that highlights what a clicked cell depends on is a widget with a data model; a plotly figure drawn beside it is a worse copy that the person then has two of.
+  find the widget, read its model, add the field or the mode there.
+- put new notebooks where the project keeps them (`notebooks/<person>/`, copied from the reference the readme names), not in a fresh directory.
+- a figure asked for once is a canvas cell; asked for again, it goes into the project's `ui` or library with a test and a commit.
+- the project's own screenshot script, if it has one, knows its selectors; prefer it to `screenshot=true`.
+
 ## the order of work
 
 1. `marimo_open path.py`, the cell table comes back: id, status, first line, defs and refs, errors under the cells that have them.

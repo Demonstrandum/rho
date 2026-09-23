@@ -222,3 +222,27 @@ test('a slow cell shows its run length in the table, a running one how long so f
     expect(cellLine({ ...base, runMs: 300 })).not.toContain('ms');
     expect(cellLine({ ...base, status: 'running', runMs: 4200 })).toContain('(running for 4.2s)');
 });
+
+test('a project layer is found by content: an agent module, a skill, widgets, notebooks', async () => {
+    const { inspectProject, labNote, hasLab } = await import('../extensions/lib/colab/project');
+    const { mkdirSync } = await import('node:fs');
+    const dir = mkdtempSync(join(tmpdir(), 'lab-'));
+    mkdirSync(join(dir, 'lab', 'widgets'), { recursive: true });
+    mkdirSync(join(dir, '.claude', 'skills', 'lab-pair'), { recursive: true });
+    mkdirSync(join(dir, 'lab', 'notebooks', 'me'), { recursive: true });
+    writeFileSync(join(dir, 'lab', '__init__.py'), '');
+    writeFileSync(join(dir, 'lab', 'agent.py'), 'import marimo._code_mode as cm\n\ndef state():\n    return "ok"\n\nasync def knob(k, v):\n    pass\n\ndef _private():\n    pass\n');
+    writeFileSync(join(dir, 'lab', 'widgets', 'dash.py'), 'import anywidget\n');
+    writeFileSync(join(dir, '.claude', 'skills', 'lab-pair', 'SKILL.md'), '---\nname: lab-pair\n---\npair on the marimo notebook\n');
+    writeFileSync(join(dir, 'lab', 'notebooks', 'me', 'nb.py'), 'import marimo\napp = marimo.App()\n');
+    writeFileSync(join(dir, 'lab', 'launch.sh'), '#!/bin/sh\nuv run marimo edit "$1" --no-token\n');
+    const lab = inspectProject(dir);
+    expect(hasLab(lab)).toBe(true);
+    expect(lab.agentModules[0]).toMatchObject({ path: 'lab/agent.py', importPath: 'lab.agent', functions: ['state', 'knob'] });
+    expect(lab.skills).toEqual(['.claude/skills/lab-pair/SKILL.md']);
+    expect(lab.widgetDirs).toEqual(['lab/widgets']);
+    expect(lab.launchers).toEqual(['lab/launch.sh']);
+    expect(lab.notebookDirs).toEqual([{ path: 'lab/notebooks/me', count: 1 }]);
+    expect(labNote(lab)).toContain('import lab.agent (state, knob)');
+    expect(hasLab(inspectProject(mkdtempSync(join(tmpdir(), 'empty-'))))).toBe(false);
+});

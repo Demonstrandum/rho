@@ -54,9 +54,12 @@ import { collapseHome, quantity, truncate } from './lib/text';
 import { currentEnvironment } from './environment';
 import { listSessions } from './lib/colab/client';
 import { PersistedState } from './lib/state-store';
+import { inspectProject, labNote, hasLab, type ProjectLab } from './lib/colab/project';
 
 interface Attached {
     readonly session: NotebookSession;
+    /** the project's own layer over marimo, when it has one. */
+    readonly lab: ProjectLab | null;
     readonly address: ServerAddress;
     /** the child, when this session started the server. */
     readonly started: Started | null;
@@ -239,7 +242,10 @@ async function open(pathInput: string, cwd: string, options: { run?: boolean; sa
     if (remote !== undefined && remote.alive) {
         fail(`an environment is attached (${remote.host}); the marimo tools act on this machine only. detach it, or give a url to a marimo server reachable from here (ssh -L forwards one).`);
     }
-    if (/^https?:\/\//.test(pathInput.trim())) return openUrl(pathInput.trim(), options);
+    // `/colab 2719`: a port names the server on this machine, the way a
+    // project's own launch script prints it
+    if (/^\d{2,5}$/.test(pathInput.trim())) return openUrl(`http://127.0.0.1:${pathInput.trim()}`, { ...options, cwd });
+    if (/^https?:\/\//.test(pathInput.trim())) return openUrl(pathInput.trim(), { ...options, cwd });
     const path = expand(pathInput, cwd);
     const known = notebooks.get(path);
     if (known !== undefined) {
@@ -329,7 +335,7 @@ async function open(pathInput: string, cwd: string, options: { run?: boolean; sa
         throw new Error(`could not open a session for ${collapseHome(path)} on ${address.url}: ${(error as Error).message}`);
     }
     if (shared) child = [...started.values()].find((s) => s.url === address!.url) ?? null;
-    const attached: Attached = { session, address, started: child, runner, seenAt: Date.now() };
+    const attached: Attached = { session, address, started: child, runner, seenAt: Date.now(), lab: labFor(cwd, path) };
     notebooks.set(path, attached);
     current = path;
     session.onChange(refreshStatus);
@@ -344,20 +350,27 @@ async function open(pathInput: string, cwd: string, options: { run?: boolean; sa
  * (`http://host:port/?access_token=...&file=...`). the session it holds is
  * the notebook; with several, `file` picks.
  */
-async function openUrl(raw: string, options: { run?: boolean }): Promise<{ attached: Attached; note: string }> {
+async function openUrl(raw: string, options: { run?: boolean; cwd: string }): Promise<{ attached: Attached; note: string }> {
     const url = new URL(raw);
     const token = url.searchParams.get('access_token') ?? undefined;
     const file = url.searchParams.get('file');
     const address: ServerAddress = { url: `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}`, token };
     if (!(await healthy(address.url))) fail(`nothing marimo answers at ${address.url}`);
-    const sessions = await listSessions(address);
+    let sessions = await listSessions(address);
+    if (sessions.length === 0 && file === null) {
+        // a server started on one file (`marimo edit nb.py`) knows it and needs
+        // no browser to name it: an editor socket with no file creates the
+        // session on that file, and the session list then says which
+        const created = await NotebookSession.createUnnamed(address, options.run ?? config.colab.runOnOpen, config.colab.waitSeconds * 1000);
+        if (created) sessions = await listSessions(address);
+    }
     let path: string | null = null;
     if (file !== null) {
         path = sessions.find((s) => s.path === file || s.filename === file || basename(s.path ?? '') === file)?.path ?? file;
     } else if (sessions.length === 1) {
         path = sessions[0]!.path;
     } else if (sessions.length === 0) {
-        fail(`${address.url} has no notebook open; open one in the browser there, or give ?file=<path>`);
+        fail(`${address.url} has no notebook open and serves a directory; open one in the browser there, or give ?file=<path>`);
     } else {
         fail(`${address.url} has several notebooks open; add ?file= one of:\n${sessions.map((s) => `  ${s.path ?? s.filename ?? s.id}`).join('\n')}`);
     }
@@ -370,7 +383,7 @@ async function openUrl(raw: string, options: { run?: boolean }): Promise<{ attac
         return { attached: known, note: 'already open' };
     }
     const session = await NotebookSession.attach(address, found, options.run ?? false);
-    const attached: Attached = { session, address, started: null, runner: null, seenAt: Date.now() };
+    const attached: Attached = { session, address, started: null, runner: null, seenAt: Date.now(), lab: labFor(options.cwd, found) };
     notebooks.set(found, attached);
     current = found;
     session.onChange(refreshStatus);
@@ -520,6 +533,35 @@ async function installPlaywright(attached: Attached, signal?: AbortSignal): Prom
     return `installed playwright and chromium into ${python} (with uv pip, so the project manifest is untouched)`;
 }
 
+const labs = new Map<string, ProjectLab>();
+
+/** the project's layer, looked up once per root: the working directory, or the notebook's when it lies outside. */
+function labFor(cwd: string, notebook: string): ProjectLab | null {
+    const root = notebook.startsWith(`${cwd}/`) ? cwd : dirname(notebook);
+    let lab = labs.get(root);
+    if (lab === undefined) {
+        lab = inspectProject(root);
+        labs.set(root, lab);
+    }
+    return hasLab(lab) ? lab : null;
+}
+
+/**
+ * what the project's agent module says about itself, when it has a `state`
+ * to ask. a project that wrote such a call meant it to be the first thing
+ * read; two thousand characters is the cap the one seen so far imposes on
+ * itself, and is imposed here on any other.
+ */
+async function labState(attached: Attached, signal?: AbortSignal): Promise<string> {
+    const module = attached.lab?.agentModules.find((m) => m.importPath !== null && m.functions.includes('state'));
+    if (module === undefined) return '';
+    const code = `import importlib as _il\n_m = _il.import_module(${JSON.stringify(module.importPath)})\n_r = _m.state()\nprint(_r if isinstance(_r, str) else repr(_r))`;
+    const run = await attached.session.execute(code, signal, 60_000);
+    if (!run.ok) return `\n${module.importPath}.state() failed: ${clip(run.stderr.trim(), 600)}`;
+    const out = run.stdout.trim();
+    return out === '' ? '' : `\n${module.importPath}.state():\n${clip(out, 2000)}`;
+}
+
 /** the cell table, as `marimo_open` and `marimo_cells` both show it. */
 async function overview(attached: Attached, signal?: AbortSignal): Promise<{ body: string; data: CellsAnswer }> {
     let data: CellsAnswer;
@@ -574,7 +616,7 @@ export default function (pi: ExtensionAPI) {
     };
 
     pi.on('input', async (event) => {
-        if (/\bmarimo\b|\bnotebook\b|\bcolab\b|\.ipynb\b|skill:marimo/i.test(event.text)) load();
+        if (/marimo|\bnotebooks?\b|\bcolab\b|\.ipynb\b/i.test(event.text)) load();
         return { action: 'continue' as const };
     });
 
@@ -615,7 +657,7 @@ export default function (pi: ExtensionAPI) {
                     const sessions = await listSessions({ url: server.url! });
                     if (!sessions.some((s) => s.path === path)) continue;
                     const session = await NotebookSession.attach({ url: server.url! }, path, false);
-                    notebooks.set(path, { session, address: { url: server.url! }, started: null, runner: null, seenAt: Date.now() });
+                    notebooks.set(path, { session, address: { url: server.url! }, started: null, runner: null, seenAt: Date.now(), lab: labFor(ctx.cwd, path) });
                     session.onChange(refreshStatus);
                     break;
                 } catch {
@@ -650,7 +692,9 @@ export default function (pi: ExtensionAPI) {
         const options = event.systemPromptOptions;
         if (options === undefined) return;
         options.sections ??= {};
-        options.sections.marimo = `Notebooks open in a live marimo kernel (use the marimo_* tools on them, not file edits; the kernel writes the file):\n${lines.join('\n')}`;
+        const labs = [...notebooks.values()].map((a) => a.lab).filter((l): l is ProjectLab => l !== null);
+        const layer = labs.length > 0 ? `\n${labNote(labs[0]!)}` : '';
+        options.sections.marimo = `Notebooks open in a live marimo kernel (use the marimo_* tools on them, not file edits; the kernel writes the file):\n${lines.join('\n')}${layer}`;
     });
 
     // ------------------------------------------------------------ tools --
@@ -666,7 +710,7 @@ export default function (pi: ExtensionAPI) {
             'A file that imports marimo and builds marimo.App is a marimo notebook: work on it through marimo_open and the other marimo_* tools, whose edits go through the running kernel and are written to the file by marimo. Editing the .py directly while it is open is lost or overwritten.',
         ],
         parameters: Type.Object({
-            path: Type.Optional(Type.String({ description: 'notebook file, relative to the working directory; or the url of a running marimo server (with ?access_token= when it has one, and ?file= when it has several notebooks open). omit to list.' })),
+            path: Type.Optional(Type.String({ description: 'notebook file, relative to the working directory; or a port (2719) or url of a running marimo server (with ?access_token= when it has one, and ?file= when it has several notebooks open). omit to list.' })),
             run: Type.Optional(Type.Boolean({ description: 'run every cell when the session is created (default from [colab] run-on-open). a found session is left as is.' })),
             sandbox: Type.Optional(Type.Boolean({ description: 'force --sandbox on or off for a server this starts; default reads the file for PEP 723 metadata.' })),
             close: Type.Optional(Type.Boolean({ description: 'detach from the notebook instead, stopping the server if this session started it and nothing else uses it.' })),
@@ -680,6 +724,8 @@ export default function (pi: ExtensionAPI) {
             }
             if (params.path === undefined || params.path.trim() === '') {
                 const lines: string[] = [];
+                const lab = labFor(cwd, join(cwd, 'x.py'));
+                if (lab !== null) lines.push(labNote(lab));
                 const here = notebooksIn(cwd);
                 lines.push(here.length === 0 ? `no marimo notebooks at the top level of ${collapseHome(cwd)}` : `notebooks in ${collapseHome(cwd)}:\n${here.map((p) => `  ${basename(p)}`).join('\n')}`);
                 const servers = await discover();
@@ -705,7 +751,8 @@ export default function (pi: ExtensionAPI) {
             const { attached, note } = await open(params.path, cwd, { run: params.run, sandbox: params.sandbox });
             const { body, data } = await overview(attached, signal);
             const browser = `a person can join at ${attached.session.browserUrl}`;
-            return text(`${note}\n${browser}\n\n${body}`, { count: data.count, errored: data.errored.length, url: attached.address.url });
+            const lab = attached.lab === null ? '' : `\n\n${labNote(attached.lab)}${await labState(attached, signal)}`;
+            return text(`${note}\n${browser}\n\n${body}${lab}`, { count: data.count, errored: data.errored.length, url: attached.address.url });
         },
         renderCall(args, theme) {
             const a = args as { path?: string; close?: boolean };
@@ -1231,7 +1278,7 @@ export default function (pi: ExtensionAPI) {
                 pi.sendMessage(
                     {
                         customType: 'colab',
-                        content: `The person opened a marimo notebook with /colab; it is now the current notebook for the marimo_* tools, and they are looking at it in the browser on the same kernel.\n${note}\n\n${body}`,
+                        content: `The person opened a marimo notebook with /colab; it is now the current notebook for the marimo_* tools, and they are looking at it in the browser on the same kernel.\n${note}\n\n${body}${attached.lab === null ? '' : `\n\n${labNote(attached.lab)}${await labState(attached)}`}`,
                         display: true,
                         details: { path: attached.session.path, url: attached.address.url },
                     },

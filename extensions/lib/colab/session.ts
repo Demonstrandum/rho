@@ -126,6 +126,35 @@ export class NotebookSession {
         return session;
     }
 
+    /**
+     * create the session for whatever file the server was started on, when
+     * it was started on one. false when the server serves a directory, which
+     * has no unique file for a socket without `file` to land on.
+     */
+    static async createUnnamed(address: ServerAddress, run: boolean, waitMs: number): Promise<boolean> {
+        if (address.serverToken === undefined) await serverToken(address);
+        const id = `rho-${randomUUID().slice(0, 8)}`;
+        const mirror = new NotebookMirror();
+        let editor: WebSocket;
+        try {
+            editor = await connect(wsUrl(address, { session_id: id }), mirror, () => undefined);
+        } catch {
+            return false;
+        }
+        try {
+            await instantiate(address, id, run);
+            if (run) {
+                const probe = new NotebookSession(address, '');
+                probe.sessionId = id;
+                await probe.settle(waitMs);
+            }
+        } finally {
+            editor.close();
+            await sleep(150);
+        }
+        return true;
+    }
+
     /** the current session id for this file on the server, or null. */
     private async lookup(): Promise<string | null> {
         const sessions = await listSessions(this.address);

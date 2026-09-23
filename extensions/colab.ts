@@ -36,7 +36,7 @@
 // Servers found running (any `marimo edit --no-token`, from the registry) are
 // used and left alone.
 
-import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
@@ -406,17 +406,39 @@ async function ask<T>(attached: Attached, fn: string, args: Record<string, unkno
     if (execution.pending === true) return { data: null, stdout: '', stderr: '', ok: true, ms: execution.ms, pending: true as const };
     const answer = readAnswer<T>(execution);
     if (answer.data === null) {
-        const why = [answer.stderr.trim(), answer.stdout.trim()].filter((s) => s !== '').join('\n');
-        fail(`the notebook did not answer${why === '' ? '' : `:\n${clip(why, 3000)}`}`);
+        if (/truncated a very large console output/.test(answer.stdout)) {
+            fail('the notebook printed more than marimo passes on, and the answer was cut with it. run the code with less output (print a summary, not the data).');
+        }
+        // never the raw stdout at length: it may be anything the notebook printed
+        const why = [answer.stderr.trim(), answer.stdout.trim()].filter((s) => s !== '').join('\n').replace(/[A-Za-z0-9+/=]{200,}/g, '[…binary…]');
+        fail(`the notebook did not answer${why === '' ? '' : `:\n${clip(why, 1200)}`}`);
     }
     return { ...answer, pending: false as const };
+}
+
+/**
+ * an image the kernel wrote to a file, read and removed. the file, not
+ * stdout, because a PNG in base64 is a megabyte marimo truncates and the
+ * model would otherwise be shown.
+ */
+function takeImage(file: string, mimeType: string): ToolText['content'][number] | null {
+    try {
+        const data = readFileSync(file).toString('base64');
+        rmSync(file, { force: true });
+        return { type: 'image', data, mimeType: mimeType.startsWith('image/') ? mimeType : 'image/png' };
+    } catch {
+        return null;
+    }
 }
 
 const outputImages = (cells: readonly CellRecord[]): ToolText['content'] => {
     const images: ToolText['content'] = [];
     for (const cell of cells) {
         const out = cell.output;
-        if (out?.image !== undefined) images.push({ type: 'image', data: out.image, mimeType: out.mimetype.startsWith('image/') ? out.mimetype : 'image/png' });
+        if (out?.image_file !== undefined) {
+            const image = takeImage(out.image_file, out.mimetype);
+            if (image !== null) images.push(image);
+        }
     }
     return images;
 };
@@ -466,6 +488,36 @@ function withTimings(attached: Attached, cells: readonly CellRecord[]): CellReco
         if (seen.runningSince !== null) return { ...c, runMs: Date.now() - seen.runningSince };
         return seen.runMs === null ? c : { ...c, runMs: seen.runMs };
     });
+}
+
+/**
+ * playwright and its chromium, into the kernel's interpreter with `uv pip`,
+ * which leaves the project's manifest alone. says what it did, or what to run.
+ */
+async function installPlaywright(attached: Attached, signal?: AbortSignal): Promise<string> {
+    const python = (await ask<{ python: string }>(attached, 'colab_python', {}, signal)).data?.python;
+    if (python === undefined) return 'screenshots need playwright; the kernel did not say which python it runs';
+    const uv = ['/opt/homebrew/bin/uv', '/usr/local/bin/uv', join(process.env.HOME ?? '', '.local', 'bin', 'uv'), ...(process.env.PATH ?? '').split(':').map((d) => join(d, 'uv'))].find((p) => existsSync(p));
+    const manual = `to enable screenshots, run: ${uv ?? 'uv'} pip install --python ${python} playwright && ${python} -m playwright install chromium`;
+    if (uv === undefined) return `screenshots need playwright in the kernel environment. ${manual}`;
+    const sh = (cmd: string, args: string[]) =>
+        new Promise<{ code: number | null; out: string }>((done) => {
+            const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+            let out = '';
+            child.stdout.on('data', (c: Buffer) => (out += c.toString()));
+            child.stderr.on('data', (c: Buffer) => (out += c.toString()));
+            const timer = setTimeout(() => child.kill('SIGKILL'), 600_000);
+            signal?.addEventListener('abort', () => child.kill('SIGTERM'), { once: true });
+            child.on('close', (code) => {
+                clearTimeout(timer);
+                done({ code, out });
+            });
+        });
+    const pip = await sh(uv, ['pip', 'install', '--python', python, 'playwright']);
+    if (pip.code !== 0) return `screenshots need playwright; installing it failed:\n${clip(pip.out.trim(), 800)}\n${manual}`;
+    const browser = await sh(python, ['-m', 'playwright', 'install', 'chromium']);
+    if (browser.code !== 0) return `playwright installed, but its chromium did not:\n${clip(browser.out.trim(), 800)}\n${manual}`;
+    return `installed playwright and chromium into ${python} (with uv pip, so the project manifest is untouched)`;
 }
 
 /** the cell table, as `marimo_open` and `marimo_cells` both show it. */
@@ -691,14 +743,26 @@ export default function (pi: ExtensionAPI) {
             const images = outputImages(cells);
             if (params.screenshot === true) {
                 interface Shots {
-                    shots: { id: string; image: string }[];
+                    shots: { id: string; image_file: string }[];
                     errors: { id: string; error: string }[];
                 }
-                const answer = await ask<Shots>(attached, 'colab_screenshot', { targets: params.ids, file: attached.session.path }, signal);
-                const data = answer.data!;
-                for (const shot of data.shots) images.push({ type: 'image', data: shot.image, mimeType: 'image/png' });
+                const shoot = () => ask<Shots>(attached, 'colab_screenshot', { targets: params.ids, file: attached.session.path }, signal);
+                let data = (await shoot()).data!;
+                const missing = data.errors.some((e) => /Playwright is not installed|playwright install/i.test(e.error));
+                if (missing) {
+                    // into the kernel's environment, not the project: `uv add`
+                    // is what marimo's own installer does in a uv project, and
+                    // a screenshot is no reason to edit pyproject.toml
+                    const note = await installPlaywright(attached, signal);
+                    body += `\n\n${note}`;
+                    if (/installed/.test(note)) data = (await shoot()).data!;
+                }
+                for (const shot of data.shots) {
+                    const image = takeImage(shot.image_file, 'image/png');
+                    if (image !== null) images.push(image);
+                }
                 if (data.shots.length > 0) body += `\n\n${quantity(data.shots.length, 'screenshot')} attached: ${data.shots.map((s) => s.id).join(', ')}`;
-                if (data.errors.length > 0) body += `\n\nscreenshots failed:\n${data.errors.map((e) => `  ${e.id}: ${e.error}`).join('\n')}`;
+                if (data.errors.length > 0 && !(missing && data.shots.length > 0)) body += `\n\nscreenshots failed:\n${data.errors.map((e) => `  ${e.id}: ${e.error.split('\n')[0]}`).join('\n')}`;
             }
             body += meanwhile(attached);
             return { content: [{ type: 'text', text: body }, ...images], details: { ids: params.ids } };
@@ -786,7 +850,7 @@ export default function (pi: ExtensionAPI) {
         ref: Type.Optional(Type.String({ description: 'a label for a created cell, so later ops in the same batch can refer to it.' })),
         run: Type.Optional(Type.Boolean({ description: 'run the cell after create/edit. default true.' })),
         hide_code: Type.Optional(Type.Boolean({ description: 'collapse the code editor in the browser (create). default false.' })),
-        packages: Type.Optional(Type.Array(Type.String(), { description: 'package names (install, uninstall): installed into the kernel environment, and into the inline metadata of a sandboxed notebook, before the cell ops apply.' })),
+        packages: Type.Optional(Type.Array(Type.String(), { description: "package names (install, uninstall): installed with the notebook's own package manager before the cell ops apply. in a uv project that is `uv add`, which edits pyproject.toml and uv.lock; in a sandboxed notebook, the inline metadata. for a tool the notebook itself does not need (a renderer, a profiler), install with bash instead: `uv pip install --python <venv python> <pkg>` leaves the project untouched." })),
     });
 
     pi.registerTool({
@@ -872,7 +936,11 @@ export default function (pi: ExtensionAPI) {
             if (others.length > 0) parts.push(`other cells with errors:\n${cellTable({ count: 0, cells: others, errored: [] })}`);
             const running = attached.session.busyWith;
             if (running.length > 0) parts.push(`still running after ${config.colab.waitSeconds}s: ${running.join(', ')}. marimo_cells shows them later; marimo_run with interrupt stops them.`);
-            if (answer.stdout.trim() !== '') parts.push(`stdout while applying:\n${clip(answer.stdout, 1500)}`);
+            if (answer.stdout.trim() !== '') {
+                const lines = answer.stdout.trim().split('\n');
+                const shown = lines.length > 8 ? [`… ${lines.length - 8} lines`, ...lines.slice(-8)] : lines;
+                parts.push(`stdout while applying:\n${clip(shown.join('\n'), 1500)}`);
+            }
             return { content: [{ type: 'text', text: `${parts.join('\n\n')}${meanwhile(attached)}` }, ...outputImages(touched)], details: { touched: touched.length, errors: touched.filter((c) => c.errors.length > 0).length + others.length } };
         },
         renderCall(args, theme) {

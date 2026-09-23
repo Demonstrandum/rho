@@ -77,13 +77,16 @@ the f-string is how marimo recognises the cell as SQL in the browser.
 matplotlib: end the cell with the axes or figure (`ax`, or `plt.gca()`); the output arrives as an image and `marimo_cells` attaches it, so you can see what the person sees.
 altair: `mo.ui.altair_chart(chart)` makes it selectable; a bare `chart` displays too.
 plotly, seaborn, bokeh display the same way: last expression.
-a chart with no image form (altair, plotly, a table, a widget) is seen with `marimo_cells ids=[...] screenshot=true`, which renders it in a headless browser; it needs `playwright` and its chromium in the kernel environment (`marimo_edit` install op, then `python -m playwright install chromium` once), and says so when they are missing.
+a chart with no image form (altair, plotly, a table, a widget) is seen with `marimo_cells ids=[...] screenshot=true`, which renders it in a headless browser.
+it needs `playwright` and its chromium in the kernel environment; when they are missing the tool installs them itself with `uv pip` (the project manifest is not touched) and says what it did.
+do not install them another way, and do not reach for kaleido or a file export to see a figure: the screenshot is the way.
 when asked what a chart looks like, look: do not describe it from the code.
 
 ## packages
 
-`marimo_edit ops=[{op: "install", packages: ["polars"]}]` installs into the kernel's environment (and into the inline metadata of a sandboxed notebook), with the kernel's own package manager.
-combine it with the cell that needs the package in the same batch; packages go first.
+`marimo_edit ops=[{op: "install", packages: ["polars"]}]` installs with the notebook's own package manager: in a uv project that is `uv add`, which edits `pyproject.toml` and `uv.lock`; in a sandboxed notebook, the inline metadata.
+that is right for a package the notebook itself imports, and wrong for a tool the notebook does not need (a renderer, a profiler, a debugger): for those, `uv pip install --python <the venv's python> <pkg>` in bash leaves the project untouched.
+combine an install with the cell that needs the package in the same batch; packages go first.
 some libraries cache what they found at import time; if a fresh install is not seen, say so rather than looping.
 
 ## environments

@@ -18,6 +18,30 @@ _MARK_OPEN = "<<colab:json>>"
 _MARK_CLOSE = "<</colab:json>>"
 
 
+def _stash_image(payload, mimetype):
+    """Write an image to a file the tool reads and deletes; a PNG through
+    stdout is a megabyte of base64 that marimo truncates and the model has
+    to look at. Returns the path."""
+    import base64 as _b64
+    import os as _os
+    import tempfile as _tempfile
+    import uuid as _uuid
+    directory = _os.path.join(_tempfile.gettempdir(), "rho-colab")
+    _os.makedirs(directory, exist_ok=True)
+    ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/svg+xml": ".svg", "image/gif": ".gif", "image/webp": ".webp"}.get(mimetype, ".bin")
+    path = _os.path.join(directory, f"{_uuid.uuid4().hex}{ext}")
+    if isinstance(payload, str):
+        if payload.startswith("data:"):
+            payload = payload.split(",", 1)[1]
+        if mimetype == "image/svg+xml" and payload.lstrip().startswith("<"):
+            payload = payload.encode()
+        else:
+            payload = _b64.b64decode(payload)
+    with open(path, "wb") as f:
+        f.write(payload)
+    return path
+
+
 def _emit(payload):
     _sys.stdout.write("\n" + _MARK_OPEN + _json.dumps(payload, default=str) + _MARK_CLOSE + "\n")
     _sys.stdout.flush()
@@ -56,11 +80,32 @@ def _output_json(out, limit):
     if data is None or data == "":
         return None
     entry = {"mimetype": mimetype}
+    if mimetype == "application/vnd.marimo+mimebundle":
+        # several representations of one output: an image when there is
+        # one, else the plainest text
+        try:
+            bundle = data if isinstance(data, dict) else _json.loads(data)
+        except Exception:
+            entry["text"] = _clip(str(data), limit)
+            return entry
+        for kind in ("image/png", "image/jpeg", "image/svg+xml", "image/gif", "image/webp"):
+            if kind in bundle:
+                entry["mimetype"] = kind
+                entry["image_file"] = _stash_image(bundle[kind], kind)
+                text = bundle.get("text/plain")
+                if isinstance(text, str) and text.strip():
+                    entry["text"] = _clip(text, 400)
+                return entry
+        for kind in ("text/markdown", "text/plain", "text/html"):
+            if kind in bundle:
+                text = bundle[kind]
+                entry["mimetype"] = kind
+                entry["text"] = _clip(_strip_html(text) if kind == "text/html" else text, limit)
+                return entry
+        entry["text"] = _clip(", ".join(k for k in bundle if k != "__metadata__"), limit)
+        return entry
     if mimetype.startswith("image/"):
-        payload = data if isinstance(data, str) else str(data)
-        if payload.startswith("data:"):
-            payload = payload.split(",", 1)[1]
-        entry["image"] = payload
+        entry["image_file"] = _stash_image(data if isinstance(data, str) else str(data), mimetype)
         return entry
     if mimetype in ("text/html", "text/markdown"):
         # mo.md renders to html too; the markdown source is not kept
@@ -69,7 +114,7 @@ def _output_json(out, limit):
         import re
         m = re.search(r'src="data:(image/[a-z+]+);base64,([^"]+)"', text)
         if m and len(m.group(2)) > 200:
-            entry["image"] = m.group(2)
+            entry["image_file"] = _stash_image(m.group(2), m.group(1))
             entry["mimetype"] = m.group(1)
             entry["text"] = _clip(_strip_html(text), 400)
             return entry
@@ -290,6 +335,8 @@ async def colab_edit(ops, limit=4000):
             "traceback": _clip("".join(_traceback.format_exception(exc)), 3000),
         })
         return
+    import importlib as _importlib
+    _importlib.invalidate_caches()
     ctx = _cm.get_context()
     ids = list(ctx.cells.keys())
     seen = []
@@ -425,6 +472,8 @@ async def colab_screenshot(targets, file=None, timeout_ms=30000):
     marimo's own screenshot session opens the server root in kiosk mode,
     which names no file, so it finds no cells on a server that serves a
     directory. The session used here adds the notebook's file key."""
+    import importlib as _importlib
+    _importlib.invalidate_caches()
     from urllib.parse import quote
     from marimo._code_mode import screenshot as _shot
     from marimo._messaging.context import HTTP_REQUEST_CTX
@@ -474,7 +523,7 @@ async def colab_screenshot(targets, file=None, timeout_ms=30000):
             try:
                 cid = ctx.cells[target].id
                 png = await session.capture(cid, timeout_ms=timeout_ms)
-                shots.append({"id": cid, "image": _shot._to_data_url(png).split(",", 1)[1]})
+                shots.append({"id": cid, "image_file": _stash_image(png, "image/png")})
             except Exception as exc:
                 errors.append({"id": target, "error": f"{type(exc).__name__}: {exc}"})
     finally:
@@ -483,3 +532,7 @@ async def colab_screenshot(targets, file=None, timeout_ms=30000):
         except Exception:
             pass
     _emit({"shots": shots, "errors": errors})
+
+
+def colab_python():
+    _emit({"python": _sys.executable, "prefix": _sys.prefix, "version": _sys.version.split()[0]})

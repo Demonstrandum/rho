@@ -36,7 +36,8 @@ export function runLength(ms: number): string {
 export interface OutputRecord {
     readonly mimetype: string;
     readonly text?: string | null;
-    readonly image?: string;
+    /** a file the kernel wrote the image to; the tool reads and removes it. */
+    readonly image_file?: string;
 }
 
 export interface CellsAnswer {
@@ -88,7 +89,7 @@ export function cellDetail(cell: CellRecord): string {
     }
     if (cell.output !== undefined && cell.output !== null) {
         const out = cell.output;
-        if (out.image !== undefined) lines.push(`  output: ${out.mimetype} image (attached)`);
+        if (out.image_file !== undefined) lines.push(`  output: ${out.mimetype} image (attached)`);
         if (out.text !== undefined && out.text !== null && out.text !== '') {
             lines.push(`  output (${out.mimetype}):`);
             lines.push(...out.text.split('\n').map((l) => `    ${l}`));

@@ -498,8 +498,57 @@ async function readCells(attached: Attached, ids: readonly string[], signal?: Ab
 }
 
 export default function (pi: ExtensionAPI) {
+    /**
+     * Loaded rather than always present, as the environment and remote tools
+     * are: nine definitions cost prompt on every request of every session,
+     * and most sessions never see a notebook. skills/marimo/SKILL.md names
+     * the tools in a line the model can act on, and the definitions arrive
+     * when something asks: the skill being read, /colab being used, a
+     * notebook being named, or a file that builds marimo.App being read.
+     */
+    const OWN = ['marimo_open', 'marimo_cells', 'marimo_run', 'marimo_edit', 'marimo_vars', 'marimo_ui', 'marimo_check', 'marimo_export', 'marimo_convert'];
+    /** Set by whatever asked for the tools, read by the hide below. */
+    let asked = false;
+    const load = (): void => {
+        asked = true;
+        const active = pi.getActiveTools();
+        const missing = OWN.filter((name) => !active.includes(name));
+        if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
+    };
+    /** Take the tools out of the loadout, until something asks for them. */
+    const hide = (): void => {
+        if (asked || notebooks.size > 0) return;
+        pi.setActiveTools(pi.getActiveTools().filter((name) => !OWN.includes(name)));
+    };
+
+    pi.on('input', async (event) => {
+        if (/\bmarimo\b|\bnotebook\b|\bcolab\b|\.ipynb\b|skill:marimo/i.test(event.text)) load();
+        return { action: 'continue' as const };
+    });
+
+    pi.on('tool_call', async (event) => {
+        // the skill being read, or a notebook file, is a request too
+        if (event.toolName === 'read') {
+            const path = String((event.input as { path?: unknown }).path ?? '');
+            if (/skills\/marimo\/SKILL\.md$/.test(path)) load();
+            else if (path.endsWith('.py') || path.endsWith('.ipynb')) {
+                try {
+                    const abs = isAbsolute(path) ? path : resolve(process.cwd(), path);
+                    if (path.endsWith('.ipynb') || isNotebook(abs)) load();
+                } catch {
+                    // unreadable: not a notebook we can act on
+                }
+            }
+        }
+    });
+
     pi.on('session_start', async (_event, ctx) => {
         uiHost = ctx.ui;
+        // before the first request goes out, unlike a hide on the first tool
+        // call, which lets one request carry every definition. the input
+        // handler runs before the request too, so a message that asks for
+        // the tools still has them.
+        hide();
         openStore = PersistedState.open({ name: 'colab', scope: 'session', parse: parseOpenState }, { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() });
         const stored = openStore.read();
         refreshStatus();
@@ -525,7 +574,10 @@ export default function (pi: ExtensionAPI) {
         current = stored.current !== null && notebooks.has(stored.current) ? stored.current : ([...notebooks.keys()].at(-1) ?? null);
         remember();
         refreshStatus();
-        if (notebooks.size > 0) ctx.ui.notify(`colab: rejoined ${[...notebooks.keys()].map((p) => basename(p)).join(', ')}`, 'info');
+        if (notebooks.size > 0) {
+            load();
+            ctx.ui.notify(`colab: rejoined ${[...notebooks.keys()].map((p) => basename(p)).join(', ')}`, 'info');
+        }
     });
 
     pi.on('session_shutdown', async () => {
@@ -1047,6 +1099,7 @@ export default function (pi: ExtensionAPI) {
         },
         handler: async (args, ctx) => {
             uiHost = ctx.ui;
+            load();
             const arg = args.trim();
             const cwd = ctx.cwd;
             const [verb, ...rest] = arg.split(/\s+/);

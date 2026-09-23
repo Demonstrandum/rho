@@ -1,7 +1,10 @@
 ---
 name: marimo
-description: work in a marimo notebook (a reactive Python notebook stored as a .py file with @app.cell functions) through the marimo_* tools. use when asked to open, fix, extend, build, lint, convert or pair on a marimo notebook, when a .py file imports marimo and builds marimo.App, or when the person says /colab. covers the graph rules that make marimo reject an edit, the cell conventions, UI elements, SQL cells and how to verify a notebook runs.
+description: work in a marimo notebook (a reactive Python notebook stored as a .py file with @app.cell functions) through the marimo_* tools. use when asked to open, fix, extend, build, lint, convert or pair on a marimo notebook, when a .py file imports marimo and builds marimo.App, or when the person says /colab. covers the graph rules that make marimo reject an edit, the cell conventions, UI elements, SQL cells and how to verify a notebook runs. loads the marimo_open, marimo_cells, marimo_run, marimo_edit, marimo_vars, marimo_ui, marimo_check, marimo_export and marimo_convert tools.
 ---
+
+reading this file loads the `marimo_*` tools into the session; they are not carried by sessions that never touch a notebook.
+a message naming marimo, a notebook, colab or an .ipynb loads them too, as does `/colab` and a `read` of a file that builds `marimo.App`.
 
 # marimo notebooks
 

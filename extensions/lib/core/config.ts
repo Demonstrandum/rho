@@ -1340,27 +1340,173 @@ function annotate(toml: string): string {
     return out.join('\n');
 }
 
-function load(): { config: RhoConfig; problems: ConfigProblem[] } {
-    if (!existsSync(CONFIG_PATH)) return { config: defaults(), problems: [] };
+// ---- session overrides ------------------------------------------------
+//
+// values set for this session only, by /config or the config tool, laid over
+// the file every time this module is evaluated. extensions read the config
+// when they load, so an override takes effect at the next /reload; the store
+// is on globalThis because /reload evaluates this module again and a
+// module-level map would be lost with the old evaluation. extensions/config.ts
+// clears it when the session is replaced.
+
+/** a field by its place in the file: `[section] key`, both in TOML spelling. */
+export interface FieldPath {
+    section: string;
+    key: string;
+}
+
+export function pathText(path: FieldPath): string {
+    return `${path.section}.${path.key}`;
+}
+
+export interface FieldInfo {
+    path: FieldPath;
+    /** what the file must supply, e.g. `boolean` */
+    type: string;
+    default: unknown;
+    doc: readonly string[];
+}
+
+const OVERRIDES = Symbol.for('rho.config.session-overrides');
+
+type Overrides = Map<string, { path: FieldPath; value: unknown }>;
+
+function overrides(): Overrides {
+    const store = globalThis as unknown as { [OVERRIDES]?: Overrides };
+    return (store[OVERRIDES] ??= new Map());
+}
+
+interface Located {
+    info: FieldInfo;
+    check: AnyGuard;
+    /** schema property names, for reading `config` */
+    section: string;
+    name: string;
+}
+
+function locate(text: string): Located | { error: string } {
+    const dot = text.indexOf('.');
+    if (dot <= 0 || dot === text.length - 1) return { error: `"${text}" is not section.key` };
+    const rawSection = text.slice(0, dot);
+    const rawKey = text.slice(dot + 1);
+    const sectionNames = [...SECTION_IDS.keys()];
+    const sectionToml = SECTION_IDS.has(rawSection) ? rawSection : nearest(rawSection, sectionNames);
+    if (sectionToml === undefined) return { error: `unknown section "${rawSection}" (known: ${sectionNames.join(', ')})` };
+    const section = SECTION_IDS.get(sectionToml)!;
+    const fields = SECTIONS[section]!;
+    const keys = Object.values(fields).map((f) => f.key);
+    const key = keys.includes(rawKey) ? rawKey : nearest(rawKey, keys);
+    if (key === undefined) return { error: `unknown key "${rawKey}" in [${sectionToml}] (known: ${keys.join(', ')})` };
+    const [name, f] = Object.entries(fields).find(([, candidate]) => candidate.key === key)!;
+    return {
+        info: { path: { section: sectionToml, key }, type: f.check.label, default: f.default, doc: f.doc },
+        check: f.check,
+        section,
+        name,
+    };
+}
+
+/** every field, in schema order. */
+export function allFields(): FieldInfo[] {
+    return Object.entries(SECTIONS).flatMap(([section, fields]) =>
+        Object.values(fields).map((f) => ({
+            path: { section: tomlName(section), key: f.key },
+            type: f.check.label,
+            default: f.default,
+            doc: f.doc,
+        })),
+    );
+}
+
+export interface FieldState {
+    info: FieldInfo;
+    /** what the extensions loaded with */
+    loaded: unknown;
+    /** the session override, if there is one */
+    override?: unknown;
+    /** true when the override differs from what is loaded, so a reload would change it */
+    pending: boolean;
+}
+
+/** a field's default, loaded value and override, or why the name names nothing. */
+export function fieldState(text: string): FieldState | { error: string } {
+    const found = locate(text);
+    if ('error' in found) return found;
+    const loadedValue = (config as unknown as Record<string, Record<string, unknown>>)[found.section]![found.name];
+    const entry = overrides().get(pathText(found.info.path));
+    return {
+        info: found.info,
+        loaded: loadedValue,
+        ...(entry === undefined ? {} : { override: entry.value }),
+        pending: entry !== undefined && JSON.stringify(entry.value) !== JSON.stringify(loadedValue),
+    };
+}
+
+/** set a field for this session. the value is checked against the field's type. */
+export function setOverride(text: string, value: unknown): FieldState | { error: string } {
+    const found = locate(text);
+    if ('error' in found) return found;
+    if (!found.check(value)) {
+        return { error: `${pathText(found.info.path)} expects ${found.check.label}, got ${JSON.stringify(value)}` };
+    }
+    overrides().set(pathText(found.info.path), { path: found.info.path, value: structuredClone(value) });
+    return fieldState(pathText(found.info.path));
+}
+
+/** drop one override, answering whether there was one. */
+export function clearOverride(text: string): boolean | { error: string } {
+    const found = locate(text);
+    if ('error' in found) return found;
+    return overrides().delete(pathText(found.info.path));
+}
+
+export function clearOverrides(): number {
+    const count = overrides().size;
+    overrides().clear();
+    return count;
+}
+
+export function overrideStates(): FieldState[] {
+    return [...overrides().keys()].map((text) => fieldState(text) as FieldState);
+}
+
+function withOverrides(raw: RawConfig): RawConfig {
+    const out: RawConfig = { ...raw };
+    for (const { path, value } of overrides().values()) {
+        // the file may spell the section another way that still resolves; the
+        // override goes into that table so it is not dropped as a duplicate.
+        const existing = Object.keys(out).find((name) => name === path.section || squash(name) === squash(path.section));
+        const name = existing ?? path.section;
+        const table = isTable(out[name]) ? { ...(out[name] as Record<string, unknown>) } : {};
+        for (const k of Object.keys(table)) if (k !== path.key && squash(k) === squash(path.key)) delete table[k];
+        table[path.key] = value;
+        out[name] = table;
+    }
+    return out;
+}
+
+function readFile(): { raw: RawConfig; problems: ConfigProblem[] } {
+    if (!existsSync(CONFIG_PATH)) return { raw: {}, problems: [] };
     let text: string;
     try {
         text = readFileSync(CONFIG_PATH, 'utf8');
     } catch (e) {
-        return {
-            config: defaults(),
-            problems: [{ at: CONFIG_PATH, message: `could not be read: ${(e as Error).message}` }],
-        };
+        return { raw: {}, problems: [{ at: CONFIG_PATH, message: `could not be read: ${(e as Error).message}` }] };
     }
     try {
-        return resolveConfig(parse(text) as RawConfig);
+        return { raw: parse(text) as RawConfig, problems: [] };
     } catch (e) {
         return {
-            config: defaults(),
-            problems: [
-                { at: CONFIG_PATH, message: `is not valid TOML, using defaults: ${(e as Error).message}` },
-            ],
+            raw: {},
+            problems: [{ at: CONFIG_PATH, message: `is not valid TOML, using defaults: ${(e as Error).message}` }],
         };
     }
+}
+
+function load(): { config: RhoConfig; problems: ConfigProblem[] } {
+    const file = readFile();
+    const resolved = resolveConfig(withOverrides(file.raw));
+    return { config: resolved.config, problems: [...file.problems, ...resolved.problems] };
 }
 
 const loaded = load();
@@ -1401,4 +1547,56 @@ export function save(path: string = CONFIG_PATH, cfg: RhoConfig = config): void 
     mkdirSync(dirname(path), { recursive: true });
     const kept = existsSync(path) ? preamble(readFileSync(path, 'utf8')) : '';
     writeFileSync(path, `${kept}${toToml(cfg)}`, 'utf8');
+}
+
+/** the config the next reload would load: the file with the overrides over it. */
+export function effectiveConfig(): RhoConfig {
+    return load().config;
+}
+
+/**
+ * what is kept of a file when only the session overrides are written into it:
+ * its own values, which must parse, with the overrides laid over them. every
+ * key is kept as written, so a file holding a few keys stays a few keys.
+ */
+function mergedOverrides(path: string): RawConfig {
+    const raw = existsSync(path) ? (parse(readFileSync(path, 'utf8')) as RawConfig) : {};
+    return withOverrides(raw);
+}
+
+export type SaveMode = 'all' | 'changes';
+
+/**
+ * write the config to `path`. `all` writes every field, as the next reload
+ * would load it. `changes` writes only the session overrides, merged into what
+ * the file already holds.
+ */
+export function saveSession(path: string, mode: SaveMode): void {
+    if (mode === 'all') {
+        save(path, effectiveConfig());
+        return;
+    }
+    const merged = mergedOverrides(path);
+    mkdirSync(dirname(path), { recursive: true });
+    const kept = existsSync(path) ? preamble(readFileSync(path, 'utf8')) : '';
+    writeFileSync(path, `${kept}${annotate(stringify(merged))}\n`, 'utf8');
+}
+
+/** set every value a TOML file holds as a session override. */
+export function loadOverrides(path: string): { set: string[]; problems: ConfigProblem[] } {
+    const raw = parse(readFileSync(path, 'utf8')) as RawConfig;
+    const set: string[] = [];
+    const problems: ConfigProblem[] = [];
+    for (const [section, table] of Object.entries(raw)) {
+        if (!isTable(table)) {
+            problems.push({ at: section, message: `expected a [${section}] table, got ${describe(table)}` });
+            continue;
+        }
+        for (const [key, value] of Object.entries(table)) {
+            const result = setOverride(`${section}.${key}`, value);
+            if ('error' in result) problems.push({ at: `${section}.${key}`, message: result.error });
+            else set.push(pathText(result.info.path));
+        }
+    }
+    return { set, problems };
 }

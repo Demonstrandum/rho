@@ -59,6 +59,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   - `web.ts` `/web` runs the pi-web UI as a background service.
   - `colab.ts` `/colab <notebook.py>` and the `marimo_*` tools: the agent and the person in one live marimo kernel; headless sessions, cell edits through the kernel, lint, export, convert, `[colab]`
   - `rho.ts` `/rho config` shows and writes the live `rho.toml`
+  - `config.ts` `/config` and a `config` tool set `rho.toml` values for this session only, and load or save them to a file.
   - `update.ts` `/update [pi|rho]` updates pi, the packages, and an rho checkout, then reloads the session.
   - `agentica.ts` an `agentica` MCP tool, registered only when `RHO_AGENTICA_RUNTIME` is set.
   - `lib/` shared modules, in a subdirectory so auto-discovery does not load them, one directory per concern.

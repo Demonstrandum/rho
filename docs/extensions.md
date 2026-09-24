@@ -558,6 +558,10 @@ this is the pattern the environment and remote tools use, moved one event earlie
 `lib/core/config.ts` the `rho.toml` loader: every `[section] key` named in these entries resolves through it.
 the file is kebab-case throughout, sections included: a section is named by its schema property, which has to be a javascript identifier, so `tomlName` derives `[send-now]` from `sendNow` on the way out and resolves it back on the way in.
 a name spelled any other way that squashes to a known one (`[sendNow]`, `halfBlocks`, `half_blocks`) still applies its values, and the problem list names the spelling to move to, so renaming a section never costs anyone their settings.
+session overrides, set by `/config` and the `config` tool (`extensions/config.ts`), are laid over the file each time the module is evaluated.
+the store is on `globalThis`, because `/reload` evaluates the module again and a module-level map would go with the old evaluation.
+every extension reads its settings when it loads, so an override applies at a reload: `/config` reloads after a change, and the tool cannot, since a reload needs the command context and a tool call gets the plain one.
+the overrides are dropped on `session_shutdown` for `new`, `resume` and `fork`, and are not written to the session file.
 
 `lib/core/state-store.ts` `PersistedState<T>`, the store for extension state that used to die with the process (the stash stack, the `/noswap` toggle, the `/cwd` target, the prompt history).
 one json file per scope under `<data dir>/rho/state/<scope>/`: `global` (one file), `project` (one file per working directory, named `<basename>-<sha256 prefix>` so two projects sharing a basename stay separate), `session` (one file per session uuid, so a resume finds its own state).
@@ -584,6 +588,8 @@ a function belongs here when two call sites would otherwise each write it and th
 
 `lib/tui/cells.ts` a rendered line read into cells (grapheme, width, colours, attributes, and the zero-width escapes before it) and written back, for painters that decide per column; truecolor is read into rgb so it can be blended, every other SGR parameter round-trips as text.
 `lib/tui/render-relay.ts` installs one `render` wrapper per process under a global symbol, and each module load swaps the painter it calls.
+whether the wrapper is in place is read off the `render` that is there now, not off a flag on the prototype: `input-field.ts` assigns `CustomEditor.prototype.render` outright on every load, which dropped the stars after the first `/reload` while the flag still said they were installed.
+a second wrapper can end up above the first under another extension's, so the painter runs only in the outermost one.
 `lib/tui/frame-timer.ts` the next frame of an animation that asks for it from its own render, so an undrawn frame asks for nothing.
 `lib/tui/editor-field.ts` which rendered editor lines are the field, from the autocomplete height the editor records.
 

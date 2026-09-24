@@ -259,6 +259,15 @@ pi also reacts to it by parking a 2-line `IdleStatus` in the dock, which `halfbl
 every trim skips a block holding an inline image: an image reserves its height as blank rows (after the escape sequence under kitty, before it under iterm2) and the terminal draws over them regardless, so dropping them leaves the transcript shorter than the picture and the input field and footer are drawn on top of it.
 matched on the kitty and iterm2 prefixes, since pi-tui's `isImageLine` is not re-exported through the package index; an iterm2 line also has to be recognised before OSC stripping, which would leave it looking blank.
 
+`starfield.ts` and `ignition.ts` are ports of two codex composer effects (`chat_composer/sparkle_field.rs`, `effort_ignition*.rs` in `openai/codex`), both off by default.
+`[starfield] input` puts braille stars (one raised dot each) in the blank cells of the empty input field, once per session or again after every turn, for `input-seconds`; `[starfield] tools` puts the same stars in a tool row while its call waits for a result.
+a cell holds a star when a hash of its position lands on one in `density`, and each star brightens on its own 4 to 7 second period as `sin(pi * phase)^12`, blended from the cell's background towards `color`.
+`[ignition] enabled` plays a one-second band animation across the field when the thinking level is raised to `xhigh` (codex's Max tier) or `max` (Ultra); an Ultra wave also flares `·` `✦` `✧` at the right end.
+both draw only on truecolor backgrounds, so they need `[input] background` for the field.
+tool rows on the main screen are painted in `TuiMainScreen.render` rather than in the row, because pi-tui clears the scrollback and redraws when a line above the viewport changes: the row marks its lines with an APC string, and a marked line above `previousViewportTop` is written as the previous frame wrote it.
+the TUI a row holds is a proxy for the current renderer with no `defineProperty` trap, so that patch goes on the prototype.
+every patch goes through `lib/tui/render-relay.ts`, so `/reload` replaces the painter instead of stacking a second wrapper.
+
 `tool-rows.ts` + `lib/tool-row/` own every tool row: what it is called, and what it says it did.
 a row is drawn in two slots, the call and the result.
 a tool that ships a `renderCall` writes its own name into the call slot (`read`, `bash`), and a tool that ships none gets `ToolExecutionComponent`'s fallback, which is the bare name the model calls and a JSON dump of the arguments under it (`slack_reply`, `ctx_search`, `web_search`).
@@ -572,6 +581,11 @@ it lives in a subdirectory because extension auto-discovery loads top-level `*.t
 it is the layer under the prose modules: `lib/prose/reflow.ts` decides where a sentence ends and `lib/prose/disenshittification.ts` rewrites to the house style, while this holds the operations both of those, and every renderer, need.
 a function belongs here when two call sites would otherwise each write it and the answer does not depend on where it is shown.
 `abbreviate` carries the one distinction that is real rather than accidental: `compact` keeps a fixed number of columns for a status line (`2.0k`), `fine` drops a trailing zero and always offers a decimal for a readout (`15.2k`).
+
+`lib/tui/cells.ts` a rendered line read into cells (grapheme, width, colours, attributes, and the zero-width escapes before it) and written back, for painters that decide per column; truecolor is read into rgb so it can be blended, every other SGR parameter round-trips as text.
+`lib/tui/render-relay.ts` installs one `render` wrapper per process under a global symbol, and each module load swaps the painter it calls.
+`lib/tui/frame-timer.ts` the next frame of an animation that asks for it from its own render, so an undrawn frame asks for nothing.
+`lib/tui/editor-field.ts` which rendered editor lines are the field, from the autocomplete height the editor records.
 
 `lib/core/template.ts` the shared `{{...}}` evaluator.
 `lib/core/source-str.ts` a String subclass carrying source provenance through template interpolation, used by the prompt explorer.

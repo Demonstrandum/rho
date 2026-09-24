@@ -255,6 +255,41 @@ fade = 12
 # 0 = invisible, 1 = the colour above, unblended
 strength = 0.55
 
+[starfield]
+# faint braille stars that twinkle in the empty input field, after
+# codex. off: never. session: once when a session opens, until the
+# first character is typed. turn: that, and again each time a turn
+# ends. needs a truecolor terminal and a field background
+input = "off"
+# how long the stars in the input field last, in seconds, counted from
+# the first frame they are drawn in. the last second is a fade
+input-seconds = 15
+# the same stars in the blank cells of a tool row while its call waits
+# for a result. they fade in over the first second and go when the
+# result arrives
+tools = false
+# the colour a star comes up towards from the background under it, as
+# a theme colour name or a hex code, with optional HSL filters after
+# an @. a theme that leaves the role empty falls through to muted,
+# accent, border
+color = "text"
+# how far a star rises out of its background at its peak. 0 = invisible,
+# 1 = the colour above, unblended
+strength = 0.55
+density = 5  # one blank cell in this many holds a star
+
+[ignition]
+# a one-shot animation across the input field when the thinking level
+# is raised to xhigh or max, after codex's effort ignition. bands of
+# colour pass under the text; nothing is drawn over it
+enabled = false
+# which animations to pick from. each change picks one at random, never
+# the one played last while there is another to choose. wave: a crest
+# sweeps left to right, and at max a spark (· ✦ ✧) flares at the right
+# end. aurora: soft bands drift and cross. pulse: a ring opens from the
+# centre
+styles = [ "wave", "aurora", "pulse" ]
+
 [send-now]
 # stop the running turn and send the editor text now, instead of
 # queueing it until the turn reaches its next boundary. on an empty

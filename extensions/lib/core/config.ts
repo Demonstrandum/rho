@@ -105,6 +105,22 @@ export function isOneOf<const T extends readonly [string, ...string[]]>(...allow
     );
 }
 
+/**
+ * a list drawn from a closed set: each element one of the members, no member
+ * twice, at least one element. narrows to an array of the union, the way
+ * `isOneOf` narrows a single value.
+ */
+export function isSubsetOf<const T extends readonly [string, ...string[]]>(...allowed: T): Guard<T[number][]> {
+    return guard<T[number][]>(
+        `non-empty array of ${allowed.map((member) => `"${member}"`).join(' | ')}, no repeats`,
+        (v) =>
+            Array.isArray(v)
+            && v.length > 0
+            && new Set(v).size === v.length
+            && v.every((e) => typeof e === 'string' && (allowed as readonly string[]).includes(e)),
+    );
+}
+
 interface Field<T> {
     /** key as it appears in the TOML file (kebab-case) */
     key: string;
@@ -120,7 +136,7 @@ interface Field<T> {
  * argument, and `def` is checked against it: a default that contradicts its
  * guard is a compile error.
  */
-function field<T>(key: string, check: Guard<T>, def: T, ...doc: string[]): Field<T> {
+function field<T>(key: string, check: Guard<T>, def: NoInfer<T>, ...doc: string[]): Field<T> {
     return { key, check, default: def, doc };
 }
 
@@ -682,6 +698,74 @@ const SCHEMA = {
             0.55,
             'how far the hint rises out of the field background at its clearest.',
             '0 = invisible, 1 = the colour above, unblended',
+        ),
+    },
+    starfield: {
+        input: field(
+            'input',
+            isOneOf('off', 'session', 'turn'),
+            'off',
+            'faint braille stars that twinkle in the empty input field, after',
+            'codex. off: never. session: once when a session opens, until the',
+            'first character is typed. turn: that, and again each time a turn',
+            'ends. needs a truecolor terminal and a field background',
+        ),
+        inputSeconds: field(
+            'input-seconds',
+            isPosInt,
+            15,
+            'how long the stars in the input field last, in seconds, counted from',
+            'the first frame they are drawn in. the last second is a fade',
+        ),
+        tools: field(
+            'tools',
+            isBool,
+            false,
+            'the same stars in the blank cells of a tool row while its call waits',
+            'for a result. they fade in over the first second and go when the',
+            'result arrives',
+        ),
+        color: field(
+            'color',
+            isString,
+            'text',
+            'the colour a star comes up towards from the background under it, as',
+            'a theme colour name or a hex code, with optional HSL filters after',
+            'an @. a theme that leaves the role empty falls through to muted,',
+            'accent, border',
+        ),
+        strength: field(
+            'strength',
+            isUnitFloat,
+            0.55,
+            'how far a star rises out of its background at its peak. 0 = invisible,',
+            '1 = the colour above, unblended',
+        ),
+        density: field(
+            'density',
+            isPosInt,
+            5,
+            'one blank cell in this many holds a star',
+        ),
+    },
+    ignition: {
+        enabled: field(
+            'enabled',
+            isBool,
+            false,
+            'a one-shot animation across the input field when the thinking level',
+            'is raised to xhigh or max, after codex\'s effort ignition. bands of',
+            'colour pass under the text; nothing is drawn over it',
+        ),
+        styles: field(
+            'styles',
+            isSubsetOf('wave', 'aurora', 'pulse'),
+            ['wave', 'aurora', 'pulse'],
+            'which animations to pick from. each change picks one at random, never',
+            'the one played last while there is another to choose. wave: a crest',
+            'sweeps left to right, and at max a spark (· ✦ ✧) flares at the right',
+            'end. aurora: soft bands drift and cross. pulse: a ring opens from the',
+            'centre',
         ),
     },
     sendNow: {

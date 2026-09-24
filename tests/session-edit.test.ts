@@ -16,7 +16,7 @@ import {
     runBetween,
     treeOf,
     applyOp,
-} from '../extensions/lib/session-edit';
+} from '../extensions/session-tree/edit';
 
 const at = '2026-01-01T00:00:00.000Z';
 

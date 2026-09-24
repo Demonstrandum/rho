@@ -190,21 +190,21 @@ forms come from the table in that file, or failing that from the usage fragments
 `lib/command-hint.ts` holds the placement and the overlay, apart from the patch, so both can be checked against a synthetic row without a terminal (`tests/command-hint.test.ts`).
 adding APC to `ESCAPE` in `lib/text.ts` was part of this: pi marks the hardware cursor position with `\x1b_pi:c\x07`, and counted as text it put every column measurement on a focused editor row seven out.
 
-`prompt-inspect.ts` reads what was sent to the provider.
+`prompt-inspect/index.ts` reads what was sent to the provider.
 nothing in it reads `ctx.getSystemPrompt()`: that reports the string pi built, and the model read the payload, which is that string after the provider serialiser has placed it (a top-level `system`, a list of cacheable blocks, a `systemInstruction`, or a leading `system` or `developer` message) and after any `before_provider_request` handler has rewritten it.
-`lib/prompt-outline.ts` `systemText` takes the text back out of whichever of those four places the payload put it, and reports null when it is in none of them, which is itself worth saying: the instructions went somewhere the extension does not know about.
+`prompt-inspect/outline.ts` `systemText` takes the text back out of whichever of those four places the payload put it, and reports null when it is in none of them, which is itself worth saying: the instructions went somewhere the extension does not know about.
 the payload also carries every message, every tool schema, and whatever an extension rewrote in `before_provider_request`.
-that hook is the only place the finished payload exists, so each one is kept as it goes out in `lib/prompt-log.ts`, a log bounded at eight entries, since a payload holds the whole conversation and a turn sends one per tool round.
+that hook is the only place the finished payload exists, so each one is kept as it goes out in `prompt-inspect/log.ts`, a log bounded at eight entries, since a payload holds the whole conversation and a turn sends one per tool round.
 `/prompt view` browses the newest, `/prompt view <n>` an older one by its ordinal, `/prompt list` picks from the log, `/prompt view system` opens the system prompt, `/prompt view json` the newest payload as raw JSON, `/prompt clear` drops the log.
 before the first turn there is nothing to show, because nothing has been sent: `/prompt view system` and the payload views both say so rather than opening an empty pager, and the note names what to do, which is run a turn.
 in an interface onto a session on another machine the log is empty for a different reason, and the two must not share a message: `prompt` is in `[remote] commands-here`, so `/prompt` runs in this process, and this process sends nothing to a provider however many turns are answered on screen.
 there the note says where the payloads are, and `/prompt view system` falls back to the prompt the far side reported with the rest of its state, labelled as pi's string rather than the payload text.
 routing `/prompt` to the session instead (taking it out of `[remote] commands-here`) gets the payloads but not the viewer: the far side is `pi --mode rpc`, whose `ui.custom` returns undefined with no terminal to draw on, so only `/prompt dump` does anything there, writing the files on that machine.
 `/prompt dump [path]` writes the newest payload as JSON, `/prompt dump all [dir]` writes every kept payload, `/prompt dump system [path]` writes the system prompt as text; with no path they land in the session scratch directory, which is where a throwaway file belongs and what gets cleaned up.
-`lib/prompt-outline.ts` reads a payload as a tree: the payload type is `unknown`, so the walk is over JSON itself, every property and every array element becoming a node down to a depth of four, which reaches one content block without naming a single provider field.
+`prompt-inspect/outline.ts` reads a payload as a tree: the payload type is `unknown`, so the walk is over JSON itself, every property and every array element becoming a node down to a depth of four, which reaches one content block without naming a single provider field.
 the one place shape is guessed at is the label, where an element carrying a `role`, `type`, or `name` string is named by it.
 `pretty` prints a string over the newlines it holds rather than as a `\n` escape, which is the reason for reading a payload here instead of through `JSON.stringify`; `r` in the pager switches to the JSON anyway.
-`lib/pager.ts` is the scrolling view: pi-tui ships `ScrollView`, but it takes its viewport from a layout pass only a fullscreen TUI runs, so the pager keeps the window itself, caching the wrapped text per width so a resize reflows.
+`prompt-inspect/pager.ts` is the scrolling view: pi-tui ships `ScrollView`, but it takes its viewport from a layout pass only a fullscreen TUI runs, so the pager keeps the window itself, caching the wrapped text per width so a resize reflows.
 the outline reopens after each pager rather than mutating, because `SelectList` takes its items at construction, the same constraint the stash picker works under.
 the smoke test drives `/prompt view` and `/prompt dump` in the pty run and checks the dumped file exists.
 
@@ -469,7 +469,7 @@ the sample is one file at a fixed path in rho's data directory, rewritten on eac
 a file per run fills the session picker with copies of the same made-up session, and a sample is not work to come back to.
 the smoke check runs `pi --sample-session` in a pty and opens `/tree` over it, since a flag, a queued command, and a session switch in sequence is not something the unit tests reach.
 
-`session-tree.ts` turns pi's tree view into an edit surface, and leaves its navigation exactly as it was.
+`session-tree/index.ts` turns pi's tree view into an edit surface, and leaves its navigation exactly as it was.
 pi matches `/tree` in `InteractiveMode`'s submit handler before extension commands are consulted, so a command of that name would never run; the view is installed by patching `InteractiveMode.prototype.showTreeSelector`, which is what `/tree`, esc esc, and the `app.session.tree` binding all call, shift+ctrl+t is that binding, so one patch covers every way in and the file registers no shortcut of its own: an extension shortcut on that key takes it off pi's action and pi reports the conflict.
 the patch keeps pi's own `TreeSelectorComponent`, wraps the instance's `handleInput`, and hands back every key normal mode does not claim, so folding, the filter modes, labels, paging, and copy keep working without being reimplemented.
 
@@ -486,10 +486,10 @@ the transcript does not repaint itself afterwards, so the tail of pi's own navig
 a selection is a connected span of one root-to-leaf path and never an arbitrary run of display rows, because a flattened run crosses a branch point into a sibling and deleting or summarising that has no meaning.
 extension therefore follows lineage, and a drag that would cross a branch point is refused with a line saying so.
 the gutter carries relative row numbers that stop at the branch point above and below the cursor, so a count never promises a row it cannot reach, and the place the numbers run out is where the branch is.
-those two columns are pi's own cursor column, rewritten in place by `lib/tree-gutter.ts` over lines pi has already rendered, so nothing about a row's content, colour, or horizontal clipping is reproduced here; a line count that does not match the renderer's shape leaves the lines untouched rather than corrupting them.
+those two columns are pi's own cursor column, rewritten in place by `session-tree/gutter.ts` over lines pi has already rendered, so nothing about a row's content, colour, or horizontal clipping is reproduced here; a line count that does not match the renderer's shape leaves the lines untouched rather than corrupting them.
 
 nothing reaches disk while the view is open.
-`lib/session-edit.ts` holds the entries and a log of ops over them, recomputes the edited list from the base after every change, and `u` walks back through the log.
+`session-tree/edit.ts` holds the entries and a log of ops over them, recomputes the edited list from the base after every change, and `u` walks back through the log.
 the surgery has to respect three things a session file can express: a surviving entry's `parentId` names a surviving entry, an assistant message carrying tool calls and the `toolResult` entries answering them are one unit, and a label, a compaction's `firstKeptEntryId`, and a branch summary's `fromId` all name entries that may be the ones removed.
 so a selection endpoint landing inside a tool-call pair widens to cover it, a delete either re-chains what hung off the span or takes the subtree with it, a label whose target went is removed and its own children re-chained past it, and a compaction retargets to the nearest surviving ancestor, which keeps its kept range as wide as it was and never wider.
 a summarised span collapses to one `custom_message` of type `rho-summary`, which participates in context as a `custom` entry does not, and stays clear of the bookkeeping pi's own compaction entries carry.

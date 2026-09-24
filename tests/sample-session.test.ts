@@ -5,7 +5,7 @@ import type { SessionEntry } from '@earendil-works/pi-coding-agent';
 import { SAMPLE_LEAF, sampleEntries } from '../extensions/lib/sample-session';
 import { sampleArgv } from '../extensions/sample-session';
 import { writeSessionCopy } from '../extensions/lib/session-file';
-import { pathTo, runIds, treeOf, unitRun } from '../extensions/lib/session-edit';
+import { pathTo, runIds, treeOf, unitRun } from '../extensions/session-tree/edit';
 
 const entries = sampleEntries();
 

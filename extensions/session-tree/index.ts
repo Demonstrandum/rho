@@ -49,11 +49,11 @@ import {
     unitRun,
     type EntryId,
     type Run,
-} from './lib/session-edit';
-import { writeSessionCopy } from './lib/session-file';
-import { markRows, type RowState } from './lib/tree-gutter';
-import { INITIAL_KEYS, NORMAL_HINTS, SEARCH_HINTS, step, type KeyState, type Verb } from './lib/tree-keys';
-import { oneLine, preview, quantity } from './lib/text';
+} from './edit';
+import { writeSessionCopy } from '../lib/session-file';
+import { markRows, type RowState } from './gutter';
+import { INITIAL_KEYS, NORMAL_HINTS, SEARCH_HINTS, step, type KeyState, type Verb } from './keys';
+import { oneLine, preview, quantity } from '../lib/text';
 
 // ---- what is reached inside pi ------------------------------------------
 //

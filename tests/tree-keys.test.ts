@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { INITIAL_KEYS, countOf, step, type KeyState } from '../extensions/lib/tree-keys';
+import { INITIAL_KEYS, countOf, step, type KeyState } from '../extensions/session-tree/keys';
 
 function run(keys: readonly string[]): { state: KeyState; actions: unknown[] } {
     let state = INITIAL_KEYS;

@@ -27,11 +27,11 @@ import { getSelectListTheme } from '@earendil-works/pi-coding-agent';
 import { Container, matchesKey, type SelectItem, SelectList, Text } from '@earendil-works/pi-tui';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { Pager } from './lib/pager';
-import { type CapturedRequest, RequestLog } from './lib/prompt-log';
-import { type OutlineNode, outline, pretty, raw, systemText, weight } from './lib/prompt-outline';
-import { collapseHome, truncate } from './lib/text';
-import { publishedRelay } from './lib/remote/ui-relay';
+import { Pager } from './pager';
+import { type CapturedRequest, RequestLog } from './log';
+import { type OutlineNode, outline, pretty, raw, systemText, weight } from './outline';
+import { collapseHome, truncate } from '../lib/text';
+import { publishedRelay } from '../lib/remote/ui-relay';
 
 type ViewKind = 'payload' | 'system' | 'json';
 

@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
-import { outline, pretty, raw, systemText, weight } from '../extensions/lib/prompt-outline';
-import { RequestLog } from '../extensions/lib/prompt-log';
+import { outline, pretty, raw, systemText, weight } from '../extensions/prompt-inspect/outline';
+import { RequestLog } from '../extensions/prompt-inspect/log';
 
 const PAYLOAD = {
     model: 'claude-opus-5',

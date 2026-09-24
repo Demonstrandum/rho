@@ -2,8 +2,8 @@
 // four guards do instead of evaluating. the judge is stubbed, so these tests
 // pin control flow rather than any model's behaviour.
 import { test, expect, mock, beforeEach } from 'bun:test';
-import type { Evaluation, Verdict } from '../extensions/lib/goal';
-import * as real from '../extensions/lib/goal';
+import type { Evaluation, Verdict } from '../extensions/lib/model/goal';
+import * as real from '../extensions/lib/model/goal';
 
 let queued: Evaluation[] = [];
 let calls = 0;
@@ -15,10 +15,10 @@ const evaluate = mock(async (): Promise<Evaluation> => {
     return next;
 });
 
-await mock.module('../extensions/lib/goal', () => ({ ...real, evaluate }));
+await mock.module('../extensions/lib/model/goal', () => ({ ...real, evaluate }));
 
 const { default: goalExtension } = await import('../extensions/goal');
-const { config } = await import('../extensions/lib/config');
+const { config } = await import('../extensions/lib/core/config');
 
 type Handler = (event: unknown, ctx: unknown) => Promise<void>;
 type CommandHandler = (args: string, ctx: unknown) => Promise<void>;

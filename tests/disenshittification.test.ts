@@ -11,7 +11,7 @@ import {
     normaliseCharacters,
     normaliseDashes,
     unmask,
-} from '../extensions/lib/disenshittification';
+} from '../extensions/lib/prose/disenshittification';
 
 const root = join(import.meta.dir, '..');
 

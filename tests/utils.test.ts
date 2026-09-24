@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import type { Theme } from '@earendil-works/pi-coding-agent';
-import { zip, choose, themeRgb, blend, ansiFg, RESET, type Rgb } from '../extensions/lib/utils';
+import { zip, choose, themeRgb, blend, ansiFg, RESET, type Rgb } from '../extensions/lib/core/utils';
 
 // make ansi escapes visible in printed output.
 const show = (s: string) => s.replaceAll('\x1b', '\\e');

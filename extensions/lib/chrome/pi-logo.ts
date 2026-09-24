@@ -8,7 +8,7 @@
 // in a subdirectory so pi's extension auto-discovery (top-level *.ts only)
 // does not try to load it as an extension.
 
-import { blend, ansiFg, RESET, type Rgb } from './utils';
+import { blend, ansiFg, RESET, type Rgb } from '../core/utils';
 import {
     tetrisGrid, BOARD_W, BOARD_H, BOARD_ROW_OFFSET, BOARD_COL_OFFSET,
     type TetrisState,

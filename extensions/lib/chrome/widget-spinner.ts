@@ -14,7 +14,7 @@
 // in a subdirectory so extension auto-discovery (top-level *.ts only) does not
 // load it as an extension.
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { duration as formatDuration } from './text';
+import { duration as formatDuration } from '../core/text';
 
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const INTERVAL_MS = 90;

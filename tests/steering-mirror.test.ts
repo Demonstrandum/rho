@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { SteeringMirror } from '../extensions/lib/steering-mirror';
+import { SteeringMirror } from '../extensions/lib/session/steering-mirror';
 
 test('entries come back in the order pi queued them', () => {
     const mirror = new SteeringMirror();

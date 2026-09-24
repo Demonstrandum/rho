@@ -9,7 +9,7 @@ import {
     trashThrough,
     trashedAt,
     type Said,
-} from '../extensions/lib/file-store';
+} from '../extensions/lib/files/file-store';
 import {
     describe as describeEntry,
     keep,
@@ -18,7 +18,7 @@ import {
     revert,
     unchanged,
     type UndoEntry,
-} from '../extensions/lib/undo-journal';
+} from '../extensions/lib/files/undo-journal';
 
 const limits = { maxEntries: 10, maxBytes: 1_000_000 };
 const store = localStore();

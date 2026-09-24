@@ -6,10 +6,10 @@ where an entry here duplicates the header comment of its file, the file is the s
 
 ## system prompt
 
-`system-prompt.ts` assembles the system prompt from `system/prompt.md` (the master template) using `lib/prompt-loader.ts`.
+`system-prompt.ts` assembles the system prompt from `system/prompt.md` (the master template) using `lib/prose/prompt-loader.ts`.
 resolves `{{include:...}}` directives, fills `{{WORDS}}`/`{{PATTERNS}}` variables from wordswap exports, caches the result, appends once in `before_agent_start`.
 
-`lib/prompt-loader.ts` `PromptLoader` class: reads a template, resolves includes, fills variables, caches.
+`lib/prose/prompt-loader.ts` `PromptLoader` class: reads a template, resolves includes, fills variables, caches.
 
 `env-block.ts` appends an `<env>` block stating the working directory, whether it is a git work tree, the platform and its release, the date, and the active model with its thinking level.
 pi gives the working directory and then says the agent can inspect `PI_*` environment variables for the rest, which is a shell call for something a line of text can carry.
@@ -20,9 +20,9 @@ the git line has three states, not two: `probeRepo` answers `yes` or `no` from w
 folding a failed probe into `no` states a falsehood about the directory and leaves the agent no way to see that the probe was what failed, which is how the node runtime bug stayed invisible.
 every line is switchable from `[env]`.
 
-`bun-runtime.ts` + `lib/bun-launcher.ts` stop a session that is running under node, after trying to move it to bun.
+`bun-runtime.ts` + `lib/core/bun-launcher.ts` stop a session that is running under node, after trying to move it to bun.
 pi ships `dist/bundle/cli.js` with `#!/usr/bin/env node` and the shim on `PATH` is a symlink to that file, so one line decides the interpreter, and `pi update` restores it on every upgrade.
-rho is written against bun: `env-block.ts` and `lib/git-snapshot.ts` read the work tree with `Bun.spawn`, and under node that raises `ReferenceError: Bun is not defined`, which their `catch` turns into `git repo: no` and a missing `<git>` block.
+rho is written against bun: `env-block.ts` and `lib/git/git-snapshot.ts` read the work tree with `Bun.spawn`, and under node that raises `ReferenceError: Bun is not defined`, which their `catch` turns into `git repo: no` and a missing `<git>` block.
 the prompt then states a falsehood about the directory with nothing on screen to say why, which is worse than not starting, so the wrong runtime is a hard stop rather than a degraded session.
 the extension patches the shebang of `cli.js` and of `rpc-entry.js` beside it, then re-runs pi under bun by path with the same arguments and exits with the child's status: the patch fixes later launches, the re-run fixes the current one and does not depend on the patch having landed.
 `RHO_BUN_REEXEC` marks the child, and a child that arrives under node again means something outside rho selects node, so that case prints the note instead of looping.
@@ -31,27 +31,27 @@ the factory runs while pi is still starting up, before the TUI owns the terminal
 `[runtime]` switches the whole check off (`enforce-bun`), the patch (`patch-launcher`), or the re-run (`reexec`).
 `tools/bun-shebang.ts` runs the same repair from `postinstall`, and `bun run doctor` reports the launcher's interpreter.
 
-`git-snapshot.ts` + `lib/git-snapshot.ts` append a `<git>` block: the branch and its divergence from upstream, the dirty files, and the last few commit subjects.
+`git-snapshot.ts` + `lib/git/git-snapshot.ts` append a `<git>` block: the branch and its divergence from upstream, the dirty files, and the last few commit subjects.
 without it a session opens with the agent running `git status` and `git log` by hand to learn what it is standing in, and an agent that skips those edits from a wrong picture of the tree.
 the read starts at `session_start` and is awaited at the first turn: `git status` on a large work tree is not instant and `session_start` is awaited during startup, so blocking there delays the first paint, while by the time a prompt has been typed the read has finished.
 a read that has not finished is dropped rather than waited on, and so is a directory that is not a work tree.
 the dirty list is capped by `[git] max-files` and what is dropped is reported as a count, because a truncated list read as complete asserts a cleanliness that is not there.
 the block states that it does not update, which is the part that matters on a resume: the read runs again for every session, so the text is at worst one session old, and the agent is told to look again before acting on it.
-`lib/git-snapshot.ts` holds the parsing and the rendering, so both are testable without a repository.
+`lib/git/git-snapshot.ts` holds the parsing and the rendering, so both are testable without a repository.
 a read that produced no snapshot returns a `Failure` naming which of the two happened: `not-a-repo`, from git's own message with `LC_ALL=C` so the match does not depend on the locale, contributes no block; `unavailable`, from a spawn that threw, a timeout, or any other non-zero exit, renders a `<git>` block saying the tree was not read.
 exit 128 is not the discriminator, since git uses it for every fatal error.
 the distinction is what the agent acts on: a missing block reads as "no repository here", and a tree that was never read must not look like that.
 
-`scratchpad.ts` + `lib/scratchpad.ts` give the session one directory for intermediate files, name it in a `<scratch>` block, and export it as `RHO_SCRATCH` so a bash call reaches it without the path being retyped.
+`scratchpad.ts` + `lib/session/scratchpad.ts` give the session one directory for intermediate files, name it in a `<scratch>` block, and export it as `RHO_SCRATCH` so a bash call reaches it without the path being retyped.
 the alternative is what happened before it: temporary work goes to `/tmp`, mixed with every other process's files, surviving the session, and refused by any tool confined to the workspace.
 context-mode rejects a read outside the project root, so a `/tmp` file written by bash cannot then be summarised by `ctx_execute_file`.
 that refusal decides the default location: `.rho/scratch/<session>/` inside the working tree is readable by every tool and needs one `.gitignore` line.
 `[scratch] location = data-dir` moves it under the rho data directory for a working tree that must stay untouched, and `off` registers nothing.
-a session id keeps two concurrent sessions in one project apart, and an in-memory session shares one directory, which is the choice `lib/state-store.ts` makes for the same case.
+a session id keeps two concurrent sessions in one project apart, and an in-memory session shares one directory, which is the choice `lib/core/state-store.ts` makes for the same case.
 directories untouched for `[scratch] keep-days` are removed when a session opens.
 a working tree that cannot be written to yields no scratch directory rather than a failed session.
 
-`personality.ts` + `lib/personality.ts` add `/personality [name | path | off]`, which sets how the agent speaks for this session.
+`personality.ts` + `lib/prose/personality.ts` add `/personality [name | path | off]`, which sets how the agent speaks for this session.
 there is no default: with nothing picked, no `<personality>` block exists and the prompt says nothing about personalities at all.
 the mode is chosen by what the session already holds.
 before the first user or assistant message, the personality is appended to the system prompt on every turn (`prompt` mode); after one exists, it goes in as a single custom message and the prompt is left byte for byte as it was (`message` mode).
@@ -72,7 +72,7 @@ the six informal files carry one and the five formal ones do not, and a file wit
 details in `../anthropic-detection-findings.md`.
 its patterns ignore case and its replacements are written in the house style, so it holds whichever side of `prompt-disenshittify.ts` it runs on.
 
-`prompt-disenshittify.ts` rewrites the assembled system prompt into the house style on `before_agent_start`, through `lib/disenshittification.ts`.
+`prompt-disenshittify.ts` rewrites the assembled system prompt into the house style on `before_agent_start`, through `lib/prose/disenshittification.ts`.
 the text it changes is pi's own head and the tool snippets the bundled packages contribute: an em dash between clauses becomes the mark the sentence needs, characters and spacing follow `../system/orthography.md`, a sentence-initial capital falls, and a list item is punctuated `x; y; z.`
 every markdown file in rho is a fixed point of the transform, which `../tests/disenshittification.test.ts` asserts over the whole repository, so nothing written here is touched.
 
@@ -107,8 +107,8 @@ an escape written into message text does not survive the round trip into the mod
 also exports swap data and formatters consumed by `system-prompt.ts` for the vocabulary section.
 inspired by jola's claude code `MessageDisplay` hook (https://jola.dev/posts/how-to-stop-claude-from-saying-load-bearing).
 
-`auditor.ts` + `lib/audit.ts` review assistant prose against the writer rules with a second model, outside the conversation, so the model that wrote the text is not the one grading it.
-`lib/audit.ts` makes one constrained call through `ctx.modelRegistry.complete` (which resolves auth, headers, and baseUrl itself): system prompt is `system/writer-rules.md` plus the `auditor` skill body plus the configured audience, one user message holds the text, and a single forced `report_findings` tool returns `{location, token, rule, prerequisite, repair}` per violation, so the verdict is structured rather than prose.
+`auditor.ts` + `lib/model/audit.ts` review assistant prose against the writer rules with a second model, outside the conversation, so the model that wrote the text is not the one grading it.
+`lib/model/audit.ts` makes one constrained call through `ctx.modelRegistry.complete` (which resolves auth, headers, and baseUrl itself): system prompt is `system/writer-rules.md` plus the `auditor` skill body plus the configured audience, one user message holds the text, and a single forced `report_findings` tool returns `{location, token, rule, prerequisite, repair}` per violation, so the verdict is structured rather than prose.
 `auditor.ts` registers `/audit`, which reviews the last assistant message on the branch that carries prose.
 on demand only: there is no per-message hook, because a call on every reply would put a report beside every message and a correction into the history of every turn (a haiku call takes about 8 seconds and costs about $0.013 on a few hundred words; a footer status shows which model is running while it does).
 findings render to a `custom` entry in the transcript, per `[audit] feedback` (`transcript` or `both`; `context` shows nothing).
@@ -122,7 +122,7 @@ mechanism borrowed from everettmorgan's `pi-agent-review`, not from ponytail, wh
 in the picker: up/down move, enter takes, `d` deletes the highlighted entry, `ctrl+c` clears the stack (no confirmation; the cleared view offers `u` to undo, closes itself after 600ms, and then names `/stash undo`), `u` undoes the last delete or clear, esc cancels.
 one level of undo is kept, and it is retired by any push, pop, or take, so an undo can never restore a stack the user has since changed.
 picker keys are compared with `matchesKey`, not raw bytes, because ctrl+c arrives as a CSI-u sequence under the kitty keyboard protocol.
-`lib/picker.ts` is that list as a component the other extensions share, and it stays on screen while an action runs: `SelectList` has no setter for its items, so a changed list is a new `SelectList` swapped into the container rather than a new overlay.
+`lib/tui/picker.ts` is that list as a component the other extensions share, and it stays on screen while an action runs: `SelectList` has no setter for its items, so a changed list is a new `SelectList` swapped into the container rather than a new overlay.
 closing and reopening the whole overlay per keystroke was what made a run of stops or deletes redraw the screen once a row.
 a row with an action in the air says so in its description (`stopping...`), the cursor does not move, and the next row can be acted on before the first one returns; a second key on the same row is ignored, since two stops of one session is one stop and an error.
 an action that has to ask a question takes the terminal for a dialog, so its key is declared `suspends: true` and for that one the picker does close and reopen at the same cursor.
@@ -130,13 +130,13 @@ when the last row goes the picker closes rather than drawing an empty box, since
 in `/remote manage`: `d` stops, `r` renames, `x` deletes after a confirmation, and ctrl+d deletes with no question asked, which is the key for emptying a host a row at a time.
 both deletes send the runner's `delete`, which stops the session, waits for the socket to go and then removes the directory: `forget` refuses a running session, and `stop` signals the broker and returns, so a `forget` sent straight after a `stop` was refused for a session on its way out and the row stayed in the list.
 `/remote manage` updates the runner before it draws, because the keys are only as new as the code answering them.
-`ctrl+s` and `ctrl+r` are also built-in keys for picker-only actions (`app.models.save`, `app.session.toggleSort`, `app.session.rename`), and pi reports every shared key at startup even under `quietStartup`; on `session_start` the extension reads the resolved bindings (`getKeybindings().getResolvedBindings()`, via `lib/keybindings-store.ts`), finds every action holding a claimed key, and moves each to the next key of the `[stash] demote-to` pool in `rho.toml` (`f2`..`f6` by default) that nothing else uses.
+`ctrl+s` and `ctrl+r` are also built-in keys for picker-only actions (`app.models.save`, `app.session.toggleSort`, `app.session.rename`), and pi reports every shared key at startup even under `quietStartup`; on `session_start` the extension reads the resolved bindings (`getKeybindings().getResolvedBindings()`, via `lib/core/keybindings-store.ts`), finds every action holding a claimed key, and moves each to the next key of the `[stash] demote-to` pool in `rho.toml` (`f2`..`f6` by default) that nothing else uses.
 it never writes over an id already in `keybindings.json`, it runs at `session_start` because pi installs the keybindings manager during startup, and an empty pool skips the move and keeps the report.
 every binding is ctrl+letter because an alt binding never arrives on macOS unless the terminal sends option as meta.
 the pop key cycles: the first press parks whatever is in the editor and shows the newest entry, each further press with the text untouched shows the next entry rather than parking another copy, and the cycle returns to the text it started from.
-`lib/stash.ts` holds the state machine: a cycle keeps a snapshot of the stack taken when it began and recomputes the stack from that snapshot at every step, so repeated pops never reorder or duplicate entries.
+`lib/session/stash.ts` holds the state machine: a cycle keeps a snapshot of the stack taken when it began and recomputes the stack from that snapshot at every step, so repeated pops never reorder or duplicate entries.
 an edit to the editor text ends the cycle (detected by comparing against the text the last pop wrote), as does sending the message, since the editor is then empty.
-the stack is on disk through `lib/state-store.ts`, so it survives an exit, a resume, and a crash: `[stash] persist` in `rho.toml` keys it to the working directory (`project`, the default), the session (`session`), everything (`global`), or nothing (`off`).
+the stack is on disk through `lib/core/state-store.ts`, so it survives an exit, a resume, and a crash: `[stash] persist` in `rho.toml` keys it to the working directory (`project`, the default), the session (`session`), everything (`global`), or nothing (`off`).
 `Stash` takes the restored state and an `onChange` callback in its constructor and routes every change to the stack through one private method, so no mutation can skip the write; the state holds the entries and the id counter, and a counter stored behind its stack is raised past the highest id on parse so a restored stash cannot hand out an id the picker is already keyed on.
 the cycle and the undo are not stored, since both refer to an editor the next process does not have.
 the store is opened at `session_start`, where the cwd and the session id are available; the footer status shows `stash N` plus the cycle position.
@@ -145,13 +145,13 @@ the store is opened at `session_start`, where the cwd and the session id are ava
 pi's two ways in while the agent works both wait: enter queues a steering message for the end of the current assistant turn's tool calls, alt+enter queues a follow-up for the end of all work, and escape stops the run while keeping the editor text (`restoreQueuedMessagesToEditor`), so escape then enter is already the impatient path.
 `ctrl+enter` is that pair in one press.
 `ctx.abort()` in a shortcut context is escape itself (interactive-mode binds it to `restoreQueuedMessagesToEditor({ abort: true })`), so it writes the queued messages into the editor ahead of the typed text and clears pi's queue; the handler therefore reads the editor after the abort and sends queue-then-typed as one turn, with no way to deliver an entry twice.
-`ctrl+shift+enter` sends the newest queued message alone and puts the rest back in the editor; that one needs the entry text, and `ExtensionContext` exposes only `hasPendingMessages()`, so `lib/steering-mirror.ts` rebuilds the queue from the three events that change it: an `input` event with `streamingBehavior` `'steer'` (pi pushed), a user `message_start` whose text matches an entry (pi delivered, and splices by text match), and `hasPendingMessages()` false (pi cleared both queues, which escape and alt+up do together).
+`ctrl+shift+enter` sends the newest queued message alone and puts the rest back in the editor; that one needs the entry text, and `ExtensionContext` exposes only `hasPendingMessages()`, so `lib/session/steering-mirror.ts` rebuilds the queue from the three events that change it: an `input` event with `streamingBehavior` `'steer'` (pi pushed), a user `message_start` whose text matches an entry (pi delivered, and splices by text match), and `hasPendingMessages()` false (pi cleared both queues, which escape and alt+up do together).
 a stopped run does not settle synchronously and an extension cannot await it (`waitForIdle` is on the command context), so polling `ctx.isIdle()` in the handler read a stop that had not happened and reported a false timeout; the send is armed instead and delivered from `agent_settled`.
 while it is armed the footer carries the elapsed wait and a widget line names the held text, in `warning` colour once `[send-now] stall-warn-ms` passes, so a run that will not stop is distinguishable from a run that is working; pressing either key again puts the held text back in the editor.
 `[send-now] log` appends a timestamped line per key press, agent event, and send to `<data dir>/rho/send-now.log`, for locating where a run that will not stop is stuck.
 keys come from `[send-now]` in `rho.toml`; `ctrl+enter` and `ctrl+shift+enter` carry no built-in binding, so nothing is demoted, but a terminal without the kitty keyboard protocol sends a bare CR for all three of enter, ctrl+enter, and ctrl+shift+enter.
 
-`prompt-history.ts` + `lib/prompt-history.ts` persistent prompt history that survives across sessions.
+`prompt-history.ts` + `lib/session/prompt-history.ts` persistent prompt history that survives across sessions.
 patches `Editor.prototype.submitValue` to capture sent prompts and `Editor.prototype.navigateHistory` to capture unsent drafts before they are overwritten.
 on first arrow-key use, stored entries are appended to pi's own history array, so they become reachable through standard navigation.
 `/history` opens a picker over the full log with delete support.
@@ -159,20 +159,20 @@ on first arrow-key use, stored entries are appended to pi's own history array, s
 inside that overlay `ctrl+r` and the search key both step to an older match, so the shell habit works once it is open.
 the editor text comes in as the opening query when it is one line no longer than `[history] seed-query-chars` (default 40); anything longer is a draft rather than a search term, and the query opens empty.
 `ctrl+r` itself cannot be the opening key: `stash.ts` uses it to restore a parked prompt, and pi skips an extension shortcut that names one of its reserved bindings (`ctrl+t`, `ctrl+g`, `ctrl+o`, `ctrl+l`, `ctrl+p`, `ctrl+x`, `ctrl+k`, escape, enter, `ctrl+c`, `ctrl+d`), which rules out most of what is left.
-`ctrl+f` is pi's second key for `tui.editor.cursorRight`, the first being the right arrow, so `lib/keybindings-store.ts` `releaseKey` takes that one key off the built-in in `keybindings.json` and the arrow keeps working.
+`ctrl+f` is pi's second key for `tui.editor.cursorRight`, the first being the right arrow, so `lib/core/keybindings-store.ts` `releaseKey` takes that one key off the built-in in `keybindings.json` and the arrow keeps working.
 without that release pi reports the overlap at every start, since the report is printed even under `quietStartup`.
-the log is stored via `lib/state-store.ts` and scoped by `[history] persist` in `rho.toml` (`project` default, like stash).
+the log is stored via `lib/core/state-store.ts` and scoped by `[history] persist` in `rho.toml` (`project` default, like stash).
 `[history] max-entries` caps the log (default 500), `[history] save-drafts` toggles draft capture (default true), `[history] debounce-ms` controls how often the in-progress draft is snapshotted while typing (default 750ms).
-`lib/prompt-history.ts` is the testable state machine: the append-only log with deduplication and capping, `ReverseSearch` (a snapshot of the log, the query, and which match is under the cursor, holding that match while it still matches so deleting a character does not jump elsewhere), and `matchWindow`, which cuts an entry to the available width around the hit rather than from the head.
+`lib/session/prompt-history.ts` is the testable state machine: the append-only log with deduplication and capping, `ReverseSearch` (a snapshot of the log, the query, and which match is under the cursor, holding that match while it still matches so deleting a character does not jump elsewhere), and `matchWindow`, which cuts an entry to the available width around the hit rather than from the head.
 `tests/prompt-history.test.ts` pins the Editor prototype method names, so a pi-tui rename fails the test rather than silently capturing nothing.
 
 `input-field.ts` patches `CustomEditor.prototype.render` to style the input field: half-block edge characters (▄/▀) replace the thin ─ borders, content rows get a dark background derived from `userMessageBg`, and the edge rows can carry a horizontal gradient.
 all three behaviours are independently switched from `[input]` in `rho.toml`.
 under `[spinner] placement = "border"` the top edge is not replaced but spliced: `borderStatus` re-renders the working status for this width and `cutInto` puts it two cells in, covering as many cells as it prints so the row keeps its width.
-the column count comes from pi-tui's `visibleWidth` rather than `lib/text.ts`'s, because a spinner glyph out of the chinese set prints two columns and counting it as one leaves the row long enough to wrap.
+the column count comes from pi-tui's `visibleWidth` rather than `lib/core/text.ts`'s, because a spinner glyph out of the chinese set prints two columns and counting it as one leaves the row long enough to wrap.
 colours are sampled live from `borderColor` (tracks bash mode, thinking levels) and the theme's `userMessageBg`, so they follow theme and mode changes with no state tracking.
 falls back to pi's rows untouched in 256-colour mode.
-`lib/colour-spec.ts` holds the `"border@l+20"` spec resolver, which `command-hint.ts` reads out of the same config file.
+`lib/tui/colour-spec.ts` holds the `"border@l+20"` spec resolver, which `command-hint.ts` reads out of the same config file.
 
 `command-hint.ts` shows the form of the command being typed at the right-hand end of the input field, in the field's own trailing padding, so it costs no row and moves nothing.
 the fading is by proximity rather than by position: a character is blended towards the colour behind it by its distance from the end of the typed line, reaching `[hint] strength` over `[hint] fade` columns, so the hint retreats ahead of the cursor and the two are never legible in the same place.
@@ -183,12 +183,12 @@ clipping to a word boundary was tried first and is wrong: it drops several chara
 by column the leading character sits at a fixed distance from the line, so it holds one brightness, and a character half cut is one the fade has already taken to the background.
 reading the background means running after everything that paints one, so the patch goes on `CustomEditor.prototype.render` (`input-field.ts` replaces that method and calls the base itself, so a patch on the base would run inside it, before the background pass) and is installed at `session_start` rather than at load, when every extension has had its turn and whatever is on the prototype then is the whole of the rendering.
 `overlayHint` walks the row, keeps every escape where it was, and replaces only the visible characters under the hint, which is what carries those backgrounds through; each replaced character is preceded by its own foreground escape and the last is followed by `\x1b[39m`, never a full reset, since the background at that column is the row's to state.
-`lib/command-usage.ts` holds the grammar: a form is parsed into literal and value tokens, and the typed words rule forms out rather than ranking them, since a required literal contradicted means the reader is not typing that form.
+`lib/chrome/command-usage.ts` holds the grammar: a form is parsed into literal and value tokens, and the typed words rule forms out rather than ranking them, since a required literal contradicted means the reader is not typing that form.
 with one form left it is shown whole; with several, what is shown is the choice between them, so `/remote` offers `[connect|create|project|list|manage|stop]`, `/remote c` narrows it to `[connect|create]`, and `/remote conn` resolves to `/remote connect <name>`.
 ranking was the first attempt and answers a question nobody asked: `/remote` is not on its way to the first line of the table, it is on its way to one of six.
 forms come from the table in that file, or failing that from the usage fragments a command already writes into its own description (`/slack <app>, /slack off, /slack add <app>`), so a command that documents itself needs no entry; `declareUsage` lets an extension state its own.
-`lib/command-hint.ts` holds the placement and the overlay, apart from the patch, so both can be checked against a synthetic row without a terminal (`tests/command-hint.test.ts`).
-adding APC to `ESCAPE` in `lib/text.ts` was part of this: pi marks the hardware cursor position with `\x1b_pi:c\x07`, and counted as text it put every column measurement on a focused editor row seven out.
+`lib/chrome/command-hint.ts` holds the placement and the overlay, apart from the patch, so both can be checked against a synthetic row without a terminal (`tests/command-hint.test.ts`).
+adding APC to `ESCAPE` in `lib/core/text.ts` was part of this: pi marks the hardware cursor position with `\x1b_pi:c\x07`, and counted as text it put every column measurement on a focused editor row seven out.
 
 `prompt-inspect/index.ts` reads what was sent to the provider.
 nothing in it reads `ctx.getSystemPrompt()`: that reports the string pi built, and the model read the payload, which is that string after the provider serialiser has placed it (a top-level `system`, a list of cacheable blocks, a `systemInstruction`, or a leading `system` or `developer` message) and after any `before_provider_request` handler has rewritten it.
@@ -217,19 +217,19 @@ the bare form cannot be a command, so it goes through the `input` event, which s
 both paths call `ctx.shutdown()`, which is where `/quit` and ctrl+D end up; pi defers it until the agent is idle, so a word typed mid-turn ends the session once the turn settles rather than killing the run, and the handler says so.
 
 `cwd.ts` adds `/cwd [path]` to change the directory the agent operates in, mid-session.
-the target is stored per session (`lib/state-store.ts`, `[cwd] remember`, on by default), so a resume chdirs back and re-registers the tools against it; a stored directory that no longer exists is dropped without a message and the session keeps the directory pi started it in.
+the target is stored per session (`lib/core/state-store.ts`, `[cwd] remember`, on by default), so a resume chdirs back and re-registers the tools against it; a stored directory that no longer exists is dropped without a message and the session keeps the directory pi started it in.
 `moveHere` is exported from it, because `project.ts` lands a checkout somewhere and the session is meant to be standing in it: everything that moves this machine's session goes through the one function that re-registers pi's tools against the new directory.
 
-`lib/where-note.ts` sends the agent the facts it opened with, whenever something moves it.
+`lib/git/where-note.ts` sends the agent the facts it opened with, whenever something moves it.
 the `<env>` and `<git>` blocks are built before the first turn and describe where the session started, while `/cwd`, a project checkout, and attaching or detaching an environment all move the ground after that, and each of them only called `ui.notify`, which is drawn for the person and is not in the conversation: the agent went on reasoning about the old directory, the old machine, and the old branch.
 the note is one custom message, `location`, carrying the machine, the directory, and a `<git>` block for the tree that is there; the renderer draws a single line and the block is read when the row is expanded.
-the git read is a `GitRunner` (`lib/git-snapshot.ts` takes one), so the tree on another machine is read by `git -C <dir>` through `capture` on the environment's connection rather than by this machine's git, which would answer about a directory of the same name here or about nothing at all.
+the git read is a `GitRunner` (`lib/git/git-snapshot.ts` takes one), so the tree on another machine is read by `git -C <dir>` through `capture` on the environment's connection rather than by this machine's git, which would answer about a directory of the same name here or about nothing at all.
 `environment.ts` folds the same block into the message it already sends when a machine is attached or released, so a change of machine reports the branch and the dirty files rather than only `git repo: yes`.
 
 ## rendering
 
 `spinner.ts` sets the working indicator and shimmering message, driven by `assets/spinners.json`, `assets/maxims.txt`, and `assets/verbs.txt`; shimmer, glyphs, and completion line adapted from pi-claude-shimmer (MIT).
-`[spinner] placement` picks which surface they are drawn on, and `lib/working-status.ts` holds pi to that choice.
+`[spinner] placement` picks which surface they are drawn on, and `lib/chrome/working-status.ts` holds pi to that choice.
 pi 0.85 moved the indicator from the row below the input field into the field's top border, drawn by `CustomEditor.renderTopBorder`, which is where `input-field.ts` writes its half-block edge: the status was rendered and then overwritten every frame, so the spinner vanished on that release with nothing in rho having changed.
 `dock` (the default) clears `embedWorkingStatus`, which sends the indicator back to the status container, gives a long message the full width, and leaves the edge rho's to draw whole; `border` keeps pi's arrangement and has `input-field.ts` cut the rendered status into the edge.
 
@@ -240,7 +240,7 @@ resource data comes from `pi.getCommands()` (split by `source`) and `ctx.ui.getA
 
 the spend field states what the session is charged and puts the api-price total in parentheses behind it, `$0.000 ($1.234)`.
 pi computes one figure, the token counts of the transcript at api list prices, and on a subscription nobody pays it: the plan does, so printing it alone shows a bill that is not owed.
-`lib/billing.ts` reads the anthropic unified rate-limit headers on `after_provider_response` (a representative claim of `five_hour` or `seven_day` is a plan window, anything else is the overage pool) and adds the cost of the following assistant message to a charged total while the mode is extra usage.
+`lib/model/billing.ts` reads the anthropic unified rate-limit headers on `after_provider_response` (a representative claim of `five_hour` or `seven_day` is a plan window, anything else is the overage pool) and adds the cost of the following assistant message to a charged total while the mode is extra usage.
 so the leading figure is zero for as long as the plan covers the session, and rises in `warning` colour once anthropic meters requests outside it, while the parenthetical stays the whole session at api prices.
 without OAuth the field is the api-price figure alone, since there the two are the same number.
 a resumed session starts its charged total at zero: the headers of the earlier turns are gone, and only the api-price total can be recomputed from the transcript.
@@ -303,22 +303,22 @@ shortening is a ladder per part, longest to shortest, and `fitLadders` degrades 
 the extension that owns the identifier learns that while doing its own work, not while rendering, so `slack.ts` writes what it learns and the renderer reads it back.
 the table lives on `globalThis`, because `/reload` replaces the module and the writer and the reader would otherwise hold two copies of it.
 
-`theme.ts` + `lib/theme-sample.ts` change the theme without asking anyone to imagine it.
+`theme.ts` + `lib/chrome/theme-sample.ts` change the theme without asking anyone to imagine it.
 `/theme <name>` completes over the loaded themes and applies each one as its name passes under the cursor, because the thing being chosen is a session, not a word in a list.
 `/theme-picker` is the same choice made against a sample session.
 
 previewing needs two things pi does not hand over.
-the completion menu reports what is chosen and not what is merely highlighted, so `lib/autocomplete-focus.ts` patches the editor at the two points where the menu's life changes and gives the highlighted item to whichever watcher claims the menu, by the editor's text rather than by the completion prefix (the prefix of `/theme dar` is `dar`, which names no command).
+the completion menu reports what is chosen and not what is merely highlighted, so `lib/tui/autocomplete-focus.ts` patches the editor at the two points where the menu's life changes and gives the highlighted item to whichever watcher claims the menu, by the editor's text rather than by the completion prefix (the prefix of `/theme dar` is `dar`, which names no command).
 and `ctx.ui.setTheme(name)` writes the name into pi's settings, which is right for a choice and wrong for the dozen themes passed over on the way to one: handed a `Theme` object instead, pi applies it and saves nothing, so that is the form a preview takes.
-`lib/preview-hold.ts` holds what the first preview replaced, so a menu closed without a choice goes back to the theme that was there and not to the one previewed before it.
+`lib/tui/preview-hold.ts` holds what the first preview replaced, so a menu closed without a choice goes back to the theme that was there and not to the one previewed before it.
 
-the picker is a full-screen overlay drawn by the things that draw a real session: the startup header above it is `lib/startup-header.ts`, which `startup.ts` also draws, and the footer under it is the session's own, which `footer.ts` leaves in `lib/footer-mirror.ts` on every frame because pi builds a `FooterComponent` from an `AgentSession` an extension is never handed.
+the picker is a full-screen overlay drawn by the things that draw a real session: the startup header above it is `lib/chrome/startup-header.ts`, which `startup.ts` also draws, and the footer under it is the session's own, which `footer.ts` leaves in `lib/chrome/footer-mirror.ts` on every frame because pi builds a `FooterComponent` from an `AgentSession` an extension is never handed.
 the transcript between them is pi's components: `UserMessageComponent`, `ToolExecutionComponent` (with pi's read renderer, and with a tool that has no renderer, which is the row `tool-rows.ts` fills in), `AssistantMessageComponent` with a thinking block, pi's own `ThemeSelectorComponent` for the list, and a real `CustomEditor` holding a line nobody sent, so the input field is the field, this package's patch of it included.
 the frame is composed to exactly the terminal height every time: the header and the question are pinned, the list, the input field and the footer sit at the bottom, and the sample transcript takes what is left, read from its end the way a session is.
 the spare rows go above the header, as head room, which is where a short session's blank space is; anywhere else they open a gap inside it.
 so nothing moves as the card animates or as a taller theme is previewed, and every line is padded to the width, since an overlay covers only where it puts characters.
 
-`syntax.ts` + `lib/syntax-palette.ts` choose the colours code is drawn in, apart from the theme that draws everything else.
+`syntax.ts` + `lib/chrome/syntax-palette.ts` choose the colours code is drawn in, apart from the theme that draws everything else.
 pi keeps one theme and the nine syntax colours are keys inside it, so a theme that is right for the borders and the footer also fixes the colouring of every code block, diff and file read.
 `/syntax <name>` completes over the palettes in `extensions/assets/syntax.json` and applies each one as its name passes under the cursor, the way `/theme` does; `/syntax` with no argument opens a picker with a code sample above the list; `/syntax none` goes back to the theme's own colours.
 
@@ -332,7 +332,7 @@ so it answers every colour correctly while failing `instanceof Theme`, and `ui.s
 a palette laid over the proxy is therefore applied as a name, silently, and nothing changes on screen; `restyle` resolves the instance behind the proxy first, and falls back to what it was handed when that global is absent, which is the case in a test.
 
 the picker is the bordered box every other picker in a session is, drawn in the dock where pi draws them rather than as an overlay over the transcript: the names are on the left and the code they colour is on the right, which is the comparison being made.
-`lib/side-by-side.ts` is the placement, since pi's components each render to lines for a width and a `Container` only stacks them: the left component is rendered at a fixed width and padded to it, the right lines are clipped to what is left, and below a minimum width the two stack instead.
+`lib/tui/side-by-side.ts` is the placement, since pi's components each render to lines for a width and a `Container` only stacks them: the left component is rendered at a fixed width and padded to it, the right lines are clipped to what is left, and below a minimum width the two stack instead.
 
 the sample is highlighted by pi's own `highlightCode` through the theme in force, so what the list previews is the colouring a code block in the transcript gets.
 it is highlighted on every frame rather than once, because the theme it is highlighted through is what the cursor is changing.
@@ -341,7 +341,7 @@ pi caches its cli-highlight theme against the identity of the current theme obje
 a palette outlives the theme it was chosen over, so `theme.ts` puts it back on: `withChosenPalette` wraps whatever theme is being applied, and where `[theme] persist` writes the name through pi's settings, the palette goes on again afterwards, since that path applies the theme bare.
 the choice itself is in rho's own global state (`[syntax] persist`), because pi's settings hold a theme name and have nowhere to record this.
 
-`lib/intro-card.ts` is one playing of the wordmark intro: it picks its mode, wordmark and shimmer direction from `[startup]` at construction and renders as a pure function of elapsed milliseconds.
+`lib/chrome/intro-card.ts` is one playing of the wordmark intro: it picks its mode, wordmark and shimmer direction from `[startup]` at construction and renders as a pure function of elapsed milliseconds.
 `startup.ts` draws one at session start and the picker builds another on every preview, which is how a theme is first seen.
 
 `image-width.ts` persists `terminal.imageWidthCells` (from `[images] width` in `rho.toml`, default 60) into the global pi settings, so inline images (e.g. from `fetch_content`) have a set width (idempotent, same helper as `silence-extra-usage-warning`).
@@ -352,8 +352,8 @@ pi supplies a width only and lets the rows follow the aspect ratio, so a 640x537
 the cap is read from `process.stdout.rows` at render time, so a resize needs no state, and the render cache (keyed on width alone) is dropped whenever the cap changes.
 `tests/image-size.test.ts` pins the option name, since a rename in pi-tui would silently disable the cap.
 
-`lib/pi-logo.ts` the pi wordmark intro animation, as pure functions of elapsed time.
-`lib/tetris-logo.ts` the tetris intro: four tetrominoes drop onto an 8x9 board, the bottom row fills and clears, and what remains is the pi glyph, ported from pi.dev.
+`lib/chrome/pi-logo.ts` the pi wordmark intro animation, as pure functions of elapsed time.
+`lib/chrome/tetris-logo.ts` the tetris intro: four tetrominoes drop onto an 8x9 board, the bottom row fills and clears, and what remains is the pi glyph, ported from pi.dev.
 
 ## billing and provider payloads
 
@@ -375,13 +375,13 @@ a directory the guard admits can still fail every turn: a work tree holding a pa
 another is a work tree that contains the checkpoint storage itself, when `.pi/` is not ignored there: git reads the shadow repo under `.pi/agent/ayu/checkpoints/sessions/<id>` as a submodule, that repo has no work tree of its own, and the staging command dies with `fatal: 'git status --porcelain=2' failed in submodule`.
 both are decided before the first turn instead of during one: the guard runs `git status --porcelain=2` in the work tree at startup, which is the scan `git add -A` performs, with a five-second limit that also catches a tree too large to walk.
 `[rewind] on-failure` (`disable-session`, the default) states the reason in one line at the top of the session, `/rewind is off here: <cwd> is not a git repo.` or `... git cannot stage <cwd> (<the fatal line>).`, and says nothing after that.
-the wrapper `rewind-guard.ts` puts around `ctx.ui.notify` drops every `Checkpoint failed:` and `Checkpoint finalization failed:` notification (pi-rewind stages twice per turn and words the two differently), and `lib/checkpoint-breaker.ts` patches `RepoManager.prototype.stageAll` to throw at once once a failure has happened, so no later turn spawns git or waits.
+the wrapper `rewind-guard.ts` puts around `ctx.ui.notify` drops every `Checkpoint failed:` and `Checkpoint finalization failed:` notification (pi-rewind stages twice per turn and words the two differently), and `lib/session/checkpoint-breaker.ts` patches `RepoManager.prototype.stageAll` to throw at once once a failure has happened, so no later turn spawns git or waits.
 a warning under every reply is worse than no checkpoints: the condition does not change during a session, the reader cannot act on the repetition, and it lands under unrelated work.
 the class is not exported, so the instance whose prototype is patched comes from `resolveSessionCheckpointStorage` (side-effect free, and the storage directory exists by the time a checkpoint has failed), imported by file path from the chunk pi-rewind's own entry imports, since node keys the module cache on the resolved file url.
 that export name is minified; `tests/checkpoint-breaker.test.ts` pins it, because a rename would leave every turn waiting on a checkpoint that cannot succeed.
 `keep-trying` restores pi-rewind's behaviour of one attempt and one warning per turn.
 
-`remove.ts` and `undo.ts` + `lib/file-store.ts`, `lib/acting-file.ts`, `lib/undo-journal.ts` stop `write` destroying a file, give the agent a way to destroy one on purpose, and give it a way to take either back.
+`remove.ts` and `undo.ts` + `lib/files/file-store.ts`, `lib/files/acting-file.ts`, `lib/files/undo-journal.ts` stop `write` destroying a file, give the agent a way to destroy one on purpose, and give it a way to take either back.
 pi's write is `mkdir` then `writeFile` (`dist/core/tools/write.js`): it does not stat the path, does not require that the file was read, and does not compare what is there with what the model last saw, so a model whose picture of a file is two turns old replaces every byte in it with one call.
 `[files] overwrite = 'refuse'` blocks that call in `tool_call` when the target holds bytes, and the block names the two ways through, `edit` for part of a file and `remove` for the whole of it.
 a write is let through when the path is absent, when the file is empty, and when its contents already hash to what is being written, since none of those destroy anything.
@@ -401,11 +401,11 @@ neither mechanism knows about the other, and an undo leaves `/rewind`'s checkpoi
 the copy never crosses the wire.
 `capture` caps one command's output at 64 KiB, so pulling a remote file back into this process would truncate it silently at about 48 KiB of source, and a backup is instead a `cp` made on the machine the file is on, under `~/.rho/undo/<session>` there or rho's data directory here.
 only a stat line and a sha256 travel.
-`lib/acting-file.ts` resolves a tool argument the way `environment.ts` does, so `local:/path`, a plain path, and `user@host:/path` each reach the machine the tool call itself reached; a path addressed at a machine nothing is attached to is left alone rather than guessed at, by the guard and by the journal both.
+`lib/files/acting-file.ts` resolves a tool argument the way `environment.ts` does, so `local:/path`, a plain path, and `user@host:/path` each reach the machine the tool call itself reached; a path addressed at a machine nothing is attached to is left alone rather than guessed at, by the guard and by the journal both.
 
-`goal.ts` + `lib/goal.ts` port claude code's `/goal`: `/goal <condition>` sets a stopping condition, and the session keeps working until a second model says the condition holds.
+`goal.ts` + `lib/model/goal.ts` port claude code's `/goal`: `/goal <condition>` sets a stopping condition, and the session keeps working until a second model says the condition holds.
 the division of labour is the whole point: the model doing the work does not decide when the work is done, since an agent twenty turns into a migration is the worst available judge of whether the migration is finished.
-after each turn a separate model reads the transcript and answers one forced `report_verdict` call, `{ok, reason, impossible?}`, through `ctx.modelRegistry.complete` (the same path `lib/audit.ts` uses, whose `forcedToolChoice` and `resolveReviewer` are shared rather than copied).
+after each turn a separate model reads the transcript and answers one forced `report_verdict` call, `{ok, reason, impossible?}`, through `ctx.modelRegistry.complete` (the same path `lib/model/audit.ts` uses, whose `forcedToolChoice` and `resolveReviewer` are shared rather than copied).
 an unmet verdict is fed back as the next turn's input, so the loop carries the difference between the current state and the condition rather than re-sending the original prompt; `/loop` in claude code, which re-runs a prompt on a timer, has no such signal.
 the judge gets no tools, which is a constraint on the writer of the condition: it can only rule on what the agent has already put in the transcript, so `npm test exits 0` is decidable and "the code is clean" collects `insufficient evidence in transcript` forever.
 thinking blocks are left out of the rendered transcript for the same reason, since a verdict read off deliberation is the self-assessment this design removes.
@@ -420,14 +420,14 @@ the judge itself may rule the condition impossible, which clears the goal with a
 the transcript is trimmed to `[goal] transcript-fraction` of the judge's context window, oldest entries first, and a trimmed transcript carries a notice telling the judge to answer `insufficient evidence in transcript` when the evidence it needs may be in the dropped part.
 the budget is in characters at four to a token, which is the ratio pi estimates with, since an extension has no tokeniser.
 verdicts render through `registerEntryRenderer`, so each check is visible in the transcript without entering the LLM context; only the fed-back reason does.
-the judge runs between turns, where pi draws nothing, so `lib/widget-spinner.ts` animates a widget for the wait; `[goal] checking-messages` says what it reads, as one string used every time, an array drawn from per check, or the empty default, which draws from `assets/maxims.txt` so a check reads like every other wait in the session.
-the condition is on disk through `lib/state-store.ts` at session scope (`[goal] persist`), so a resume restores it, with the timer, the turn count, and the block count reset, since those measure this run of the loop rather than the condition.
+the judge runs between turns, where pi draws nothing, so `lib/chrome/widget-spinner.ts` animates a widget for the wait; `[goal] checking-messages` says what it reads, as one string used every time, an array drawn from per check, or the empty default, which draws from `assets/maxims.txt` so a check reads like every other wait in the session.
+the condition is on disk through `lib/core/state-store.ts` at session scope (`[goal] persist`), so a resume restores it, with the timer, the turn count, and the block count reset, since those measure this run of the loop rather than the condition.
 not ported: claude code's check-ins on long-running background work, which back off from 30 minutes and cap at three while idle.
 pi has no background task registry an extension can read, so the loop instead skips a turn whose message queue is not empty and evaluates once the queued message has landed.
 
 `search.ts` adds `/search <words>` and a `pi_search` tool over pi's own commands and documentation.
 pi's `/` completion fuzzy-matches command names only (pi-tui's `CombinedAutocompleteProvider` filters with `fuzzyFilter(items, prefix, (item) => item.name)` and attaches the description afterwards, for display), nothing searches the docs, and the agent can reach neither, so `/export` is unreachable from the word "jsonl".
-`lib/pi-docs.ts` builds one index over three sources: the built-in commands parsed out of `<pi>/dist/core/slash-commands.js` (that array is not re-exported and the package `exports` map has only `.`, `./rpc-entry`, `./client`, so a deep import does not resolve; a release that moves the file yields zero built-ins and a warning line rather than an exception), the session commands from `pi.getCommands()` (extension commands, prompt templates, skills, with provenance; built-in interactive commands are documented as excluded, which is why the first source exists), and every heading section of `<pi>/README.md` and `<pi>/docs/*.md` plus any path in `[search] doc-roots`.
+`lib/model/pi-docs.ts` builds one index over three sources: the built-in commands parsed out of `<pi>/dist/core/slash-commands.js` (that array is not re-exported and the package `exports` map has only `.`, `./rpc-entry`, `./client`, so a deep import does not resolve; a release that moves the file yields zero built-ins and a warning line rather than an exception), the session commands from `pi.getCommands()` (extension commands, prompt templates, skills, with provenance; built-in interactive commands are documented as excluded, which is why the first source exists), and every heading section of `<pi>/README.md` and `<pi>/docs/*.md` plus any path in `[search] doc-roots`.
 ranking is term frequency weighted by inverse document frequency, so "session" (in half the records) decides nothing and "machine" (in five) decides everything; a match inside a longer word scores a fifth of a whole-word match, so `gist` returns `/share` rather than every mention of `registerProvider`; a query term that is no substring of a command name still matches it as a subsequence, so `expot` finds `/export`.
 results render as a `registerEntryRenderer` CustomEntry, which draws in the transcript without entering the LLM context.
 the index is built on first use and held for the session, so `/reload` is what picks up a pi upgrade.
@@ -457,7 +457,7 @@ the reasoning, the traps, and what is deliberately not built are in `extensions/
 
 `sample-session.ts` opens a session made up to be looked at: `pi --sample-session`, or `/sample-session` in a running one.
 the things that draw a session are hard to work on without one, and the sessions that exist are somebody's work, with their paths, their keys, and their mistakes in it, so none of them can go in a screenshot or be replayed on another machine.
-`lib/sample-session.ts` builds one from nothing: every entry kind in `docs/session-format.md`, three branch points, thinking blocks, a tool call whose result is an error, an aborted reply, a branch summary, a label, and a `custom_message` standing in for a summarised span.
+`lib/session/sample-session.ts` builds one from nothing: every entry kind in `docs/session-format.md`, three branch points, thinking blocks, a tool call whose result is an error, an aborted reply, a branch summary, a label, and a `custom_message` standing in for a summarised span.
 it is deterministic, fixed ids and a fixed clock, so two runs write identical files and a test can name an entry.
 
 two things about how it opens were learned the hard way.
@@ -494,7 +494,7 @@ the surgery has to respect three things a session file can express: a surviving 
 so a selection endpoint landing inside a tool-call pair widens to cover it, a delete either re-chains what hung off the span or takes the subtree with it, a label whose target went is removed and its own children re-chained past it, and a compaction retargets to the nearest surviving ancestor, which keeps its kept range as wide as it was and never wider.
 a summarised span collapses to one `custom_message` of type `rho-summary`, which participates in context as a `custom` entry does not, and stays clear of the bookkeeping pi's own compaction entries carry.
 
-committing writes the edited tree to a new session file through `lib/session-file.ts` and switches to it.
+committing writes the edited tree to a new session file through `lib/session/session-file.ts` and switches to it.
 pi's own copies (`/fork`, `/clone`, `SessionManager.createBranchedSession`) keep one root-to-leaf path, since both commands exist to start a new line of work; this copy keeps every branch, and the file being edited is never written, so it is the backup and `/resume` is the way back to it.
 leaving with edits pending asks commit, discard, or keep editing; leaving with none behaves as pi's tree always has, including the branch-summary prompt.
 `/session-copy` and `/session-backup` are the same whole-tree copy without an edit, one switching to the copy and one staying put.
@@ -509,7 +509,7 @@ every private of pi's the file reaches is named one by one in an interface, so a
 an rho installed as a local path is a working checkout that pi never touches, so the commits arrive here by `git merge --ff-only` against the tracked branch, and `bun install` follows only when the incoming range touched a manifest.
 nothing else moves the checkout: a divergence, an upstream that is not set, and a conflict with uncommitted work are reported rather than resolved, since a rebase rewrites history and a reset discards what is in the tree.
 git refuses a fast-forward exactly when the incoming commits touch a file with unstaged changes, so the merge is attempted and git's own refusal is the message.
-the third is the launcher's shebang, which a pi self-update rewrites back to node: rho's postinstall runs only for a package install, so `lib/bun-launcher.ts` repairs it again here.
+the third is the launcher's shebang, which a pi self-update rewrites back to node: rho's postinstall runs only for a package install, so `lib/core/bun-launcher.ts` repairs it again here.
 pi's new version is not this process's, which is already running the old bundle, so the report names the version change and leaves it to the next start; `/reload` picks up the extensions and resources, and runs only when a step moved something on disk.
 
 `colab.ts` puts the agent and the person in one marimo kernel.
@@ -546,39 +546,39 @@ this is the pattern the environment and remote tools use, moved one event earlie
 
 ## shared libraries
 
-`lib/config.ts` the `rho.toml` loader: every `[section] key` named in these entries resolves through it.
+`lib/core/config.ts` the `rho.toml` loader: every `[section] key` named in these entries resolves through it.
 the file is kebab-case throughout, sections included: a section is named by its schema property, which has to be a javascript identifier, so `tomlName` derives `[send-now]` from `sendNow` on the way out and resolves it back on the way in.
 a name spelled any other way that squashes to a known one (`[sendNow]`, `halfBlocks`, `half_blocks`) still applies its values, and the problem list names the spelling to move to, so renaming a section never costs anyone their settings.
 
-`lib/state-store.ts` `PersistedState<T>`, the store for extension state that used to die with the process (the stash stack, the `/noswap` toggle, the `/cwd` target, the prompt history).
+`lib/core/state-store.ts` `PersistedState<T>`, the store for extension state that used to die with the process (the stash stack, the `/noswap` toggle, the `/cwd` target, the prompt history).
 one json file per scope under `<data dir>/rho/state/<scope>/`: `global` (one file), `project` (one file per working directory, named `<basename>-<sha256 prefix>` so two projects sharing a basename stay separate), `session` (one file per session uuid, so a resume finds its own state).
 a `StateSpec<T>` carries the file name, the scope, and a `parse` validator, so a file from an older version, a truncated file, or a hand-edited one reads as no state rather than a value of the wrong shape.
 writes go to a temp file and a rename, so a kill mid-write leaves the previous file intact.
 opening a session-scoped store prunes files of that name not written to for 30 days.
 an in-memory session (no uuid) gets no file and every call is a no-op.
 
-`lib/widget-spinner.ts` the animated widget both out-of-turn model calls wait behind (`/audit`'s review, the goal loop's judge).
+`lib/chrome/widget-spinner.ts` the animated widget both out-of-turn model calls wait behind (`/audit`'s review, the goal loop's judge).
 `ctx.modelRegistry` exposes `complete()` and not `stream()`, so neither call can show tokens as they generate, and `setWorkingMessage`/`setWorkingIndicator` are documented as belonging to an active agent turn, which neither a command handler nor a settled session is.
 with no UI (print or json mode) the work runs and nothing is drawn.
 
-`lib/working-status.ts` where the working indicator is drawn, and the one place that knows it.
+`lib/chrome/working-status.ts` where the working indicator is drawn, and the one place that knows it.
 `embedWorkingStatus` is per editor instance and the editor is built in interactive-mode's constructor, so an extension cannot set it at construction and be sure it loaded first; interactive-mode calls `setWorkingStatusIndicator` on the default editor before every `isWorkingStatusEditor` check, so patching that method decides the placement whatever the load order was.
 the flag is declared `readonly` and the indicator `private`, so the runtime shape is named in this file and the casts stay in it.
 
-`lib/settings-store.ts` shared helper (`ensureGlobalSetting`) for the idempotent nested global-settings writes.
+`lib/core/settings-store.ts` shared helper (`ensureGlobalSetting`) for the idempotent nested global-settings writes.
 it lives in a subdirectory because extension auto-discovery loads top-level `*.ts` only.
 
-`lib/text.ts` the text primitives every extension here was writing for itself: escape stripping and visible-column splicing, truncation and one-line previews, plurals and series and abbreviated counts, durations and relative times, identifier words, and `~` paths.
-it is the layer under the prose modules: `lib/reflow.ts` decides where a sentence ends and `lib/disenshittification.ts` rewrites to the house style, while this holds the operations both of those, and every renderer, need.
+`lib/core/text.ts` the text primitives every extension here was writing for itself: escape stripping and visible-column splicing, truncation and one-line previews, plurals and series and abbreviated counts, durations and relative times, identifier words, and `~` paths.
+it is the layer under the prose modules: `lib/prose/reflow.ts` decides where a sentence ends and `lib/prose/disenshittification.ts` rewrites to the house style, while this holds the operations both of those, and every renderer, need.
 a function belongs here when two call sites would otherwise each write it and the answer does not depend on where it is shown.
 `abbreviate` carries the one distinction that is real rather than accidental: `compact` keeps a fixed number of columns for a status line (`2.0k`), `fine` drops a trailing zero and always offers a decimal for a readout (`15.2k`).
 
-`lib/template.ts` the shared `{{...}}` evaluator.
-`lib/source-str.ts` a String subclass carrying source provenance through template interpolation, used by the prompt explorer.
-`lib/utils.ts` small helpers moved verbatim out of `startup.ts` and `spinner.ts`.
-`lib/keybindings-store.ts` reads and writes pi's resolved keybindings, for the stash demotion.
-`lib/steering-mirror.ts` rebuilds pi's steering queue from the events that change it.
-`lib/audit.ts`, `lib/goal.ts`, `lib/stash.ts`, `lib/prompt-history.ts`, `lib/pi-docs.ts`, `lib/checkpoint-breaker.ts`, `lib/prompt-loader.ts` are described with the extensions that use them, above.
+`lib/core/template.ts` the shared `{{...}}` evaluator.
+`lib/core/source-str.ts` a String subclass carrying source provenance through template interpolation, used by the prompt explorer.
+`lib/core/utils.ts` small helpers moved verbatim out of `startup.ts` and `spinner.ts`.
+`lib/core/keybindings-store.ts` reads and writes pi's resolved keybindings, for the stash demotion.
+`lib/session/steering-mirror.ts` rebuilds pi's steering queue from the events that change it.
+`lib/model/audit.ts`, `lib/model/goal.ts`, `lib/session/stash.ts`, `lib/session/prompt-history.ts`, `lib/model/pi-docs.ts`, `lib/session/checkpoint-breaker.ts`, `lib/prose/prompt-loader.ts` are described with the extensions that use them, above.
 
 ## ci and tooling
 

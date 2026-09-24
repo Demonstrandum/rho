@@ -2,9 +2,9 @@ import { test, expect } from 'bun:test';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { SessionEntry } from '@earendil-works/pi-coding-agent';
-import { SAMPLE_LEAF, sampleEntries } from '../extensions/lib/sample-session';
+import { SAMPLE_LEAF, sampleEntries } from '../extensions/lib/session/sample-session';
 import { sampleArgv } from '../extensions/sample-session';
-import { writeSessionCopy } from '../extensions/lib/session-file';
+import { writeSessionCopy } from '../extensions/lib/session/session-file';
 import { pathTo, runIds, treeOf, unitRun } from '../extensions/session-tree/edit';
 
 const entries = sampleEntries();

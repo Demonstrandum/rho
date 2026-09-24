@@ -24,10 +24,10 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
-import { bunBinary, describe, findLauncher, repairLaunchers } from './lib/bun-launcher';
-import { completeLastWord } from './lib/complete-words';
-import { rhoRoot } from './lib/rho-root';
-import { withSpinner } from './lib/widget-spinner';
+import { bunBinary, describe, findLauncher, repairLaunchers } from './lib/core/bun-launcher';
+import { completeLastWord } from './lib/tui/complete-words';
+import { rhoRoot } from './lib/core/rho-root';
+import { withSpinner } from './lib/chrome/widget-spinner';
 
 const ROOT = rhoRoot(fileURLToPath(import.meta.url));
 

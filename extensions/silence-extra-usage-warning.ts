@@ -5,7 +5,7 @@
 // fix is a one-time idempotent settings write (same pattern as clear-on-shrink).
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { ensureGlobalSetting } from './lib/settings-store';
+import { ensureGlobalSetting } from './lib/core/settings-store';
 
 export default function (pi: ExtensionAPI) {
     pi.on('session_start', async (_event, ctx) => {

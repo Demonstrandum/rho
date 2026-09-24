@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PersistedState, type StateSpec } from '../extensions/lib/state-store';
-import { parseStashState, Stash, STASH_STATE_VERSION } from '../extensions/lib/stash';
+import { PersistedState, type StateSpec } from '../extensions/lib/core/state-store';
+import { parseStashState, Stash, STASH_STATE_VERSION } from '../extensions/lib/session/stash';
 
 interface Counter {
     readonly version: 1;

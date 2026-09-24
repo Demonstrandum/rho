@@ -50,11 +50,11 @@ import {
     type HistoryEntryId,
     type HistoryState,
     type SearchView,
-} from './lib/prompt-history';
-import { releaseKey } from './lib/keybindings-store';
-import { PersistedState, type StateScope } from './lib/state-store';
-import { config } from './lib/config';
-import { ago, preview as previewOf } from './lib/text';
+} from './lib/session/prompt-history';
+import { releaseKey } from './lib/core/keybindings-store';
+import { PersistedState, type StateScope } from './lib/core/state-store';
+import { config } from './lib/core/config';
+import { ago, preview as previewOf } from './lib/core/text';
 
 const STATE_NAME = 'prompt-history';
 const PREVIEW_CHARS = 72;

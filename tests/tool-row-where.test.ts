@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { callPreview } from '../extensions/lib/tool-row/preview';
-import { visibleWidth } from '../extensions/lib/text';
+import { visibleWidth } from '../extensions/lib/core/text';
 
 /**
  * A command that ran on another machine looked exactly like one that ran here.

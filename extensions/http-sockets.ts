@@ -26,7 +26,7 @@
 
 import * as undici from 'undici';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
+import { config } from './lib/core/config';
 
 /** what pi waits for a response, when it has not been told otherwise. */
 const DEFAULT_RESPONSE_MS = 300_000;

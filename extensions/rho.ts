@@ -5,7 +5,7 @@
 //   /rho config write PATH   write live config to a file
 import { resolve } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { config, configPath, configProblems, toToml, save } from './lib/config';
+import { config, configPath, configProblems, toToml, save } from './lib/core/config';
 
 function problemReport(): string {
     return configProblems.map((p) => `  ${p.at}: ${p.message}`).join('\n');

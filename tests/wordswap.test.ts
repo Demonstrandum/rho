@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildSwaps, buildPatternSwaps, applySwaps, inflectVerb } from '../extensions/wordswap';
 import type { WordValue } from '../extensions/wordswap';
-import { SourceStr, parseSpans, stripMarkers, wrapRawDict, mark } from '../extensions/lib/source-str';
+import { SourceStr, parseSpans, stripMarkers, wrapRawDict, mark } from '../extensions/lib/core/source-str';
 
 const dict = { 'load-bearing': 'cooked', 'honest take': 'spicy doodad', seam: 'whatchamacallit' };
 

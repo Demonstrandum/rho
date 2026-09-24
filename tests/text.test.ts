@@ -18,7 +18,7 @@ import {
     truncate,
     visibleWidth,
     words,
-} from '../extensions/lib/text';
+} from '../extensions/lib/core/text';
 
 test('plain drops every escape and keeps the characters', () => {
     const styled = '\x1b[1m\x1b[38;2;1;2;3mread\x1b[39m\x1b[22m file.ts';

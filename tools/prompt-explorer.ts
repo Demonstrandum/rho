@@ -21,7 +21,7 @@ import {
     wrapRawDict,
     parseSpans,
     hasMarkers,
-} from '../extensions/lib/source-str';
+} from '../extensions/lib/core/source-str';
 
 // ── paths ──────────────────────────────────────────────────
 

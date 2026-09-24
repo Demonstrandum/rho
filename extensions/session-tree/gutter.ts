@@ -12,7 +12,7 @@
 // cursor walks, so past it the gutter is blank. that makes the branch point
 // visible as the place the numbers run out.
 
-import { spliceVisible } from '../lib/text';
+import { spliceVisible } from '../lib/core/text';
 
 export const GUTTER = 2;
 

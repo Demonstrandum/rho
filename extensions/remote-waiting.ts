@@ -11,7 +11,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { SILENCE_MS, quiet, waitingLine } from './lib/waiting';
+import { SILENCE_MS, quiet, waitingLine } from './lib/tui/waiting';
 
 const WIDGET = 'remote-waiting';
 const TICK_MS = 1000;

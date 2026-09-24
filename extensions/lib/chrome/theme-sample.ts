@@ -23,7 +23,7 @@ import {
     UserMessageComponent,
 } from '@earendil-works/pi-coding-agent';
 import { Container, type Component, type TUI } from '@earendil-works/pi-tui';
-import { setNote } from './tool-row/notes';
+import { setNote } from '../tool-row/notes';
 
 /**
  * the renderer pair ToolExecutionComponent accepts in place of a definition.

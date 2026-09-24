@@ -4,7 +4,7 @@
 // tool rows: halfblock-boxes.ts, which strips the blank rows a row wraps
 // itself in, and tool-rows.ts, which boxes the tail pi's edit tool draws
 // outside its own box.
-import { isBlank } from './text';
+import { isBlank } from '../core/text';
 
 /**
  * an inline image reserves its height as blank lines: after the escape sequence

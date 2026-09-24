@@ -7,12 +7,12 @@
 //   bun run config            -> rewrites the repo's rho.toml, which is generated
 //
 // the rho.toml at the repo root is output, never a source: it is the schema in
-// extensions/lib/config.ts printed with its docs. change the schema, then run
+// extensions/lib/core/config.ts printed with its docs. change the schema, then run
 // `bun run config`. editing it by hand puts the file and the schema at odds,
 // and tests/config.test.ts fails while they are.
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { configPath, DEFAULTS, toToml, save } from '../extensions/lib/config';
+import { configPath, DEFAULTS, toToml, save } from '../extensions/lib/core/config';
 
 const arg = process.argv[2] ?? null;
 const force = process.argv.includes('--force');

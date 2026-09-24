@@ -29,8 +29,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import envPaths from 'env-paths';
 import { CURRENT_SESSION_VERSION, type ExtensionAPI, type SessionHeader } from '@earendil-works/pi-coding-agent';
-import { sampleEntries } from './lib/sample-session';
-import { sessionLines } from './lib/session-file';
+import { sampleEntries } from './lib/session/sample-session';
+import { sessionLines } from './lib/session/session-file';
 
 const COMMAND = 'sample-session';
 const FLAG = `--${COMMAND}`;

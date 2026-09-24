@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { completeLastWord, lastWord } from '../extensions/lib/complete-words';
+import { completeLastWord, lastWord } from '../extensions/lib/tui/complete-words';
 
 /**
  * pi replaces the whole argument text with the value it is given, so a

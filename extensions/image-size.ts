@@ -16,7 +16,7 @@
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Image } from '@earendil-works/pi-tui';
-import { config } from './lib/config';
+import { config } from './lib/core/config';
 
 /** the fields of Image this patch reads. pi-tui declares them private. */
 interface ImageInternals {

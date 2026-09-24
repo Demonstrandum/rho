@@ -5,7 +5,7 @@ import {
     hintFor,
     parseForm,
     type KnownCommand,
-} from '../extensions/lib/command-usage';
+} from '../extensions/lib/chrome/command-usage';
 
 const known: KnownCommand[] = [
     { name: 'remote', description: 'run the session on another machine' },

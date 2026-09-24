@@ -27,7 +27,7 @@ import {
     createReadTool,
     createWriteTool,
 } from '@earendil-works/pi-coding-agent';
-import { completeLastWord } from './lib/complete-words';
+import { completeLastWord } from './lib/tui/complete-words';
 import { scriptComplaint } from './lib/remote/project';
 import { parseProjectRequest } from './lib/remote/naming';
 import { capture, connectOverOriginChannel, operationsFor, waitFor } from './lib/remote/client';
@@ -39,9 +39,9 @@ import { deploy } from './lib/remote/deploy';
 import { addressName, parseAddress, parseLocated, sshTarget } from './lib/remote/address';
 import { configuredHosts, isConfiguredHost } from './lib/remote/ssh-config';
 import type { Address } from './lib/remote/address';
-import { PersistedState } from './lib/state-store';
-import { config } from './lib/config';
-import { gitBlockFor, gitThrough } from './lib/where-note';
+import { PersistedState } from './lib/core/state-store';
+import { config } from './lib/core/config';
+import { gitBlockFor, gitThrough } from './lib/git/where-note';
 
 interface Environment {
     readonly name: string;

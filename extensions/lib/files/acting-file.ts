@@ -10,7 +10,7 @@
 // without a connection.
 
 import { isAbsolute, resolve } from 'node:path';
-import { parseLocated, sshTarget } from './remote/address';
+import { parseLocated, sshTarget } from '../remote/address';
 import { localStore, remoteStore, type FileStore, type Said } from './file-store';
 
 /** the parts of an attached environment a path needs to resolve against. */

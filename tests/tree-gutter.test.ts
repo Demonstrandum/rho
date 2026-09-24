@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { GUTTER, gutterText, markRow, markRows } from '../extensions/session-tree/gutter';
-import { plain, visibleWidth } from '../extensions/lib/text';
+import { plain, visibleWidth } from '../extensions/lib/core/text';
 
 test('every mark is exactly the width of the gutter it replaces', () => {
     expect(visibleWidth(gutterText({ kind: 'cursor' }))).toBe(GUTTER);

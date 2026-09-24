@@ -8,7 +8,7 @@
 // `#!/usr/bin/env node`. extensions/bun-runtime.ts runs the same repair at
 // startup, for the sessions between one update and the next install.
 
-import { findLauncher, describe, readLauncher, repairLaunchers } from '../extensions/lib/bun-launcher';
+import { findLauncher, describe, readLauncher, repairLaunchers } from '../extensions/lib/core/bun-launcher';
 
 const check = process.argv.includes('--check');
 const launcher = findLauncher();

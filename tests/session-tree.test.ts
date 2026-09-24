@@ -8,8 +8,8 @@ import { InteractiveMode, initTheme, type ExtensionAPI, type SessionEntry } from
 import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { plain } from '../extensions/lib/text';
-import install from '../extensions/session-tree';
+import { plain } from '../extensions/lib/core/text';
+import install from '../extensions/session-tree/index';
 
 const at = (n: number) => new Date(1760000000000 + n * 1000).toISOString();
 

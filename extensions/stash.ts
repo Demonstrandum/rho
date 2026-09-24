@@ -20,11 +20,11 @@
 
 import { DynamicBorder, type ExtensionAPI, type ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Container, type KeyId, matchesKey, type SelectItem, SelectList, Text } from '@earendil-works/pi-tui';
-import { parseStashState, Stash, type StashEntry, type StashEntryId, type PopResult, type StashState } from './lib/stash';
-import { actionsBoundTo, ensureKeybinding, type KeybindingId } from './lib/keybindings-store';
-import { PersistedState, type StateScope } from './lib/state-store';
-import { config } from './lib/config';
-import { ago, preview as previewOf, quantity } from './lib/text';
+import { parseStashState, Stash, type StashEntry, type StashEntryId, type PopResult, type StashState } from './lib/session/stash';
+import { actionsBoundTo, ensureKeybinding, type KeybindingId } from './lib/core/keybindings-store';
+import { PersistedState, type StateScope } from './lib/core/state-store';
+import { config } from './lib/core/config';
+import { ago, preview as previewOf, quantity } from './lib/core/text';
 
 const STATUS_ID = 'rho-stash';
 // SelectList ignores plain letters (its filter is only set programmatically), so

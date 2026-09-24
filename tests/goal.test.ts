@@ -7,7 +7,7 @@ import {
     feedbackText,
     parseActiveGoal,
     renderTranscript,
-} from '../extensions/lib/goal';
+} from '../extensions/lib/model/goal';
 
 function userEntry(id: string, text: string): SessionEntry {
     return {

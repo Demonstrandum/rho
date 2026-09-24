@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { previewHold } from '../extensions/lib/preview-hold';
+import { previewHold } from '../extensions/lib/tui/preview-hold';
 
 function harness(initial: string, fails: ReadonlySet<string> = new Set()) {
     let current = initial;

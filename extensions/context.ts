@@ -29,7 +29,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
-import { abbreviate, percent } from './lib/text';
+import { abbreviate, percent } from './lib/core/text';
 
 const ENTRY_TYPE = 'rho-context-readout';
 

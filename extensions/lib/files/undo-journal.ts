@@ -23,7 +23,7 @@ import { randomUUID } from 'node:crypto';
 import { readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { FileStore, Stat } from './file-store';
-import { PersistedState, type StateIdentity } from './state-store';
+import { PersistedState, type StateIdentity } from '../core/state-store';
 
 /** the tools that change a file's bytes and are journalled. */
 export type MutatingTool = 'write' | 'edit' | 'remove';

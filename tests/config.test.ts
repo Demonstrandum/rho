@@ -12,7 +12,7 @@ import {
     isOneOf,
     preamble,
     tomlName,
-} from '../extensions/lib/config';
+} from '../extensions/lib/core/config';
 import { parse } from 'smol-toml';
 
 test('a valid value is taken from the file', () => {

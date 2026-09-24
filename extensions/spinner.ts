@@ -19,11 +19,11 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
-import { themeRgb, blend, ansiFg, RESET, type Rgb } from './lib/utils';
-import { evalTemplates } from './lib/template';
-import { duration as formatDuration } from './lib/text';
-import { installPlacement } from './lib/working-status';
-import { config } from './lib/config';
+import { themeRgb, blend, ansiFg, RESET, type Rgb } from './lib/core/utils';
+import { evalTemplates } from './lib/core/template';
+import { duration as formatDuration } from './lib/core/text';
+import { installPlacement } from './lib/chrome/working-status';
+import { config } from './lib/core/config';
 
 installPlacement();
 

@@ -24,9 +24,9 @@ import {
     type Theme,
 } from '@earendil-works/pi-coding-agent';
 import { Editor } from '@earendil-works/pi-tui';
-import { config, type GradientSpec } from './lib/config';
-import { borderStatus, cutInto } from './lib/working-status';
-import { resolveColour } from './lib/colour-spec';
+import { config, type GradientSpec } from './lib/core/config';
+import { borderStatus, cutInto } from './lib/chrome/working-status';
+import { resolveColour } from './lib/tui/colour-spec';
 import {
     type Rgb,
     blend,
@@ -36,7 +36,7 @@ import {
     themeRgb,
     themeBgRgb,
     RESET,
-} from './lib/utils';
+} from './lib/core/utils';
 
 const LOWER_HALF = '\u2584';
 const UPPER_HALF = '\u2580';

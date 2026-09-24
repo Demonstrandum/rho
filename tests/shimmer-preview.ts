@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { colorSweep, playFrames, toFrames } from '../extensions/spinner';
-import { ansiFg, type Rgb } from '../extensions/lib/utils';
+import { ansiFg, type Rgb } from '../extensions/lib/core/utils';
 
 const here = join(import.meta.dir, '..', 'extensions', 'assets');
 

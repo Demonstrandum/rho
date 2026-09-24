@@ -186,7 +186,7 @@ export function restyle(theme: Theme, palette: SyntaxPalette): Theme {
 // the palettes on disk
 // ---------------------------------------------------------------------------
 
-const PALETTES_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'syntax.json');
+const PALETTES_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'syntax.json');
 
 function isColorValue(value: unknown): value is ColorValue {
     if (typeof value === 'number') return Number.isInteger(value) && value >= 0 && value <= 255;

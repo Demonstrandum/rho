@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-// cli over extensions/lib/reflow.ts: rewrites markdown prose to one sentence
+// cli over extensions/lib/prose/reflow.ts: rewrites markdown prose to one sentence
 // per line (o5 in system/orthography.md).
-import { reflow } from '../extensions/lib/reflow';
+import { reflow } from '../extensions/lib/prose/reflow';
 
-export { reflow, splitSentences } from '../extensions/lib/reflow';
+export { reflow, splitSentences } from '../extensions/lib/prose/reflow';
 
 const main = async (): Promise<void> => {
     const args = process.argv.slice(2);

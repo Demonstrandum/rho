@@ -7,9 +7,9 @@
 import type { AssistantMessage, Model } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
-import { abbreviate, capitalise, collapseHome, oneLine, words } from './lib/text';
-import { publishFooter } from './lib/footer-mirror';
-import { billing, trackBilling } from './lib/billing';
+import { abbreviate, capitalise, collapseHome, oneLine, words } from './lib/core/text';
+import { publishFooter } from './lib/chrome/footer-mirror';
+import { billing, trackBilling } from './lib/model/billing';
 import { currentEnvironment } from './environment';
 
 const ARROW_IN = '▲  ';

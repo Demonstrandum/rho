@@ -15,11 +15,11 @@
 // transport adds it as a separate system block at request time, it is what
 // keeps an oauth request on plan billing, and nothing here may rewrite it.
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
+import { config } from './lib/core/config';
 // tools/unshitty.ts sets this to capture the prompt as it stands before the
 // rewrite, so it can show the diff the rewrite makes.
 const DISABLE = 'RHO_DISENSHITTIFY_OFF';
-import { disenshittifyMarkdown } from './lib/disenshittification';
+import { disenshittifyMarkdown } from './lib/prose/disenshittification';
 
 export default function (pi: ExtensionAPI) {
     pi.on('before_agent_start', async (event) => {

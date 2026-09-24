@@ -6,8 +6,8 @@
 // exposes no runtime setter for it.
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { ensureGlobalSetting } from './lib/settings-store';
-import { config } from './lib/config';
+import { ensureGlobalSetting } from './lib/core/settings-store';
+import { config } from './lib/core/config';
 
 export default function (pi: ExtensionAPI) {
     pi.on('session_start', async (_event, ctx) => {

@@ -1,6 +1,6 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, test } from 'bun:test';
-import { chooseOne, keyOf, type Option } from '../extensions/lib/choice';
+import { chooseOne, keyOf, type Option } from '../extensions/lib/tui/choice';
 
 type Way = 'carry' | 'leave' | 'exit';
 

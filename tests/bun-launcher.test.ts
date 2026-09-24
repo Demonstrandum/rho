@@ -8,7 +8,7 @@ import {
     patch,
     readLauncher,
     repairLaunchers,
-} from '../extensions/lib/bun-launcher';
+} from '../extensions/lib/core/bun-launcher';
 
 const scratch = (): string => mkdtempSync(join(tmpdir(), 'rho-launcher-'));
 

@@ -12,8 +12,8 @@
 
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import { VERSION } from '@earendil-works/pi-coding-agent';
-import { choose, themeRgb, zip } from './utils';
-import { config } from './config';
+import { choose, themeRgb, zip } from '../core/utils';
+import { config } from '../core/config';
 import { createTetrisState, tickTetris, PIECE_COLORS_DARK, PIECE_COLORS_LIGHT } from './tetris-logo';
 import {
     CENTER_ROW, CURSOR_TAIL_MS, DEFAULT_INTRO_MS, FADE_RAMP, LOGO_H, SHIMMER_DIRS, TYPE_PER_CHAR_MS,

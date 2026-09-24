@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { keyOf } from '../extensions/lib/choice';
+import { keyOf } from '../extensions/lib/tui/choice';
 import {
     carryEnv,
     leavingIn,

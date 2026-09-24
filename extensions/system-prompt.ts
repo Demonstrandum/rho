@@ -4,7 +4,7 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { PromptLoader } from './lib/prompt-loader';
+import { PromptLoader } from './lib/prose/prompt-loader';
 import { wordEntries, patternEntries } from './wordswap';
 
 const systemDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'system');

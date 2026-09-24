@@ -12,8 +12,8 @@
 // line by line for the explorer view.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { stripMarkers } from './source-str';
-import { evalTemplates } from './template';
+import { stripMarkers } from '../core/source-str';
+import { evalTemplates } from '../core/template';
 
 export class PromptLoader {
     private readonly dir: string;

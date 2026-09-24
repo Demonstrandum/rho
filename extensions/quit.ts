@@ -17,8 +17,8 @@
 // after the turn settles rather than killing the run.
 
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
-import { builtinCommandNames } from './lib/pi-docs';
+import { config } from './lib/core/config';
+import { builtinCommandNames } from './lib/model/pi-docs';
 
 function leave(ctx: ExtensionContext): void {
     if (!ctx.isIdle()) {

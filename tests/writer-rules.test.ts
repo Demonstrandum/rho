@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { PromptLoader } from '../extensions/lib/prompt-loader';
+import { PromptLoader } from '../extensions/lib/prose/prompt-loader';
 
 const systemDir = join(import.meta.dir, '..', 'system');
 const rulesPath = join(systemDir, 'writer-rules.md');

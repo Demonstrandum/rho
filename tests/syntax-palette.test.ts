@@ -10,7 +10,7 @@ import {
     themeUnder,
     withChosenPalette,
     type SyntaxPalette,
-} from '../extensions/lib/syntax-palette';
+} from '../extensions/lib/chrome/syntax-palette';
 import { Theme } from '@earendil-works/pi-coding-agent';
 
 /**

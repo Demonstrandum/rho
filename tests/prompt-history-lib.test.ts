@@ -1,7 +1,7 @@
 // unit tests for the prompt history state machine
 
 import { describe, expect, it, beforeEach } from 'bun:test';
-import { HistoryLog, matchWindow, parseHistoryState, ReverseSearch, HISTORY_STATE_VERSION, type HistoryState, type HistoryEntry, type HistoryEntryId } from '../extensions/lib/prompt-history';
+import { HistoryLog, matchWindow, parseHistoryState, ReverseSearch, HISTORY_STATE_VERSION, type HistoryState, type HistoryEntry, type HistoryEntryId } from '../extensions/lib/session/prompt-history';
 
 describe('HistoryLog', () => {
     let log: HistoryLog;

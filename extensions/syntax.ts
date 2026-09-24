@@ -28,12 +28,12 @@ import {
     type Theme,
 } from '@earendil-works/pi-coding-agent';
 import { Container, SelectList, Text, type SelectItem } from '@earendil-works/pi-tui';
-import { config } from './lib/config';
-import { PersistedState } from './lib/state-store';
-import { previewHold, type PreviewHold } from './lib/preview-hold';
-import { watchAutocompleteFocus } from './lib/autocomplete-focus';
-import { SideBySide } from './lib/side-by-side';
-import { chosenPalette, choosePalette, palettes, paletteNamed, restyle, themeUnder } from './lib/syntax-palette';
+import { config } from './lib/core/config';
+import { PersistedState } from './lib/core/state-store';
+import { previewHold, type PreviewHold } from './lib/tui/preview-hold';
+import { watchAutocompleteFocus } from './lib/tui/autocomplete-focus';
+import { SideBySide } from './lib/tui/side-by-side';
+import { chosenPalette, choosePalette, palettes, paletteNamed, restyle, themeUnder } from './lib/chrome/syntax-palette';
 
 /** the name that stands for the theme's own colours. */
 const NONE = 'none';

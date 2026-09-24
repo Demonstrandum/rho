@@ -30,16 +30,16 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { KeybindingsManager } from '@earendil-works/pi-coding-agent';
 import type { SelectItem, TUI } from '@earendil-works/pi-tui';
-import { visibleWidth } from './lib/text';
-import { config } from './lib/config';
-import { createIntro, type IntroCard } from './lib/intro-card';
-import { headerLines } from './lib/startup-header';
-import { lastFooter } from './lib/footer-mirror';
-import { previewHold, type PreviewHold } from './lib/preview-hold';
-import { watchAutocompleteFocus } from './lib/autocomplete-focus';
-import { withChosenPalette } from './lib/syntax-palette';
-import { FRAME_MS } from './lib/pi-logo';
-import { sampleSession } from './lib/theme-sample';
+import { visibleWidth } from './lib/core/text';
+import { config } from './lib/core/config';
+import { createIntro, type IntroCard } from './lib/chrome/intro-card';
+import { headerLines } from './lib/chrome/startup-header';
+import { lastFooter } from './lib/chrome/footer-mirror';
+import { previewHold, type PreviewHold } from './lib/tui/preview-hold';
+import { watchAutocompleteFocus } from './lib/tui/autocomplete-focus';
+import { withChosenPalette } from './lib/chrome/syntax-palette';
+import { FRAME_MS } from './lib/chrome/pi-logo';
+import { sampleSession } from './lib/chrome/theme-sample';
 
 const HINT = 'up/down preview, enter keep, esc cancel';
 

@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { RESOLVE_STORAGE_EXPORT, installCheckpointFastFail } from '../extensions/lib/checkpoint-breaker';
+import { RESOLVE_STORAGE_EXPORT, installCheckpointFastFail } from '../extensions/lib/session/checkpoint-breaker';
 import { failureAction } from '../extensions/rewind-guard';
 
 const require = createRequire(import.meta.url);

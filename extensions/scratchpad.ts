@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
-import { prepare } from './lib/scratchpad';
+import { config } from './lib/core/config';
+import { prepare } from './lib/session/scratchpad';
 
 // gives the session one directory for intermediate files, names it in the
 // prompt, and exports it as RHO_SCRATCH so a bash call can reach it without the

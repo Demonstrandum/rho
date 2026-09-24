@@ -11,7 +11,7 @@
 // identical adjacent text, so pressing arrow-up and then arrow-down does not
 // double-record the same draft.
 
-import { oneLine, truncate } from './text';
+import { oneLine, truncate } from '../core/text';
 
 export type HistoryEntryId = number & { readonly __historyEntryId: unique symbol };
 

@@ -15,9 +15,9 @@
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text } from '@earendil-works/pi-tui';
-import { config } from './config';
+import { config } from '../core/config';
 import { render as renderGit, renderFailure, snapshot, type GitRunner } from './git-snapshot';
-import type { Captured } from './remote/client';
+import type { Captured } from '../remote/client';
 
 /** What moved the agent. The wording of the note is the only difference. */
 export type Move = 'cwd' | 'project' | 'environment';

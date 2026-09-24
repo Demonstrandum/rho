@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test';
 import type { Component } from '@earendil-works/pi-tui';
-import { SideBySide, clip, pad } from '../extensions/lib/side-by-side';
-import { visibleWidth } from '../extensions/lib/text';
+import { SideBySide, clip, pad } from '../extensions/lib/tui/side-by-side';
+import { visibleWidth } from '../extensions/lib/core/text';
 
 function lines(rendered: readonly string[]): string[] {
     return rendered.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ''));

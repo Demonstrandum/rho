@@ -21,13 +21,13 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { completeLastWord } from './lib/complete-words';
+import { completeLastWord } from './lib/tui/complete-words';
 import { fileURLToPath } from 'node:url';
-import { rhoRoot } from './lib/rho-root';
-import { chooseOne } from './lib/choice';
-import { config } from './lib/config';
-import { attachCommand, leaveTerminal as leave, resumeLines } from './lib/leave-terminal';
-import { releaseKey } from './lib/keybindings-store';
+import { rhoRoot } from './lib/core/rho-root';
+import { chooseOne } from './lib/tui/choice';
+import { config } from './lib/core/config';
+import { attachCommand, leaveTerminal as leave, resumeLines } from './lib/tui/leave-terminal';
+import { releaseKey } from './lib/core/keybindings-store';
 import {
     carryEnv,
     carryingBack,

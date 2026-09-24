@@ -45,8 +45,8 @@ import {
     type ToolRenderResultOptions,
 } from '@earendil-works/pi-coding-agent';
 import { Box, type Component, type TuiMouseEvent, type TuiMouseEventResult } from '@earendil-works/pi-tui';
-import { trimBlankEdges } from './lib/box-edges';
-import { config } from './lib/config';
+import { trimBlankEdges } from './lib/tui/box-edges';
+import { config } from './lib/core/config';
 import {
     collapseCall,
     collapseResult,
@@ -56,7 +56,7 @@ import {
     parseExecCall,
     parseExecResult,
 } from './lib/tool-row/exec';
-import { truncate, visibleWidth } from './lib/text';
+import { truncate, visibleWidth } from './lib/core/text';
 import { noteFor } from './lib/tool-row/notes';
 import { callPreview, resultPreview } from './lib/tool-row/preview';
 import type { RowColor, RowTheme } from './lib/tool-row/theme';

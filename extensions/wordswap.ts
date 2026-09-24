@@ -24,9 +24,9 @@ import type {
     ExtensionUIContext,
     MarkdownTransformContext,
 } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
-import { PersistedState } from './lib/state-store';
-import { plain } from './lib/text';
+import { config } from './lib/core/config';
+import { PersistedState } from './lib/core/state-store';
+import { plain } from './lib/core/text';
 
 const swapsPath = join(dirname(fileURLToPath(import.meta.url)), 'assets', 'wordswap.json');
 

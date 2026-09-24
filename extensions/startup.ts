@@ -21,11 +21,11 @@
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth } from '@earendil-works/pi-tui';
-import { ensureGlobalSetting } from './lib/settings-store';
-import { config } from './lib/config';
-import { createIntro } from './lib/intro-card';
-import { headerLines } from './lib/startup-header';
-import { FRAME_MS } from './lib/pi-logo';
+import { ensureGlobalSetting } from './lib/core/settings-store';
+import { config } from './lib/core/config';
+import { createIntro } from './lib/chrome/intro-card';
+import { headerLines } from './lib/chrome/startup-header';
+import { FRAME_MS } from './lib/chrome/pi-logo';
 
 export default function (pi: ExtensionAPI) {
     pi.on('session_start', async (_event, ctx) => {

@@ -35,9 +35,9 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { ensureGlobalSetting } from './lib/settings-store';
-import { config } from './lib/config';
-import { installCheckpointFastFail } from './lib/checkpoint-breaker';
+import { ensureGlobalSetting } from './lib/core/settings-store';
+import { config } from './lib/core/config';
+import { installCheckpointFastFail } from './lib/session/checkpoint-breaker';
 
 export type CheckpointMode = 'git' | 'always' | 'never';
 

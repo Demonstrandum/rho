@@ -21,7 +21,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
-import { config } from './lib/config';
+import { config } from './lib/core/config';
 import {
     buildIndex,
     hitOrigin,
@@ -31,7 +31,7 @@ import {
     type IndexReport,
     type SearchOptions,
     type SessionCommand,
-} from './lib/pi-docs';
+} from './lib/model/pi-docs';
 
 const ENTRY_TYPE = 'rho-search-results';
 

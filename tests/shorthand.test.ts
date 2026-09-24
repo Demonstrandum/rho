@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveShorthand, shorthandComplaint, shorthandFor } from '../extensions/lib/shorthand';
+import { resolveShorthand, shorthandComplaint, shorthandFor } from '../extensions/lib/core/shorthand';
 
 const REMOTE = ['create', 'connect', 'project', 'list', 'stop'];
 

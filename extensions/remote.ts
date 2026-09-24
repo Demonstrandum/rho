@@ -24,10 +24,10 @@ import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { addressName, parseAddress, sshTarget } from './lib/remote/address';
-import { browse } from './lib/picker';
+import { browse } from './lib/tui/picker';
 import { controlPath } from './lib/remote/agent-tag';
-import { shorthandFor, takeVerb } from './lib/shorthand';
-import { completeLastWord, lastWord } from './lib/complete-words';
+import { shorthandFor, takeVerb } from './lib/core/shorthand';
+import { completeLastWord, lastWord } from './lib/tui/complete-words';
 import { troubleWith } from './lib/remote/advice';
 import { agentTrouble, describeAgentTrouble } from './lib/remote/ssh-agent';
 import { branchSlug, parseProjectRequest, projectNameOf, repoName, sessionName } from './lib/remote/naming';
@@ -38,10 +38,10 @@ import { projectPlan } from './lib/remote/project';
 import { entryCount, freePath, rehomed, sessionIdOf } from './lib/remote/transfer';
 import { askInterfaceToLeave } from './lib/remote/leave';
 import { carryEnv, leavingIn, withoutLeaving } from './lib/remote/leaving';
-import { leaveTerminal, resumeLines } from './lib/leave-terminal';
+import { leaveTerminal, resumeLines } from './lib/tui/leave-terminal';
 import { modelFlags } from './lib/remote/pi-args';
 import type { ModelChoice } from './lib/remote/pi-args';
-import { config } from './lib/config';
+import { config } from './lib/core/config';
 import { posix, shQuote } from './lib/remote/shell';
 
 /** What /remote can be asked to do. A word is matched against these. */

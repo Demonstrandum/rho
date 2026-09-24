@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseBranchLine, render, renderFailure, snapshot, type Snapshot } from '../extensions/lib/git-snapshot';
+import { parseBranchLine, render, renderFailure, snapshot, type Snapshot } from '../extensions/lib/git/git-snapshot';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

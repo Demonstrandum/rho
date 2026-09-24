@@ -42,9 +42,9 @@ import envPaths from 'env-paths';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { type KeyId, Text } from '@earendil-works/pi-tui';
 import type { UserMessage } from '@earendil-works/pi-ai';
-import { SteeringMirror } from './lib/steering-mirror';
-import { config } from './lib/config';
-import { preview } from './lib/text';
+import { SteeringMirror } from './lib/session/steering-mirror';
+import { config } from './lib/core/config';
+import { preview } from './lib/core/text';
 
 const STATUS_ID = 'rho-send-now';
 // how often the elapsed wait in the footer is redrawn while a send is armed.

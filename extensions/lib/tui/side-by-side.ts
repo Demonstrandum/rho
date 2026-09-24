@@ -11,7 +11,7 @@
 // are less readable than one of either.
 
 import type { Component } from '@earendil-works/pi-tui';
-import { spliceVisible, visibleWidth } from './text';
+import { spliceVisible, visibleWidth } from '../core/text';
 
 /** clip a styled line to `width` columns, keeping its escape sequences. */
 export function clip(line: string, width: number): string {

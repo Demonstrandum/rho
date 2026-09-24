@@ -43,17 +43,17 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { StringEnum } from '@earendil-works/pi-ai';
 import { Text } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
-import { config } from './lib/config';
+import { config } from './lib/core/config';
 import { helperCall, readAnswer } from './lib/colab/helper';
 import { cellDetail, cellTable, clip, lintText, runLength, type CellRecord, type CellsAnswer } from './lib/colab/format';
 import { chooseRunner, isNotebook, parseLint, run as runMarimo, wantsSandbox, type Runner } from './lib/colab/marimo-cli';
 import { discover, start, type Started } from './lib/colab/server';
 import { NotebookSession } from './lib/colab/session';
 import { healthy, type ServerAddress } from './lib/colab/client';
-import { collapseHome, quantity, truncate } from './lib/text';
+import { collapseHome, quantity, truncate } from './lib/core/text';
 import { currentEnvironment } from './environment';
 import { listSessions } from './lib/colab/client';
-import { PersistedState } from './lib/state-store';
+import { PersistedState } from './lib/core/state-store';
 import { inspectProject, labNote, hasLab, type ProjectLab } from './lib/colab/project';
 
 interface Attached {

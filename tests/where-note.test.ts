@@ -6,9 +6,9 @@
  */
 
 import { expect, test } from 'bun:test';
-import type { GitRunner } from '../extensions/lib/git-snapshot';
+import type { GitRunner } from '../extensions/lib/git/git-snapshot';
 import type { Captured } from '../extensions/lib/remote/client';
-import { gitThrough, whereNote } from '../extensions/lib/where-note';
+import { gitThrough, whereNote } from '../extensions/lib/git/where-note';
 
 const tree: GitRunner = async (args) => {
     if (args[0] === 'status') return { ok: true, text: '## test2...origin/test2 [ahead 1]\n M src/a.ts\n' };

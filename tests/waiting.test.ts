@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { SILENCE_MS, quiet, waitingLine } from '../extensions/lib/waiting';
+import { SILENCE_MS, quiet, waitingLine } from '../extensions/lib/tui/waiting';
 
 describe('silence during a remote turn', () => {
     test('a settled session is not waiting for anything', () => {

@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
-import { render, renderFailure, snapshot, type Reading } from './lib/git-snapshot';
+import { config } from './lib/core/config';
+import { render, renderFailure, snapshot, type Reading } from './lib/git/git-snapshot';
 
 // appends a <git> block: the branch and its divergence from upstream, the dirty
 // files, and the last few commit subjects.

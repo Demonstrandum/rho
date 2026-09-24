@@ -14,7 +14,7 @@
  * the launcher already captures that stream to report why a client stopped.
  */
 
-import type { Option } from '../choice';
+import type { Option } from '../tui/choice';
 
 /** The three ways out, named by what happens to the conversation on screen. */
 export type Leaving = 'carry' | 'leave' | 'exit';

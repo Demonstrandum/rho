@@ -13,7 +13,7 @@
 // of falls through to its arguments spelled out, which is still shorter than
 // the JSON block pi would print.
 
-import { ELLIPSIS, oneLine, truncate, visibleWidth } from '../text';
+import { ELLIPSIS, oneLine, truncate, visibleWidth } from '../core/text';
 import { PLAIN_THEME, type RowTheme } from './theme';
 
 export interface ArgEntry {

@@ -18,7 +18,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { findPiBinary, findPiScope, userPath } from './pi-location';
-import { findLauncher, readLauncher } from '../extensions/lib/bun-launcher';
+import { findLauncher, readLauncher } from '../extensions/lib/core/bun-launcher';
 
 /** the versions rho is developed against. bump with the code that needs it. */
 const MINIMUM = {

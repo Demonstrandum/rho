@@ -23,7 +23,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
+import { config } from './lib/core/config';
 import { publishedRelay, type RelayHandle, type UiRequest } from './lib/remote/ui-relay';
 
 /** what pi's rpc mode cannot do, and what an extension checks for before offering it. */

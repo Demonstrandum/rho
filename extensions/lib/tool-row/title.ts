@@ -12,7 +12,7 @@
 // is how pi's own rows read (`read`, `bash`, `exec`). TITLES holds the names
 // where that reads wrong, and `[tools] names` in rho.toml overrides any of it.
 
-import { plain, spliceVisible, words } from '../text';
+import { plain, spliceVisible, words } from '../core/text';
 
 /**
  * a namespace a package stamps on every one of its tools. it is dropped when

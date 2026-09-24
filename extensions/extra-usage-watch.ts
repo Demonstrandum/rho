@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { CLAIM_HEADER, isPlanClaim } from './lib/billing';
+import { CLAIM_HEADER, isPlanClaim } from './lib/model/billing';
 
 // detect when anthropic routes requests to extra-usage ("overage") billing
 // instead of plan claims, and warn once per session. detection reads the

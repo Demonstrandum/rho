@@ -28,12 +28,12 @@
 // whatever is on the prototype then is the whole of the rendering.
 
 import { CustomEditor, type ExtensionAPI, type Theme } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
-import { hintFor, type KnownCommand } from './lib/command-usage';
-import { overlayHint, placeHint } from './lib/command-hint';
-import { resolveColour } from './lib/colour-spec';
-import { plain, visibleWidth } from './lib/text';
-import { type Rgb } from './lib/utils';
+import { config } from './lib/core/config';
+import { hintFor, type KnownCommand } from './lib/chrome/command-usage';
+import { overlayHint, placeHint } from './lib/chrome/command-hint';
+import { resolveColour } from './lib/tui/colour-spec';
+import { plain, visibleWidth } from './lib/core/text';
+import { type Rgb } from './lib/core/utils';
 
 const { enabled, color, gap, fade, strength } = config.hint;
 

@@ -26,11 +26,11 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
-import { config } from './lib/config';
-import { PersistedState } from './lib/state-store';
-import { withSpinner } from './lib/widget-spinner';
+import { config } from './lib/core/config';
+import { PersistedState } from './lib/core/state-store';
+import { withSpinner } from './lib/chrome/widget-spinner';
 import { loadMaxims } from './spinner';
-import { duration as formatDuration } from './lib/text';
+import { duration as formatDuration } from './lib/core/text';
 import {
     chooseMessage,
     classifyFailure,
@@ -40,7 +40,7 @@ import {
     parseActiveGoal,
     type ActiveGoal,
     type Verdict,
-} from './lib/goal';
+} from './lib/model/goal';
 
 const ENTRY_TYPE = 'rho-goal';
 const STATE_NAME = 'goal';

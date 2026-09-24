@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // bun run unshitty [--head] [--plain] [--keep]
 // diffs the system prompt a real session sends against the same text after
-// extensions/lib/disenshittification.ts has run over it. the session applies
+// extensions/lib/prose/disenshittification.ts has run over it. the session applies
 // that rewrite itself, through extensions/prompt-disenshittify.ts, so the
 // capture below disables it and applies the transform here instead: what the
 // diff shows is what the extension does. the anthropic block
@@ -23,7 +23,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { disenshittifyMarkdown } from '../extensions/lib/disenshittification';
+import { disenshittifyMarkdown } from '../extensions/lib/prose/disenshittification';
 
 /** the last line pi's own head emits; everything after it comes from elsewhere. */
 const HEAD_END = /- (?:Always read pi \.md files completely|always read pi \.md files completely)[^\n]*/;

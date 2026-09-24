@@ -30,9 +30,9 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AutocompleteItem } from '@earendil-works/pi-tui';
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
-import { PersistedState } from './lib/state-store';
-import { collapseHome } from './lib/text';
+import { config } from './lib/core/config';
+import { PersistedState } from './lib/core/state-store';
+import { collapseHome } from './lib/core/text';
 import {
     announcement,
     block,
@@ -45,7 +45,7 @@ import {
     read,
     resolveArgument,
     revocation,
-} from './lib/personality';
+} from './lib/prose/personality';
 
 const STATE_VERSION = 1;
 const OFF = 'off';

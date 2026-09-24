@@ -30,7 +30,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { Pager } from './pager';
 import { type CapturedRequest, RequestLog } from './log';
 import { type OutlineNode, outline, pretty, raw, systemText, weight } from './outline';
-import { collapseHome, truncate } from '../lib/text';
+import { collapseHome, truncate } from '../lib/core/text';
 import { publishedRelay } from '../lib/remote/ui-relay';
 
 type ViewKind = 'payload' | 'system' | 'json';

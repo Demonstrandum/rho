@@ -1,8 +1,8 @@
 import { platform, release } from 'node:os';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
+import { config } from './lib/core/config';
 import { currentEnvironment } from './environment';
-import { runGit } from './lib/run-git';
+import { runGit } from './lib/git/run-git';
 
 /** long enough for a cold work tree, short enough not to hold up a turn. */
 const PROBE_TIMEOUT_MS = 5_000;

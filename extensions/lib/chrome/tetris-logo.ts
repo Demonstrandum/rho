@@ -11,7 +11,7 @@
 // in a subdirectory so pi's extension auto-discovery (top-level *.ts only)
 // does not try to load it as an extension.
 
-import type { Rgb } from './utils';
+import type { Rgb } from '../core/utils';
 
 // rows 0..2 are the run-up the pieces fall through. the stack lands on rows
 // 2..5 over a filled row 6; the clear takes row 6 and the stack falls into

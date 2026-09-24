@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { plain } from '../extensions/lib/text';
+import { plain } from '../extensions/lib/core/text';
 import { callPreview, resultPreview, summariseArgs } from '../extensions/lib/tool-row/preview';
 import { retitle, toolTitle } from '../extensions/lib/tool-row/title';
 

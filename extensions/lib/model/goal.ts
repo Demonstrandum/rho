@@ -19,9 +19,9 @@
 import { Type } from 'typebox';
 import type { Api, Model, Tool, ToolCall } from '@earendil-works/pi-ai';
 import type { ExtensionContext, SessionEntry } from '@earendil-works/pi-coding-agent';
-import { config } from './config';
+import { config } from '../core/config';
 import { forcedToolChoice, resolveReviewer } from './audit';
-import { omitTail } from './text';
+import { omitTail } from '../core/text';
 
 const TOOL_NAME = 'report_verdict';
 

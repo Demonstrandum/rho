@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test';
-import { overlayHint, placeHint } from '../extensions/lib/command-hint';
-import { type Rgb, ansiBg } from '../extensions/lib/utils';
-import { plain, visibleWidth } from '../extensions/lib/text';
+import { overlayHint, placeHint } from '../extensions/lib/chrome/command-hint';
+import { type Rgb, ansiBg } from '../extensions/lib/core/utils';
+import { plain, visibleWidth } from '../extensions/lib/core/text';
 
 const BG: Rgb = [0, 0, 0];
 const FG: Rgb = [200, 200, 200];

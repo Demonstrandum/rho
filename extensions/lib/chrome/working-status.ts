@@ -29,9 +29,9 @@ import { CustomEditor } from '@earendil-works/pi-coding-agent';
 // set prints two columns, and counting it as one leaves the row a column too
 // long, which wraps and takes the layout with it.
 import { visibleWidth } from '@earendil-works/pi-tui';
-import { spliceVisible } from './text';
-import { RESET } from './utils';
-import { config } from './config';
+import { spliceVisible } from '../core/text';
+import { RESET } from '../core/utils';
+import { config } from '../core/config';
 
 export type SpinnerPlacement = 'border' | 'dock';
 

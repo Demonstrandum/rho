@@ -16,7 +16,7 @@
 // identifiers held back for the expanded row.
 
 import type { RowTheme } from '../lib/tool-row/theme';
-import { truncate } from '../lib/text';
+import { truncate } from '../lib/core/text';
 
 /** how a channel id is written for a person: their name, or the id. */
 export type Named = (id: string) => string;

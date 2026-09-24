@@ -25,8 +25,8 @@
 
 import { spawnSync } from 'node:child_process';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { bunBinary, describe, findLauncher, isBunRuntime, repairLaunchers, type Repair } from './lib/bun-launcher';
-import { config } from './lib/config';
+import { bunBinary, describe, findLauncher, isBunRuntime, repairLaunchers, type Repair } from './lib/core/bun-launcher';
+import { config } from './lib/core/config';
 
 const REEXEC_MARKER = 'RHO_BUN_REEXEC';
 

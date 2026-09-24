@@ -8,7 +8,7 @@ import {
     queryTerms,
     search,
     type SearchRecord,
-} from '../extensions/lib/pi-docs';
+} from '../extensions/lib/model/pi-docs';
 
 const BUILTIN_SOURCE = `
 export const slashCommands = [

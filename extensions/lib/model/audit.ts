@@ -9,11 +9,11 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { rhoRoot } from './rho-root';
+import { rhoRoot } from '../core/rho-root';
 import { Type, type Static } from 'typebox';
 import type { Api, AssistantMessage, Model, Tool, ToolCall } from '@earendil-works/pi-ai';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { config } from './config';
+import { config } from '../core/config';
 
 const root = rhoRoot(fileURLToPath(import.meta.url));
 

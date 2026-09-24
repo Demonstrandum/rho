@@ -9,7 +9,7 @@ import {
     shimmerMs, shimmerIntensity, timeline, cellGlyph, pathCellFade,
     renderLogoLines, logoHeight, logoCenterRow,
     type IntroMode, type ShimmerDir, type Timeline,
-} from '../extensions/lib/pi-logo';
+} from '../extensions/lib/chrome/pi-logo';
 
 type Cell = readonly [number, number];
 
@@ -405,7 +405,7 @@ test('the renderer is a pure function of its inputs', () => {
 test('the intro card and the demo both drive the shared module, holding no copy', () => {
     const root = join(import.meta.dir, '..');
     const sources = {
-        'extensions/lib/intro-card.ts': readFileSync(join(root, 'extensions/lib/intro-card.ts'), 'utf8'),
+        'extensions/lib/chrome/intro-card.ts': readFileSync(join(root, 'extensions/lib/chrome/intro-card.ts'), 'utf8'),
         'demo/preview-animation.ts': readFileSync(join(root, 'demo/preview-animation.ts'), 'utf8'),
     };
     for (const [name, src] of Object.entries(sources)) {

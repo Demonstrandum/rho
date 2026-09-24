@@ -32,12 +32,12 @@ import {
     withFileMutationQueue,
     type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
+import { config } from './lib/core/config';
 import { currentEnvironment } from './environment';
-import { targetFor, type Target } from './lib/acting-file';
-import type { Stat } from './lib/file-store';
-import { keep, recordMutation, sessionJournal, slotFor, type Limits, type Recorded } from './lib/undo-journal';
-import type { StateIdentity } from './lib/state-store';
+import { targetFor, type Target } from './lib/files/acting-file';
+import type { Stat } from './lib/files/file-store';
+import { keep, recordMutation, sessionJournal, slotFor, type Limits, type Recorded } from './lib/files/undo-journal';
+import type { StateIdentity } from './lib/core/state-store';
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 

@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Theme } from '@earendil-works/pi-coding-agent';
-import type { Rgb } from '../extensions/lib/utils';
+import type { Rgb } from '../extensions/lib/core/utils';
 import { toFrames, playFrames, parseVerb, formatVerb } from '../extensions/spinner';
 
 const show = (s: string) => s.replaceAll('\x1b', '\\e');

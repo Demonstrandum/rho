@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
 import { refusal, verdict } from '../extensions/remove';
-import { targetFor } from '../extensions/lib/acting-file';
-import type { Said } from '../extensions/lib/file-store';
+import { targetFor } from '../extensions/lib/files/acting-file';
+import type { Said } from '../extensions/lib/files/file-store';
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 

@@ -1,6 +1,6 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, test } from 'bun:test';
-import { browse, busyRow, hints, intentOf } from '../extensions/lib/picker';
+import { browse, busyRow, hints, intentOf } from '../extensions/lib/tui/picker';
 
 /**
  * The keys these lists use, in one place.

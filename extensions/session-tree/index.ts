@@ -50,10 +50,10 @@ import {
     type EntryId,
     type Run,
 } from './edit';
-import { writeSessionCopy } from '../lib/session-file';
+import { writeSessionCopy } from '../lib/session/session-file';
 import { markRows, type RowState } from './gutter';
 import { INITIAL_KEYS, NORMAL_HINTS, SEARCH_HINTS, step, type KeyState, type Verb } from './keys';
-import { oneLine, preview, quantity } from '../lib/text';
+import { oneLine, preview, quantity } from '../lib/core/text';
 
 // ---- what is reached inside pi ------------------------------------------
 //

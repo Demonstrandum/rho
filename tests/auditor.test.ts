@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Api, Model } from '@earendil-works/pi-ai';
-import { formatFinding, parseFindings, proseOf, resolveReviewer } from '../extensions/lib/audit';
+import { formatFinding, parseFindings, proseOf, resolveReviewer } from '../extensions/lib/model/audit';
 
 const skillPath = join(import.meta.dir, '..', 'skills', 'auditor', 'SKILL.md');
 

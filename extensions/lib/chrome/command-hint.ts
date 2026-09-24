@@ -5,8 +5,8 @@
 // the typed line has already pushed off the left) can be checked without a
 // terminal. the extension holds the patch; this holds the sums.
 
-import { spans } from './text';
-import { type Rgb, ansiFg, blend } from './utils';
+import { spans } from '../core/text';
+import { type Rgb, ansiFg, blend } from '../core/utils';
 
 export interface HintPlacement {
     /** the first column the hint occupies. */

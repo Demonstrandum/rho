@@ -32,9 +32,9 @@ import {
     type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
 import { Box, Container, type Component } from '@earendil-works/pi-tui';
-import { holdsImage, trimBlankEdges } from './lib/box-edges';
-import { config } from './lib/config';
-import { isBlank as isBlankText, OSC } from './lib/text';
+import { holdsImage, trimBlankEdges } from './lib/tui/box-edges';
+import { config } from './lib/core/config';
+import { isBlank as isBlankText, OSC } from './lib/core/text';
 
 export { trimBlankEdges };
 

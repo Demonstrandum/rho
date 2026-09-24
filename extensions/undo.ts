@@ -23,10 +23,10 @@ import {
     isToolCallEventType,
     type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
-import { config } from './lib/config';
+import { config } from './lib/core/config';
 import { currentEnvironment } from './environment';
-import { targetFor } from './lib/acting-file';
-import { LOCAL_BACKUPS, type FileStore } from './lib/file-store';
+import { targetFor } from './lib/files/acting-file';
+import { LOCAL_BACKUPS, type FileStore } from './lib/files/file-store';
 import {
     describe,
     keep,
@@ -41,8 +41,8 @@ import {
     type Limits,
     type MutatingTool,
     type Recorded,
-} from './lib/undo-journal';
-import type { StateIdentity } from './lib/state-store';
+} from './lib/files/undo-journal';
+import type { StateIdentity } from './lib/core/state-store';
 import { dirname } from 'node:path';
 
 const limits = (): Limits => ({

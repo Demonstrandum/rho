@@ -17,10 +17,10 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
-import { config } from './lib/config';
-import { duration as formatDuration } from './lib/text';
-import { withSpinner } from './lib/widget-spinner';
-import { proseOf, runAudit, type AuditResult, type Finding } from './lib/audit';
+import { config } from './lib/core/config';
+import { duration as formatDuration } from './lib/core/text';
+import { withSpinner } from './lib/chrome/widget-spinner';
+import { proseOf, runAudit, type AuditResult, type Finding } from './lib/model/audit';
 
 const ENTRY_TYPE = 'rho-audit-report';
 const WIDGET_KEY = 'rho-audit-spinner';

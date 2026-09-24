@@ -6,9 +6,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExtensionAPI, ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { config } from '../extensions/lib/config';
-import { LOCAL_BACKUPS } from '../extensions/lib/file-store';
-import { PersistedState } from '../extensions/lib/state-store';
+import { config } from '../extensions/lib/core/config';
+import { LOCAL_BACKUPS } from '../extensions/lib/files/file-store';
+import { PersistedState } from '../extensions/lib/core/state-store';
 import installRemove from '../extensions/remove';
 import installUndo from '../extensions/undo';
 

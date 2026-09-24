@@ -16,7 +16,7 @@
 // fits the budget. one command keeping its arguments while its neighbour is
 // down to a bare head is the result of that, not a special case.
 
-import { BRACKET, elidePath, ELLIPSIS, oneLine, quantity, truncate } from '../text';
+import { BRACKET, elidePath, ELLIPSIS, oneLine, quantity, truncate } from '../core/text';
 import { visibleWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 import { PLAIN_THEME, type RowColor, type RowTheme } from './theme';
 import { toolTitle } from './title';

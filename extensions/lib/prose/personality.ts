@@ -17,7 +17,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { rhoRoot } from './rho-root';
+import { rhoRoot } from '../core/rho-root';
 import { fileURLToPath } from 'node:url';
 import envPaths from 'env-paths';
 

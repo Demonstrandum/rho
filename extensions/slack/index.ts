@@ -33,12 +33,12 @@ import type { ExtensionAPI, ExtensionCommandContext, MessageRenderer, Theme } fr
 import { Box, type Component, Text } from '@earendil-works/pi-tui';
 import type { RowTheme } from '../lib/tool-row/theme';
 import { slackCall, slackResult } from './row';
-import { completeLastWord } from '../lib/complete-words';
-import { PersistedState } from '../lib/state-store';
+import { completeLastWord } from '../lib/tui/complete-words';
+import { PersistedState } from '../lib/core/state-store';
 import { noteFor, setNote } from '../lib/tool-row/notes';
 import { loadMaxims } from '../spinner';
-import { config } from '../lib/config';
-import { quantity } from '../lib/text';
+import { config } from '../lib/core/config';
+import { quantity } from '../lib/core/text';
 import {
     type Acknowledgement,
     addressed,

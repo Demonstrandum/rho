@@ -21,7 +21,7 @@ import {
     rgbToHsl,
     themeBgRgb,
     themeRgb,
-} from './utils';
+} from '../core/utils';
 
 export function resolveColour(theme: Theme | undefined, spec: string): Rgb | undefined {
     if (!spec || !theme) return undefined;

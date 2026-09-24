@@ -36,12 +36,12 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { TSchema } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
-import { PersistedState } from './lib/state-store';
-import { config } from './lib/config';
+import { PersistedState } from './lib/core/state-store';
+import { config } from './lib/core/config';
 import { currentEnvironment } from './environment';
-import { collapseHome } from './lib/text';
-import { announceWhere, gitThrough, registerLocationRenderer, whereNote } from './lib/where-note';
-import type { Place } from './lib/where-note';
+import { collapseHome } from './lib/core/text';
+import { announceWhere, gitThrough, registerLocationRenderer, whereNote } from './lib/git/where-note';
+import type { Place } from './lib/git/where-note';
 
 const TARGET_VERSION = 1;
 

@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test';
 import { visibleWidth } from '@earendil-works/pi-tui';
-import { borderStatus, cutInto } from '../extensions/lib/working-status';
-import { plain } from '../extensions/lib/text';
+import { borderStatus, cutInto } from '../extensions/lib/chrome/working-status';
+import { plain } from '../extensions/lib/core/text';
 
 const EDGE = (width: number) => '\u2584'.repeat(width);
 

@@ -29,7 +29,7 @@ import { CustomEditor } from '@earendil-works/pi-coding-agent';
 // set prints two columns, and counting it as one leaves the row a column too
 // long, which wraps and takes the layout with it.
 import { visibleWidth } from '@earendil-works/pi-tui';
-import { spliceVisible } from '../core/text';
+import { plain, spliceVisible } from '../core/text';
 import { RESET } from '../core/utils';
 import { config } from '../core/config';
 
@@ -40,6 +40,42 @@ export const placement: SpinnerPlacement = config.spinner.placement;
 /** how far in from the left edge the status sits, and the space either side. */
 const INSET = 2;
 const MARGIN = 2;
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+// a codepoint a terminal draws in two columns when it stands on its own: every
+// pictograph, and the skin-tone modifiers, which are swatches when nothing
+// absorbs them.
+const WIDE_ALONE = /\p{Extended_Pictographic}|\p{Emoji_Modifier}/u;
+// the joiners themselves, which no terminal gives a column to.
+const JOINER = /[\u200d\ufe0e\ufe0f]/u;
+
+/**
+ * the widest a terminal could draw `text`, in columns.
+ *
+ * visibleWidth measures a grapheme cluster as Unicode composes it, so the ZWJ
+ * sequence `1F481 200D 2640 FE0F` is two columns. a terminal that does not
+ * compose the sequence draws its parts instead and advances four. the two
+ * measures disagree only on multi-codepoint emoji: ZWJ sequences, flags,
+ * keycaps, skin tones.
+ *
+ * a status placed by the composed measure therefore overruns the row on such a
+ * terminal, which wraps it and repaints the message over itself. charging each
+ * cluster its worst case costs a column or two of border where the terminal
+ * did compose it, and never overruns.
+ */
+export function widestWidth(text: string): number {
+    let total = 0;
+    for (const { segment } of graphemes.segment(plain(text))) {
+        let parts = 0;
+        for (const point of segment) {
+            if (JOINER.test(point)) continue;
+            parts += WIDE_ALONE.test(point) ? 2 : visibleWidth(point);
+        }
+        total += Math.max(parts, visibleWidth(segment));
+    }
+    return total;
+}
 
 /**
  * what pi's WorkingStatusIndicator offers a border. neither this nor the two
@@ -99,7 +135,7 @@ export function borderStatus(editor: unknown, width: number): string | undefined
     // pi keeps a cell of border to the right of the message; below that it
     // falls back to the spinner alone, and so does this.
     const message = indicator.renderInBorder(Math.max(1, width - 5));
-    if (visibleWidth(message) > 0 && visibleWidth(message) <= room) return message;
+    if (visibleWidth(message) > 0 && widestWidth(message) <= room) return message;
 
     const spinner = indicator.renderSpinnerInBorder(room);
     return visibleWidth(spinner) > 0 ? spinner : undefined;
@@ -115,7 +151,10 @@ export function borderStatus(editor: unknown, width: number): string | undefined
  * columns index it.
  */
 export function cutInto(row: string, status: string, width: number): string {
-    const statusWidth = visibleWidth(status);
+    // what it covers is its worst case, not its composed width: a cluster the
+    // terminal draws wider than Unicode composes it has to take those cells
+    // from the border, or the row grows and wraps.
+    const statusWidth = widestWidth(status);
     const covered = statusWidth + MARGIN;
     if (statusWidth === 0 || INSET + covered > width) return row;
     return spliceVisible(row, INSET, INSET + covered, ` ${status}${RESET} `);

@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { visibleWidth } from '@earendil-works/pi-tui';
-import { borderStatus, cutInto } from '../extensions/lib/chrome/working-status';
+import { borderStatus, cutInto, widestWidth } from '../extensions/lib/chrome/working-status';
 import { plain } from '../extensions/lib/core/text';
 
 const EDGE = (width: number) => '\u2584'.repeat(width);
@@ -30,6 +30,24 @@ test('a two-column glyph covers two cells of the row', () => {
     const out = cutInto(EDGE(20), '\u4e36 ok', 20);
     expect(visibleWidth(out)).toBe(20);
     expect(plain(out).startsWith('\u2584\u2584 \u4e36 ok \u2584')).toBe(true);
+});
+
+test('a zwj sequence is charged the columns its parts would take', () => {
+    // composed it is one two-column cluster; drawn as parts it is 💁 and ♀.
+    expect(visibleWidth('\u{1f481}\u200d\u2640\ufe0f')).toBe(2);
+    expect(widestWidth('\u{1f481}\u200d\u2640\ufe0f')).toBe(4);
+});
+
+test('widestWidth agrees with visibleWidth where terminals agree', () => {
+    for (const text of ['working', '\u4e07 Serving', '\u{1f485}', '\x1b[31mred\x1b[0m']) {
+        expect(widestWidth(text)).toBe(visibleWidth(text));
+    }
+});
+
+test('a status holding a zwj sequence takes its worst case from the border', () => {
+    const out = cutInto(EDGE(20), '\u{1f481}\u200d\u2640\ufe0f ok', 20);
+    // four cells for the emoji, one space, two for 'ok', and the margin.
+    expect(plain(out)).toBe('\u2584\u2584 \u{1f481}\u200d\u2640\ufe0f ok ' + '\u2584'.repeat(9));
 });
 
 test('cutInto leaves a row with no room for the status alone', () => {

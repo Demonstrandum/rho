@@ -28,10 +28,10 @@ import {
     type MessageRenderer,
     type Theme,
 } from '@earendil-works/pi-coding-agent';
-import slack from '../extensions/slack';
+import slack from '../extensions/slack/index';
 import { adaptTheme, noteOn, rowTitle } from '../extensions/tool-rows';
 import { callPreview, resultPreview } from '../extensions/lib/tool-row/preview';
-import { slackCall, slackResult } from '../extensions/lib/slack-row';
+import { slackCall, slackResult } from '../extensions/slack/row';
 import { noteFor, setNote } from '../extensions/lib/tool-row/notes';
 
 const SAMUEL = 'D0C2SA7A1EY';

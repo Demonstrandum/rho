@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { slackCall, slackResult, type RowContext } from '../extensions/lib/slack-row';
+import { slackCall, slackResult, type RowContext } from '../extensions/slack/row';
 import { PLAIN_THEME } from '../extensions/lib/tool-row/theme';
 
 const NAMES: Readonly<Record<string, string>> = { D0C2SA7A1EY: 'Samuel', C07J1N8Q0RH: '#robotics' };

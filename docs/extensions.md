@@ -443,16 +443,17 @@ it registers an `agentica` tool (runs python that can call MCP tools via the Age
 `RHO_AGENTICA_PYTHON` overrides the interpreter (default `<runtime>/.venv/bin/python`).
 the nix original gated this behind a build flag; rho has no build step so the gate is runtime and explicit.
 
-`slack.ts` puts one session in reach of a Slack DM: `/slack <app>` attaches, `/slack off` releases, `/slack add <app>` stores an app's two tokens through a UI prompt rather than the transcript, `/slack new <app>` prints Slack's create-app link with the manifest already filled in.
+`slack/` puts one session in reach of a Slack DM: `/slack <app>` attaches, `/slack off` releases, `/slack add <app>` stores an app's two tokens through a UI prompt rather than the transcript, `/slack new <app>` prints Slack's create-app link with the manifest already filled in.
 the socket is held by the session and dies with it, so nothing receives DMs while pi is closed; a high-water mark per conversation and a `conversations.history` call at connect recover what arrived in the meantime, which Socket Mode never redelivers.
 credentials belong to an app and an app is locked to one session, because Slack hands each payload to an arbitrary one of an app's open connections; two sessions on two apps are independent, which is what the named store is for.
 an incoming message gets a reaction as the read mark and a rotating status line (`code-bot is thinking...`) refreshed every 90 seconds, and only the turn that ends without tool calls is forwarded as the answer.
 it reaches the session as a custom message carrying the sender, the channel, the timestamp and the files in `details`, and a `registerMessageRenderer` draws it as a user-style box (bold `slack`, who wrote, what they said) with the rest on ctrl+o; the instructions to the model are three sentences, because the tool descriptions carry the same rules and the delivered text is paid for on every message.
 seven tools are registered on attach: `slack_reply`, `slack_send_file`, `slack_read`, `slack_done`, `slack_directory` (who and what the workspace holds, and the IDs that address them), `slack_manage_message` (update, delete, react, unreact, reactions, permalink) and `slack_schedule` (send later, list, cancel).
 a surface that operates on something rather than sending takes an action rather than a tool per Slack method, because every definition is paid for in the prompt of every attached session.
-`lib/slack-api.ts` holds the Web API calls, the cursor paging every listing needs, and the reconnecting Socket Mode client; `lib/slack-config.ts` the app store, the per-app lock, and the manifest.
+the extension is a directory, because four files for one surface is more than `lib/` should carry: `slack/index.ts` is the session side, `slack/api.ts` the Web API calls with the cursor paging every listing needs and the reconnecting Socket Mode client, `slack/config.ts` the app store, the per-app lock and the manifest, `slack/row.ts` what each tool row says it did.
+pi loads `extensions/<name>/index.ts` and nothing else beneath it (`discoverExtensionsInDir`), so the other three are private to the directory and no manifest entry changes.
 a user ID is an address everywhere, not only in `chat.postMessage`: `SlackWeb` opens the DM once per person and uses the channel it returns, so a `U...` from the directory works with reading and scheduling too.
-the reasoning, the traps, and what is deliberately not built are in `extensions/slack.NOTES.md`.
+the reasoning, the traps, and what is deliberately not built are in `extensions/slack/NOTES.md`.
 
 `sample-session.ts` opens a session made up to be looked at: `pi --sample-session`, or `/sample-session` in a running one.
 the things that draw a session are hard to work on without one, and the sessions that exist are somebody's work, with their paths, their keys, and their mistakes in it, so none of them can go in a screenshot or be replayed on another machine.

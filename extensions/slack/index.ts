@@ -22,7 +22,7 @@
 // conversations.history for the gap when it opens.
 //
 // Why the forwarding is what it is, and the two traps behind the thread and
-// the reload handling, are in extensions/slack.NOTES.md.
+// the reload handling, are in extensions/slack/NOTES.md.
 
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -31,14 +31,14 @@ import { basename, isAbsolute, join, resolve } from 'node:path';
 import { Type } from 'typebox';
 import type { ExtensionAPI, ExtensionCommandContext, MessageRenderer, Theme } from '@earendil-works/pi-coding-agent';
 import { Box, type Component, Text } from '@earendil-works/pi-tui';
-import type { RowTheme } from './lib/tool-row/theme';
-import { slackCall, slackResult } from './lib/slack-row';
-import { completeLastWord } from './lib/complete-words';
-import { PersistedState } from './lib/state-store';
-import { noteFor, setNote } from './lib/tool-row/notes';
-import { loadMaxims } from './spinner';
-import { config } from './lib/config';
-import { quantity } from './lib/text';
+import type { RowTheme } from '../lib/tool-row/theme';
+import { slackCall, slackResult } from './row';
+import { completeLastWord } from '../lib/complete-words';
+import { PersistedState } from '../lib/state-store';
+import { noteFor, setNote } from '../lib/tool-row/notes';
+import { loadMaxims } from '../spinner';
+import { config } from '../lib/config';
+import { quantity } from '../lib/text';
 import {
     type Acknowledgement,
     addressed,
@@ -54,7 +54,7 @@ import {
     SocketMode,
     type Timestamp,
     type UserId,
-} from './lib/slack-api';
+} from './api';
 import {
     type AppName,
     checkName,
@@ -69,7 +69,7 @@ import {
     takeLock,
     TOKEN_PREFIX,
     writeApp,
-} from './lib/slack-config';
+} from './config';
 
 const STATE_VERSION = 1;
 
@@ -186,7 +186,7 @@ const named = (id: string): string => noteFor(id) ?? id;
  * The call and result rows of one Slack tool.
  *
  * Spread into the tool's definition, so every tool here draws through
- * lib/slack-row.ts rather than through the generic row, which reads `action`
+ * slack/row.ts rather than through the generic row, which reads `action`
  * as one more argument to hide until the row is opened.
  */
 const rowsFor = (tool: string) => ({

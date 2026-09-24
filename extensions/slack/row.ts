@@ -15,8 +15,8 @@
 // every case: a verb, what it acted on, and the text it carried, with the
 // identifiers held back for the expanded row.
 
-import type { RowTheme } from './tool-row/theme';
-import { truncate } from './text';
+import type { RowTheme } from '../lib/tool-row/theme';
+import { truncate } from '../lib/text';
 
 /** how a channel id is written for a person: their name, or the id. */
 export type Named = (id: string) => string;

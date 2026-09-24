@@ -1,7 +1,7 @@
 # slack: why it is built this way
 
 Built during the dev-box migration to get one person's Slack replies in front of a running session, then rebuilt as three files with no daemon and no fixed workspace.
-`extensions/slack.ts` is the session side, `extensions/lib/slack-api.ts` the Slack calls and the socket, `extensions/lib/slack-config.ts` the store of apps and the lock.
+`extensions/slack/index.ts` is the session side, `extensions/slack/api.ts` the Slack calls and the socket, `extensions/slack/config.ts` the store of apps and the lock.
 `bin/slack-inbox` and its spool are gone.
 
 ## The unit is the app, and an app belongs to one session

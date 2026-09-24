@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { scheduleTime } from '../extensions/lib/slack-api';
+import { scheduleTime } from '../extensions/slack/api';
 
 const NOW = Date.parse('2026-09-17T12:00:00Z');
 

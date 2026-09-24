@@ -8,11 +8,11 @@ import { join } from 'node:path';
 const DIR = mkdtempSync(join(tmpdir(), 'rho-slack-'));
 process.env.RHO_SLACK_DIR = DIR;
 
-type Store = typeof import('../extensions/lib/slack-config');
+type Store = typeof import('../extensions/slack/config');
 let store: Store;
 
 beforeAll(async () => {
-    store = await import('../extensions/lib/slack-config');
+    store = await import('../extensions/slack/config');
 });
 
 describe('app names', () => {

@@ -7,7 +7,7 @@
 //   bun run demo/preview-animation.ts rho --loop   repeat until ctrl-c
 //   bun run demo/preview-animation.ts --accent '#82aaff'
 //
-// every frame comes from renderLogoLines() in extensions/lib/pi-logo.ts, the
+// every frame comes from renderLogoLines() in extensions/lib/chrome/pi-logo.ts, the
 // same function extensions/startup.ts calls, driven by the same rho.toml
 // config. the only things this file decides are which accent colour stands in
 // for the theme, and that the output goes to stdout instead of the pi header.

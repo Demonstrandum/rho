@@ -604,7 +604,7 @@ it fails with the upgrade command when bun is older than 1.2.0, or when the inst
 `--install` is the postinstall form, where a missing pi is a warning rather than an error, since installing rho before pi is a normal order.
 
 `tools/bun-shebang.ts` (`bun run bun-shebang`, `--check`) points pi's launcher at bun, from `postinstall` so a `pi update` that restores the node shebang is undone at the next install.
-it shares `extensions/lib/bun-launcher.ts` with `bun-runtime.ts`, so the install-time repair and the startup repair are one implementation.
+it shares `extensions/lib/core/bun-launcher.ts` with `bun-runtime.ts`, so the install-time repair and the startup repair are one implementation.
 a failure is a warning at install time, since a machine can install rho before pi.
 
 `tools/pi-location.ts` finds pi's install, shared by `preflight.ts` and `link-pi-packages.ts`.

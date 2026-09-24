@@ -2,7 +2,7 @@
 // starts, so that pi's own head and the tool snippets the bundled packages
 // contribute read the way the rest of the prompt does.
 //
-// the transform is extensions/lib/disenshittification.ts. every markdown file
+// the transform is extensions/lib/prose/disenshittification.ts. every markdown file
 // in rho is a fixed point of it (tests/disenshittification.test.ts holds that),
 // so what it changes here is pi's text and third-party text, nothing of ours.
 //

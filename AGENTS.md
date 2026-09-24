@@ -90,7 +90,7 @@ if an entry here is growing past two lines, that is the signal to move it.
 - `extensions/assets/spinners.json` spinner definitions keyed by name (`category`, `interval`, `frames`); enabled categories live in `spinner.ts` (`chinese` by default).
 - `extensions/assets/maxims.txt` working messages, one per line, `;` comments, picked at random each turn.
 - `extensions/assets/verbs.txt` completion verbs, one per line, `;` comments, picked at random for the settle line (`完 <verb> for <duration>`)
-- `rho.toml` generated output, never hand-edited: the schema in `extensions/lib/config.ts` printed with its docs.
+- `rho.toml` generated output, never hand-edited: the schema in `extensions/lib/core/config.ts` printed with its docs.
   change the schema, then run `bun run config`; `tests/config.test.ts` fails while the two disagree.
 - `package.json` the `pi` manifest declaring resource paths.
 - `.npmrc` turns off npm peer resolution for the install `pi install` runs; pi's own packages are symlinked from the installed pi by `tools/link-pi-packages.ts`, never fetched.
@@ -112,7 +112,8 @@ one line each; the detail is in `docs/extensions.md`.
 - `tools/prompt-explorer.ts` (`bun run prompt`, `prompt:cli`, `prompt:preview`, `prompt:plain`) shows the assembled prompt.
 - `tools/slack-preview.ts` (`bun run slack:preview`) draws every Slack tool row and the arriving-message box, collapsed and expanded, through the renderers a session uses.
 - `tools/prompt-full.ts` (`bun run prompt:full`) shows the prompt as the provider receives it, pi's text included.
-- `tools/reflow.ts` (cli over `extensions/lib/reflow.ts`) rewrites markdown to one sentence per line; run it after editing markdown here.
+- `tools/reflow.ts` (cli over `extensions/lib/prose/reflow.ts`) rewrites markdown to one sentence per line; run it after editing markdown here.
+- `tools/regroup.ts` (`bun tools/regroup.ts <plan.json> [--dry]`) moves modules and repairs every import that named them, resolving each specifier rather than matching its text.
 - `tools/unshitty.ts` (`bun run unshitty`, `unshitty:head`) diffs the live system prompt against its rewritten form; `$DIFF` picks the differ.
 - `tools/thinking-replay-probe.ts`, `tools/box-mockup.ts`, `tools/init-config.ts`, `tools/link-pi-packages.ts` one-off probes and setup.
 
@@ -127,7 +128,7 @@ see `system/README.md` for the injection order.
 
 - `bun install` then `bun run typecheck`.
 - never edit `rho.toml`.
-  it is generated from `extensions/lib/config.ts` by `bun run config`, which is what to run after adding or changing a field.
+  it is generated from `extensions/lib/core/config.ts` by `bun run config`, which is what to run after adding or changing a field.
 - `/reload` in a session picks up changes without a restart.
 - after editing any markdown here, run `bun tools/reflow.ts --write <files>`.
 - when documenting a change, put it in the file's header comment or `docs/extensions.md`, not here.

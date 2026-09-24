@@ -25,7 +25,7 @@ Every conversation therefore carries a high-water mark in session state, and the
 That call needs `im:history` for a DM.
 Enumerating DM conversations through `users.conversations` would need `im:read`; keeping the channel ids already seen avoids depending on it, and the scope is in the manifest anyway.
 
-State lives in `extensions/lib/state-store.ts` under the `session` scope, keyed by session id and pruned after 30 days: the attached app name and the marks.
+State lives in `extensions/lib/core/state-store.ts` under the `session` scope, keyed by session id and pruned after 30 days: the attached app name and the marks.
 `pi.appendEntry()` was the alternative and is the wrong one, because this is machine state about a socket rather than part of the conversation.
 A resume reopens the app it was attached to, unless another session has taken it in the meantime.
 

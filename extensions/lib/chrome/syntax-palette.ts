@@ -159,6 +159,18 @@ export function themeUnder(theme: Theme): Theme {
 }
 
 /**
+ * whether a palette is on the theme in force.
+ *
+ * pi replaces the Theme object without telling an extension: the `system`
+ * theme is rebuilt when the terminal reports a switch between light and dark,
+ * and the object that replaces it carries no palette. so the chooser asks this
+ * each turn and lays the palette on again when the answer is no.
+ */
+export function isRestyled(theme: Theme): boolean {
+    return (instance(theme) as unknown as Partial<Restyled>)[LAID_OVER] !== undefined;
+}
+
+/**
  * `theme` with the palette's colours in place of its own.
  *
  * returns the theme unchanged when the palette sets nothing usable, so a

@@ -79,6 +79,12 @@ function sampleEditor(tui: TUI, keybindings: KeybindingsManager, theme: Theme): 
 interface ThemeChoice {
     readonly name: string;
     readonly current: boolean;
+    /**
+     * the background the theme is drawn for: declared in its json, detected
+     * from its colours, or, for `system` and any theme whose text is the
+     * terminal's own, whatever the terminal reports right now.
+     */
+    readonly appearance: string | null;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -91,7 +97,11 @@ export default function (pi: ExtensionAPI) {
 
     const themes = (ctx: ExtensionContext): ThemeChoice[] => {
         const current = ctx.ui.theme.name;
-        return ctx.ui.getAllThemes().map((entry) => ({ name: entry.name, current: entry.name === current }));
+        return ctx.ui.getAllThemes().map((entry) => ({
+            name: entry.name,
+            current: entry.name === current,
+            appearance: ctx.ui.getTheme(entry.name)?.appearance ?? null,
+        }));
     };
 
     /**
@@ -161,11 +171,10 @@ export default function (pi: ExtensionAPI) {
             const wanted = prefix.trim().toLowerCase();
             const items = themes(live)
                 .filter((entry) => entry.name.toLowerCase().includes(wanted))
-                .map((entry) => ({
-                    value: entry.name,
-                    label: entry.name,
-                    ...(entry.current ? { description: '(current)' } : {}),
-                }));
+                .map((entry) => {
+                    const note = [entry.appearance, entry.current ? '(current)' : null].filter((part) => part !== null).join(' ');
+                    return { value: entry.name, label: entry.name, ...(note === '' ? {} : { description: note }) };
+                });
             return items.length === 0 ? null : items;
         },
         async handler(args: string, ctx: ExtensionCommandContext) {

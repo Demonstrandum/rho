@@ -4,6 +4,7 @@ import {
     chosenPalette,
     choosePalette,
     fgAnsi,
+    isRestyled,
     paletteNamed,
     palettes,
     restyle,
@@ -95,6 +96,17 @@ test('theme.colors carries the palette too', () => {
     expect(styled.colors.syntaxKeyword).toEqual({ kind: 'rgb', r: 255, g: 121, b: 198 });
     expect(styled.colors.border).toEqual(real.colors.border);
     expect(real.colors.syntaxKeyword).toEqual({ kind: 'rgb', r: 17, g: 34, b: 51 });
+});
+
+/**
+ * pi replaces the Theme object without an event when the `system` theme is
+ * rebuilt for a terminal that has switched light or dark, and the replacement
+ * carries no palette. the chooser puts it back on what answers false here.
+ */
+test('a theme that arrived without the palette says so', () => {
+    const theme = base();
+    expect(isRestyled(theme)).toBe(false);
+    expect(isRestyled(restyle(theme, paletteNamed('nord')!))).toBe(true);
 });
 
 test('the theme keeps its name under a palette', () => {

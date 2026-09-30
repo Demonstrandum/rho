@@ -33,7 +33,7 @@ import { PersistedState } from './lib/core/state-store';
 import { previewHold, type PreviewHold } from './lib/tui/preview-hold';
 import { watchAutocompleteFocus } from './lib/tui/autocomplete-focus';
 import { SideBySide } from './lib/tui/side-by-side';
-import { chosenPalette, choosePalette, palettes, paletteNamed, restyle, themeUnder } from './lib/chrome/syntax-palette';
+import { chosenPalette, choosePalette, isRestyled, palettes, paletteNamed, restyle, themeUnder } from './lib/chrome/syntax-palette';
 
 /** the name that stands for the theme's own colours. */
 const NONE = 'none';
@@ -138,6 +138,20 @@ export default function (pi: ExtensionAPI) {
         preview.commit();
         if (config.syntax.persist) store?.write({ palette: name });
     };
+
+    /**
+     * the chosen palette, back on a theme that arrived without it.
+     *
+     * `system`, pi's default since 0.99, is rebuilt from the terminal's
+     * colours whenever it reports a switch between light and dark, and the new
+     * object has the theme's own syntax colours. no event says so, so the
+     * check runs each turn, where it costs one property read.
+     */
+    pi.on('before_agent_start', async (_event, ctx: ExtensionContext) => {
+        const palette = chosenPalette();
+        if (palette === null || isRestyled(ctx.ui.theme)) return;
+        ctx.ui.setTheme(restyle(ctx.ui.theme, palette));
+    });
 
     pi.on('session_start', (_event, ctx: ExtensionContext) => {
         live = ctx;

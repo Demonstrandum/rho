@@ -59,20 +59,20 @@
   },
   "bundledDependencies": ["pi-web-access", "@ayulab/pi-rewind", "context-mode", "token-rate-pi", "pi-subagents"],
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.85.1",
-    "@earendil-works/pi-agent-core": ">=0.85.1",
-    "@earendil-works/pi-coding-agent": ">=0.85.1",
-    "@earendil-works/pi-tui": ">=0.85.1",
+    "@earendil-works/pi-ai": ">=0.99.0",
+    "@earendil-works/pi-agent-core": ">=0.99.0",
+    "@earendil-works/pi-coding-agent": ">=0.99.0",
+    "@earendil-works/pi-tui": ">=0.99.0",
     "typebox": ">=1.3.7"
   },
   "engines": {
     "bun": ">=1.3.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": ">=0.85.1",
-    "@earendil-works/pi-ai": ">=0.85.1",
-    "@earendil-works/pi-coding-agent": ">=0.85.1",
-    "@earendil-works/pi-tui": ">=0.85.1",
+    "@earendil-works/pi-agent-core": ">=0.99.0",
+    "@earendil-works/pi-ai": ">=0.99.0",
+    "@earendil-works/pi-coding-agent": ">=0.99.0",
+    "@earendil-works/pi-tui": ">=0.99.0",
     "@types/bun": "^1.4.2",
     "typebox": ">=1.3.7",
     "typescript": "^5.9.3"

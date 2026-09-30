@@ -52,7 +52,7 @@ bundles my:
 
 ## install
 
-rho needs bun 1.2.0 or newer and pi 0.84.0 or newer.
+rho needs bun 1.3.0 or newer and pi 0.99.0 or newer, which is the release that added tool exposure and the theme internals the syntax palettes are laid over.
 an older bun fails partway through the install with an error that names the wrong file, so the install checks the version first and says what to upgrade.
 run `bun run doctor` at any time for the same report.
 

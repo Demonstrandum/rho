@@ -24,7 +24,7 @@ import { findLauncher, readLauncher } from '../extensions/lib/core/bun-launcher'
 const MINIMUM = {
     bun: '1.3.0',
     node: '20.0.0',
-    pi: '0.84.0',
+    pi: '0.99.0',
 } as const;
 
 type Severity = 'error' | 'warning';

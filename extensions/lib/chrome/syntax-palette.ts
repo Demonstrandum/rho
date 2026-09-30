@@ -10,10 +10,15 @@
 // theme is not always a file: a built-in has no path to read, and pi hands out
 // a Theme object with the colours already encoded as ansi. so `restyle` makes
 // an object that delegates to the theme for every colour except the ones the
-// palette names. pi asks a Theme for colours through `fg`/`getFgAnsi`, both of
-// which read `this.fgColors`, so giving the new object its own map of that name
-// is the whole of the override, and a key pi adds later still resolves through
-// the theme it came from.
+// palette names. pi asks a Theme for colours two ways, and both are overridden:
+// `fg`/`style`/`getFgAnsi` read the precomputed escapes in `this.fgAnsi`, and
+// `theme.colors` resolves `this.concreteColors` against the terminal's reported
+// defaults, caching that in `this.resolvedColors`, which the new object must
+// start without or it inherits the colours it exists to replace. a key pi adds
+// later still resolves through the theme it came from.
+//
+// a colour is parsed by pi's own `parseColor`, so a palette entry may be `#rgb`,
+// `#rrggbb`, an index, `oklch()` or `okhsl()`: the set a theme file takes.
 //
 // the returned object is `instanceof Theme` and keeps the theme's name, so
 // pi's own theme list, the settings writer, and rho's picker all read it as the
@@ -23,6 +28,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Theme, type ThemeColor } from '@earendil-works/pi-coding-agent';
+import { foregroundAnsi, parseColor, type Color, type TerminalColorMode } from '@earendil-works/pi-tui';
 
 /** the roles a palette can set, named as a reader names them. */
 export const SYNTAX_ROLES = [
@@ -57,8 +63,9 @@ const THEME_KEY: Readonly<Record<SyntaxRole, ThemeColor>> = {
 };
 
 /**
- * what a theme accepts as a colour: `#rrggbb`, an index into the terminal's
- * 256 colours, or the empty string for the terminal's own foreground.
+ * what a theme accepts as a colour: `#rgb`, `#rrggbb`, `oklch()`, `okhsl()`, an
+ * index into the terminal's 256 colours, or the empty string for the
+ * terminal's own foreground.
  */
 export type ColorValue = string | number;
 
@@ -73,41 +80,31 @@ export interface SyntaxPalette {
 // colour encoding
 // ---------------------------------------------------------------------------
 
-export type ColorMode = ReturnType<Theme['getColorMode']>;
+export type ColorMode = TerminalColorMode;
 
-const CUBE = [0, 95, 135, 175, 215, 255] as const;
-
-function nearestCubeIndex(value: number): number {
-    let best = 0;
-    for (let i = 1; i < CUBE.length; i++) {
-        if (Math.abs(value - CUBE[i]!) < Math.abs(value - CUBE[best]!)) best = i;
+/**
+ * the colour a palette entry names, or null when it names none. pi's parser
+ * throws on anything it does not recognise, and an index outside 0-255 is not
+ * a colour a terminal has, so both are refused rather than guessed at.
+ */
+function parse(color: ColorValue): Color | null {
+    if (typeof color === 'number' && (!Number.isInteger(color) || color < 0 || color > 255)) return null;
+    try {
+        return parseColor(color);
+    } catch {
+        return null;
     }
-    return best;
-}
-
-function toRgb(hex: string): readonly [number, number, number] | null {
-    const cleaned = hex.replace('#', '');
-    if (!/^[0-9a-fA-F]{6}$/.test(cleaned)) return null;
-    const n = parseInt(cleaned, 16);
-    return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
 }
 
 /**
  * the escape that sets a foreground colour, in the mode the theme was built
- * for. a terminal without truecolour gets the nearest colour in the 6x6x6
- * cube, which is what pi does with a hex colour in that mode.
+ * for. a terminal without truecolour gets the nearest colour it has, which is
+ * pi's own approximation rather than a second one written here.
  */
 export function fgAnsi(color: ColorValue, mode: ColorMode): string | null {
     if (color === '') return '\x1b[39m';
-    if (typeof color === 'number') {
-        return Number.isInteger(color) && color >= 0 && color <= 255 ? `\x1b[38;5;${color}m` : null;
-    }
-    const rgb = toRgb(color);
-    if (rgb === null) return null;
-    const [r, g, b] = rgb;
-    if (mode === 'truecolor') return `\x1b[38;2;${r};${g};${b}m`;
-    const index = 16 + 36 * nearestCubeIndex(r) + 6 * nearestCubeIndex(g) + nearestCubeIndex(b);
-    return `\x1b[38;5;${index}m`;
+    const parsed = parse(color);
+    return parsed === null ? null : foregroundAnsi(parsed, mode);
 }
 
 // ---------------------------------------------------------------------------
@@ -137,13 +134,22 @@ function instance(theme: Theme): Theme {
 
 interface Restyled {
     [LAID_OVER]: Theme;
-    fgColors: Map<string, string>;
+    /** the escapes `fg`, `style` and `getFgAnsi` answer from. */
+    fgAnsi: Map<string, string>;
+    /** the colours `theme.colors` resolves against the terminal's defaults. */
+    concreteColors: Record<string, Color>;
 }
 
-/** the colour map a Theme resolves `fg` through. private to pi, present here. */
-function colorMap(theme: Theme): Map<string, string> | null {
-    const map = (theme as unknown as Partial<Restyled>).fgColors;
+/** the escape map a Theme resolves `fg` through. private to pi, present here. */
+function ansiMap(theme: Theme): Map<string, string> | null {
+    const map = (theme as unknown as Partial<Restyled>).fgAnsi;
     return map instanceof Map ? map : null;
+}
+
+/** the same theme's concrete colours, which `theme.colors` is built from. */
+function concreteColors(theme: Theme): Record<string, Color> {
+    const colors = (theme as unknown as Partial<Restyled>).concreteColors;
+    return typeof colors === 'object' && colors !== null ? colors : {};
 }
 
 /** the theme under any palette, or the theme itself. */
@@ -160,24 +166,39 @@ export function themeUnder(theme: Theme): Theme {
  */
 export function restyle(theme: Theme, palette: SyntaxPalette): Theme {
     const base = themeUnder(instance(theme));
-    const colors = colorMap(base);
-    if (colors === null) return base;
+    const escapes = ansiMap(base);
+    if (escapes === null) return base;
 
     const mode = base.getColorMode();
-    const replaced = new Map(colors);
+    const replacedAnsi = new Map(escapes);
+    const replacedColors = { ...concreteColors(base) };
     let any = false;
     for (const role of SYNTAX_ROLES) {
         const value = palette.colors[role];
         if (value === undefined) continue;
-        const ansi = fgAnsi(value, mode);
-        if (ansi === null) continue;
-        replaced.set(THEME_KEY[role], ansi);
+        const key = THEME_KEY[role];
+        if (value === '') {
+            // the terminal's own foreground: an escape, and no concrete colour
+            // of its own, which is how pi holds a token set to "".
+            replacedAnsi.set(key, '\x1b[39m');
+            delete replacedColors[key];
+            any = true;
+            continue;
+        }
+        const color = parse(value);
+        if (color === null) continue;
+        replacedAnsi.set(key, foregroundAnsi(color, mode));
+        replacedColors[key] = color;
         any = true;
     }
     if (!any) return base;
 
     const styled = Object.create(base) as Theme;
-    Object.defineProperty(styled, 'fgColors', { value: replaced });
+    Object.defineProperty(styled, 'fgAnsi', { value: replacedAnsi });
+    Object.defineProperty(styled, 'concreteColors', { value: replacedColors });
+    // pi caches `theme.colors` per instance; an inherited cache would answer
+    // with the colours this object exists to replace.
+    Object.defineProperty(styled, 'resolvedColors', { value: undefined, writable: true });
     Object.defineProperty(styled, LAID_OVER, { value: base });
     return styled;
 }
@@ -190,7 +211,8 @@ const PALETTES_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 
 
 function isColorValue(value: unknown): value is ColorValue {
     if (typeof value === 'number') return Number.isInteger(value) && value >= 0 && value <= 255;
-    return typeof value === 'string' && (value === '' || /^#[0-9a-fA-F]{6}$/.test(value));
+    if (typeof value !== 'string') return false;
+    return value === '' || parse(value) !== null;
 }
 
 function parsePalette(raw: unknown): SyntaxPalette | null {

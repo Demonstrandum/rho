@@ -15,16 +15,17 @@ import { Theme } from '@earendil-works/pi-coding-agent';
 
 /**
  * a stand-in for pi's Theme: the two things a palette touches are the map `fg`
- * resolves through and the colour mode. anything else a Theme has is inherited
- * from this object the same way it is from a real one.
+ * resolves through, which pi calls `fgAnsi`, and the colour mode. anything
+ * else a Theme has is inherited from this object the same way it is from a
+ * real one.
  */
 function fakeTheme(name: string, colors: Record<string, string>): Theme {
     const theme = {
         name,
-        fgColors: new Map(Object.entries(colors)),
+        fgAnsi: new Map(Object.entries(colors)),
         getColorMode: () => 'truecolor' as const,
         getFgAnsi(color: string): string {
-            const ansi = (this as unknown as { fgColors: Map<string, string> }).fgColors.get(color);
+            const ansi = (this as unknown as { fgAnsi: Map<string, string> }).fgAnsi.get(color);
             if (ansi === undefined) throw new Error(`Unknown theme color: ${color}`);
             return ansi;
         },
@@ -67,12 +68,33 @@ test('an unusable colour is refused rather than guessed at', () => {
     expect(fgAnsi(300, 'truecolor')).toBeNull();
 });
 
+// the parser is pi's, so a palette takes every form a theme file takes.
+test('a colour may be short hex, oklch or okhsl', () => {
+    expect(fgAnsi('#f0c', 'truecolor')).toBe('\x1b[38;2;255;0;204m');
+    expect(fgAnsi('oklch(0% 0 0)', 'truecolor')).toBe('\x1b[38;2;0;0;0m');
+    expect(fgAnsi('okhsl(0 0% 100%)', 'truecolor')).toBe('\x1b[38;2;255;255;255m');
+});
+
 test('a palette replaces the colours it names and no others', () => {
     const theme = base();
     const styled = restyle(theme, paletteNamed('dracula')!);
     expect(styled.getFgAnsi('syntaxKeyword')).toBe('\x1b[38;2;255;121;198m');
     expect(styled.getFgAnsi('border')).toBe(theme.getFgAnsi('border'));
     expect(theme.getFgAnsi('syntaxKeyword')).toBe('\x1b[38;2;132;148;204m');
+});
+
+/**
+ * `theme.colors` is the other way pi answers a colour, resolved from private
+ * concrete colours rather than from the escapes. a palette that changed only
+ * the escapes would draw code in its own colours and report the theme's.
+ */
+test('theme.colors carries the palette too', () => {
+    const colors = { muted: '#777777', text: '', thinkingXhigh: '#888888', syntaxKeyword: '#112233', border: '#445566' };
+    const real = new Theme(colors as never, { selectedBg: '#222222' } as never, 'truecolor', { name: 'live' });
+    const styled = restyle(real, paletteNamed('dracula')!);
+    expect(styled.colors.syntaxKeyword).toEqual({ kind: 'rgb', r: 255, g: 121, b: 198 });
+    expect(styled.colors.border).toEqual(real.colors.border);
+    expect(real.colors.syntaxKeyword).toEqual({ kind: 'rgb', r: 17, g: 34, b: 51 });
 });
 
 test('the theme keeps its name under a palette', () => {

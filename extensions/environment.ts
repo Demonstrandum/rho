@@ -41,6 +41,7 @@ import { configuredHosts, isConfiguredHost } from './lib/remote/ssh-config';
 import type { Address } from './lib/remote/address';
 import { PersistedState } from './lib/core/state-store';
 import { config } from './lib/core/config';
+import { does } from './lib/core/tool-annotations';
 import { gitBlockFor, gitThrough } from './lib/git/where-note';
 
 interface Environment {
@@ -551,9 +552,11 @@ export default function (pi: ExtensionAPI) {
             },
         }) as T;
 
-    pi.registerTool(route(localRead, (ops) => createReadTool(process.cwd(), { operations: ops.read })));
-    pi.registerTool(route(localWrite, (ops) => createWriteTool(process.cwd(), { operations: ops.write })));
-    pi.registerTool(route(localEdit, (ops) => createEditTool(process.cwd(), { operations: ops.edit })));
+    // pi's own three, with the hints it does not set: they reach whichever
+    // machine is attached, which is the open world an annotation names.
+    pi.registerTool({ ...route(localRead, (ops) => createReadTool(process.cwd(), { operations: ops.read })), annotations: does('read', 'open') });
+    pi.registerTool({ ...route(localWrite, (ops) => createWriteTool(process.cwd(), { operations: ops.write })), annotations: does('replace', 'open') });
+    pi.registerTool({ ...route(localEdit, (ops) => createEditTool(process.cwd(), { operations: ops.edit })), annotations: does('replace', 'open') });
     /**
      * bash, with the machine as an optional argument.
      *
@@ -580,6 +583,8 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         ...localBash,
+        // a command does whatever it was written to do, anywhere it can reach.
+        annotations: does('replace', 'open'),
         parameters: bashParameters,
         promptGuidelines: [
             'Omit bash\u2019s on argument unless the command must run somewhere other than the current environment: passing the machine the session already points at repeats what the environment block says and reads as though it changed something.',
@@ -702,6 +707,7 @@ export default function (pi: ExtensionAPI) {
     // ── the same three verbs, for the agent ────────────────────────────────
     pi.registerTool({
         name: 'environment',
+        annotations: does('set', 'open'),
         label: 'Environment',
         description:
             'Work on another machine. connect attaches one and makes it current; default switches between an attached one and "local"; list says what is attached. After connecting, bash, read, write and edit act there.',

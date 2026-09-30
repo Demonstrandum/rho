@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { does } from './lib/core/tool-annotations';
 
 const execFileAsync = promisify(execFile);
 
@@ -30,6 +31,8 @@ const MAX_BUFFER = 10 * 1024 * 1024;
 function agenticaTool(runtime: string, python: string) {
     return defineTool({
         name: 'agentica',
+        // arbitrary python against whatever MCP servers the runtime holds.
+        annotations: does('replace', 'open'),
         label: 'Agentica',
         description:
             'Execute Python code that can call MCP tools via the Agentica MCP Runtime. ' +

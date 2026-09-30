@@ -23,6 +23,7 @@ import { projectPlan, scriptComplaint } from './lib/remote/project';
 import { agentTrouble, describeAgentTrouble } from './lib/remote/ssh-agent';
 import { completeLastWord, lastWord } from './lib/tui/complete-words';
 import { moveHere } from './cwd';
+import { does } from './lib/core/tool-annotations';
 import { announceWhere, gitThrough, registerLocationRenderer } from './lib/git/where-note';
 import type { WordChoice } from './lib/tui/complete-words';
 import { readdirSync } from 'node:fs';
@@ -137,6 +138,8 @@ export default function (pi: ExtensionAPI) {
     registerLocationRenderer(pi);
     pi.registerTool({
         name: 'project',
+        // a clone reaches a remote; nothing checked out is overwritten.
+        annotations: does('set', 'open'),
         label: 'Project',
         description:
             'Check out a repository and branch where the tools are acting: one clone under ~/projects/<project>/checkout and a worktree per branch, and the working directory moves into the worktree. Works on this machine, or on the attached one. A project already checked out is named rather than cloned again.',

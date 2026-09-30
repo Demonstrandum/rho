@@ -39,6 +39,7 @@ import { noteFor, setNote } from '../lib/tool-row/notes';
 import { loadMaxims } from '../spinner';
 import { config } from '../lib/core/config';
 import { quantity } from '../lib/core/text';
+import { does } from '../lib/core/tool-annotations';
 import {
     type Acknowledgement,
     addressed,
@@ -537,6 +538,7 @@ export default function (pi: ExtensionAPI) {
         pi.registerTool({
             ...rowsFor('slack_reply'),
             ...deferred,
+            annotations: does('add', 'open'),
             name: 'slack_reply',
             label: 'Slack reply',
             description:
@@ -578,6 +580,7 @@ export default function (pi: ExtensionAPI) {
         pi.registerTool({
             ...rowsFor('slack_send_file'),
             ...deferred,
+            annotations: does('add', 'open'),
             name: 'slack_send_file',
             label: 'Slack file',
             description:
@@ -626,6 +629,7 @@ export default function (pi: ExtensionAPI) {
         pi.registerTool({
             ...rowsFor('slack_read'),
             ...deferred,
+            annotations: does('read', 'open'),
             name: 'slack_read',
             label: 'Slack read',
             description:
@@ -670,6 +674,8 @@ export default function (pi: ExtensionAPI) {
         pi.registerTool({
             ...rowsFor('slack_done'),
             ...deferred,
+            // ends the exchange, and the read mark and status say so in Slack.
+            annotations: does('set', 'open'),
             name: 'slack_done',
             label: 'Slack done',
             description:
@@ -694,6 +700,7 @@ export default function (pi: ExtensionAPI) {
         pi.registerTool({
             ...rowsFor('slack_directory'),
             ...deferred,
+            annotations: does('read', 'open'),
             name: 'slack_directory',
             label: 'Slack directory',
             description:
@@ -840,6 +847,8 @@ export default function (pi: ExtensionAPI) {
         pi.registerTool({
             ...rowsFor('slack_manage_message'),
             ...deferred,
+            // update and delete act on a message somebody has already read.
+            annotations: does('replace', 'open'),
             name: 'slack_manage_message',
             label: 'Slack manage message',
             description:
@@ -932,6 +941,9 @@ export default function (pi: ExtensionAPI) {
         pi.registerTool({
             ...rowsFor('slack_schedule'),
             ...deferred,
+            // cancel drops a message that has not been sent, so nothing anyone
+            // has seen stops existing.
+            annotations: does('add', 'open'),
             name: 'slack_schedule',
             label: 'Slack schedule',
             description:

@@ -33,6 +33,7 @@ import {
     type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
 import { config } from './lib/core/config';
+import { does } from './lib/core/tool-annotations';
 import { currentEnvironment } from './environment';
 import { targetFor, type Target } from './lib/files/acting-file';
 import type { Stat } from './lib/files/file-store';
@@ -94,6 +95,7 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool(
         defineTool({
             name: 'remove',
+            annotations: does('replace', 'local'),
             label: 'remove',
             description:
                 "Move a file or directory to the machine's trash, where the person can restore it, "

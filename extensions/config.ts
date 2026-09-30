@@ -47,6 +47,7 @@ import {
     type SaveMode,
 } from './lib/core/config';
 import { collapseHome } from './lib/core/text';
+import { does } from './lib/core/tool-annotations';
 
 type Result = { ok: true; text: string; changed: boolean } | { ok: false; text: string };
 
@@ -226,6 +227,7 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool(
         defineTool({
             name: 'config',
+            annotations: does('set', 'local'),
             label: 'Config',
             description:
                 "Read and change rho's settings (rho.toml) for this session only, and save them to a file. " +

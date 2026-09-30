@@ -42,6 +42,7 @@ import { leaveTerminal, resumeLines } from './lib/tui/leave-terminal';
 import { modelFlags } from './lib/remote/pi-args';
 import type { ModelChoice } from './lib/remote/pi-args';
 import { config } from './lib/core/config';
+import { does } from './lib/core/tool-annotations';
 import { posix, shQuote } from './lib/remote/shell';
 
 /** What /remote can be asked to do. A word is matched against these. */
@@ -1586,6 +1587,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'remote_connect',
+        annotations: does('set', 'open'),
         label: 'Connect to remote session',
         description:
             'connect puts this terminal in front of a session on another machine, starting it if it is not running; the handover happens as soon as this turn ends. disconnect is the other direction, run from inside a session that somebody is attached to: it sends them back to their own machine. A session that has never been used is given this conversation, and what is said there comes back when the person leaves it, so the two machines hold one thread.',
@@ -1645,6 +1647,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'remote_session',
+        annotations: does('set', 'open'),
         label: 'Remote session',
         description:
             'Start or inspect an agent session on another machine, which keeps running when this one stops. create starts a named session; list says what is running there.',

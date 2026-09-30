@@ -51,6 +51,7 @@ import { discover, start, type Started } from './lib/colab/server';
 import { NotebookSession } from './lib/colab/session';
 import { healthy, type ServerAddress } from './lib/colab/client';
 import { collapseHome, quantity, truncate } from './lib/core/text';
+import { does } from './lib/core/tool-annotations';
 import { currentEnvironment } from './environment';
 import { listSessions } from './lib/colab/client';
 import { PersistedState } from './lib/core/state-store';
@@ -699,6 +700,7 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool({
         name: 'marimo_open',
         ...deferred,
+        annotations: does('set', 'local'),
         label: 'marimo open',
         prepareArguments: dropNulls,
         description:
@@ -768,6 +770,7 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool({
         name: 'marimo_cells',
         ...deferred,
+        annotations: does('read', 'local'),
         label: 'marimo cells',
         prepareArguments: dropNulls,
         description:
@@ -830,6 +833,8 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool({
         name: 'marimo_run',
         ...deferred,
+        // a cell runs arbitrary python: it can write anything the kernel can.
+        annotations: does('replace', 'local'),
         label: 'marimo run',
         prepareArguments: dropNulls,
         description:
@@ -903,6 +908,7 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool({
         name: 'marimo_edit',
         ...deferred,
+        annotations: does('replace', 'local'),
         label: 'marimo edit',
         prepareArguments: dropNulls,
         description:
@@ -1009,6 +1015,7 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool({
         name: 'marimo_vars',
         ...deferred,
+        annotations: does('read', 'local'),
         label: 'marimo vars',
         prepareArguments: dropNulls,
         description:
@@ -1061,6 +1068,9 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool({
         name: 'marimo_ui',
         ...deferred,
+        // a value, and the cells that read it run again: the same call twice
+        // leaves the notebook in the same state.
+        annotations: does('set', 'local'),
         label: 'marimo ui',
         prepareArguments: dropNulls,
         description:
@@ -1101,6 +1111,8 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool({
         name: 'marimo_check',
         ...deferred,
+        // lint, and with fix it rewrites the files it lints.
+        annotations: does('replace', 'local'),
         label: 'marimo check',
         prepareArguments: dropNulls,
         description:
@@ -1142,6 +1154,7 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool({
         name: 'marimo_export',
         ...deferred,
+        annotations: does('add', 'local'),
         label: 'marimo export',
         prepareArguments: dropNulls,
         description:
@@ -1177,6 +1190,7 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool({
         name: 'marimo_convert',
         ...deferred,
+        annotations: does('add', 'local'),
         label: 'marimo convert',
         prepareArguments: dropNulls,
         description:

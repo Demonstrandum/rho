@@ -24,6 +24,7 @@ import {
     type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
 import { config } from './lib/core/config';
+import { does } from './lib/core/tool-annotations';
 import { currentEnvironment } from './environment';
 import { targetFor } from './lib/files/acting-file';
 import { LOCAL_BACKUPS, type FileStore } from './lib/files/file-store';
@@ -157,6 +158,7 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool(
         defineTool({
             name: 'undo',
+            annotations: does('replace', 'local'),
             label: 'undo',
             description:
                 'Put back a file this session changed. Every write, edit and remove is recorded '

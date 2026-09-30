@@ -22,6 +22,7 @@ import {
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
 import { config } from './lib/core/config';
+import { does } from './lib/core/tool-annotations';
 import {
     buildIndex,
     hitOrigin,
@@ -141,6 +142,7 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool(
         defineTool({
             name: 'pi_search',
+            annotations: does('read', 'local'),
             label: 'Search pi',
             description:
                 "Search pi's own slash commands and pi's documentation by keyword. " +

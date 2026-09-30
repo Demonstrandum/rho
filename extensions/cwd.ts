@@ -40,6 +40,7 @@ import { PersistedState } from './lib/core/state-store';
 import { config } from './lib/core/config';
 import { currentEnvironment } from './environment';
 import { collapseHome } from './lib/core/text';
+import { does } from './lib/core/tool-annotations';
 import { announceWhere, gitThrough, registerLocationRenderer, whereNote } from './lib/git/where-note';
 import type { Place } from './lib/git/where-note';
 
@@ -196,6 +197,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'cwd',
+        annotations: does('set', 'local'),
         label: 'Directory',
         description:
             'Move the directory the tools act in, for the rest of the session: read, write, edit, bash, grep, find and ls all follow it. Acts on this machine, or on the attached one. With no path, reports where the tools are acting and changes nothing.',

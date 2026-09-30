@@ -40,12 +40,12 @@ import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync 
 import { spawn } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { StringEnum } from '@earendil-works/pi-ai';
+import { StringEnum, type JsonObject } from '@earendil-works/pi-ai';
 import { Text } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import { config } from './lib/core/config';
 import { helperCall, readAnswer } from './lib/colab/helper';
-import { cellDetail, cellTable, clip, lintText, runLength, type CellRecord, type CellsAnswer } from './lib/colab/format';
+import { CELLS_SCHEMA, cellDetail, cellTable, cellsPayload, clip, lintText, readPayload, runLength, type CellRecord, type CellsAnswer } from './lib/colab/format';
 import { chooseRunner, isNotebook, parseLint, run as runMarimo, wantsSandbox, type Runner } from './lib/colab/marimo-cli';
 import { discover, start, type Started } from './lib/colab/server';
 import { NotebookSession } from './lib/colab/session';
@@ -781,11 +781,12 @@ export default function (pi: ExtensionAPI) {
             notebook: Type.Optional(Type.String({ description: 'which open notebook, when more than one is. default: the current one.' })),
             screenshot: Type.Optional(Type.Boolean({ description: 'with ids: also render each cell output through a headless browser and attach the PNGs.' })),
         }),
+        outputSchema: CELLS_SCHEMA,
         async execute(_id, params, signal, _update, ctx) {
             const attached = attachedFor(params.notebook, ctx.cwd);
             if (params.ids === undefined || params.ids.length === 0) {
                 const { body, data } = await overview(attached, signal);
-                return text(body, { count: data.count, errored: data.errored.length });
+                return { ...text(body, { count: data.count, errored: data.errored.length }), structuredContent: cellsPayload(attached.session.path, data) };
             }
             const cells = await readCells(attached, params.ids, signal);
             let body = cells.map(cellDetail).join('\n\n');
@@ -814,7 +815,11 @@ export default function (pi: ExtensionAPI) {
                 if (data.errors.length > 0 && !(missing && data.shots.length > 0)) body += `\n\nscreenshots failed:\n${data.errors.map((e) => `  ${e.id}: ${e.error.split('\n')[0]}`).join('\n')}`;
             }
             body += meanwhile(attached);
-            return { content: [{ type: 'text', text: body }, ...images], details: { ids: params.ids } };
+            return {
+                content: [{ type: 'text', text: body }, ...images],
+                details: { ids: params.ids },
+                structuredContent: readPayload(attached.session.path, cells),
+            };
         },
         renderCall(args, theme) {
             const a = args as { ids?: string[] };
@@ -1026,10 +1031,19 @@ export default function (pi: ExtensionAPI) {
             notebook: Type.Optional(Type.String({ description: 'which open notebook. default: the current one.' })),
             chars: Type.Optional(Type.Integer({ description: 'repr length per variable. default 300.' })),
         }),
+        // the helper's own answer: what each key holds depends on the type of
+        // the variable it describes, so the values are left unconstrained.
+        outputSchema: Type.Object({
+            notebook: Type.String(),
+            variables: Type.Record(Type.String(), Type.Record(Type.String(), Type.Unknown())),
+            missing: Type.Array(Type.String()),
+        }),
         async execute(_id, params, signal, _update, ctx) {
             const attached = attachedFor(params.notebook, ctx.cwd);
+            // the helper's json, so the values are already JSON: what each key
+            // holds depends on the type of the variable it describes.
             interface VarsAnswer {
-                variables: Record<string, Record<string, unknown>>;
+                variables: Record<string, JsonObject>;
                 missing: string[];
             }
             const answer = await ask<VarsAnswer>(attached, 'colab_vars', { names: params.names ?? null, limit: params.chars ?? 300 }, signal);
@@ -1051,7 +1065,10 @@ export default function (pi: ExtensionAPI) {
             }
             if (data.missing.length > 0) lines.push(`not defined: ${data.missing.join(', ')}`);
             if (lines.length === 0) lines.push('no public variables yet');
-            return text(lines.join('\n'), { count: Object.keys(data.variables).length });
+            return {
+                ...text(lines.join('\n'), { count: Object.keys(data.variables).length }),
+                structuredContent: { notebook: attached.session.path, variables: data.variables, missing: data.missing },
+            };
         },
         renderCall(args, theme) {
             const a = args as { names?: string[] };

@@ -29,6 +29,7 @@ import { config } from './lib/core/config';
 import { attachCommand, leaveTerminal as leave, resumeLines } from './lib/tui/leave-terminal';
 import { releaseKey } from './lib/core/keybindings-store';
 import {
+    DETACH_KEY,
     carryEnv,
     carryingBack,
     type Leaving,
@@ -286,7 +287,7 @@ export default function (pi: ExtensionAPI) {
         // app.exit's only key, so releasing it leaves the action on none, and
         // /exit is how the session ends. After pi has installed the resolved
         // keybindings; it applies from the next start.
-        releaseKey('app.exit', 'ctrl+d');
+        releaseKey('app.exit', DETACH_KEY);
 
         const asked = pi.getFlag('attach');
         if (typeof asked !== 'string') return;
@@ -526,7 +527,7 @@ export default function (pi: ExtensionAPI) {
      *
      * pi's own ctrl+d exits, which is the thing tmux was there to prevent.
      */
-    pi.registerShortcut('ctrl+d', {
+    pi.registerShortcut(DETACH_KEY, {
         description: 'detach: leave this session running without an interface',
         handler: async (ctx: ExtensionContext) => {
             if ((ctx.ui.getEditorText() ?? '') !== '') return;

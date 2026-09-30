@@ -14,7 +14,11 @@
  * the launcher already captures that stream to report why a client stopped.
  */
 
+import type { KeyId } from '@earendil-works/pi-tui';
 import type { Option } from '../tui/choice';
+
+/** The key detach.ts takes from app.exit, and the startup hint names. */
+export const DETACH_KEY: KeyId = 'ctrl+d';
 
 /** The three ways out, named by what happens to the conversation on screen. */
 export type Leaving = 'carry' | 'leave' | 'exit';

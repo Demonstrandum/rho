@@ -656,6 +656,22 @@ export default function (pi: ExtensionAPI) {
                     Type.Integer({ minimum: 1, maximum: 200, description: 'How many messages. Default 20.' }),
                 ),
             }),
+            // a script gets the messages; the model gets the same messages as
+            // the lines it reads.
+            outputSchema: Type.Object({
+                channel: Type.String(),
+                thread: Type.Union([Type.String(), Type.Null()]),
+                messages: Type.Array(
+                    Type.Object({
+                        ts: Type.String(),
+                        threadTs: Type.Union([Type.String(), Type.Null()]),
+                        user: Type.String(),
+                        name: Type.String(),
+                        text: Type.String(),
+                        files: Type.Array(Type.Object({ name: Type.String(), path: Type.String() })),
+                    }),
+                ),
+            }),
             async execute(_id, params: { channel?: string; thread?: string; limit?: number }) {
                 if (attached === null) return said('Slack is not attached to this session.');
                 const target = params.channel ?? exchange?.channel ?? null;
@@ -667,7 +683,21 @@ export default function (pi: ExtensionAPI) {
                 if (last !== undefined) mark(target, last.ts);
                 for (const message of read.value) remember(message);
                 const lines = read.value.map((m) => `[${clock(m.ts)} UTC ${m.ts}] ${m.name}: ${m.text}`);
-                return said(`${target}, ${read.value.length} messages:\n${lines.join('\n')}`);
+                return {
+                    ...said(`${target}, ${read.value.length} messages:\n${lines.join('\n')}`),
+                    structuredContent: {
+                        channel: target,
+                        thread: params.thread ?? null,
+                        messages: read.value.map((m) => ({
+                            ts: m.ts,
+                            threadTs: m.threadTs,
+                            user: m.user,
+                            name: m.name,
+                            text: m.text,
+                            files: m.files.map((file) => ({ name: file.name, path: file.path })),
+                        })),
+                    },
+                };
             },
         });
 

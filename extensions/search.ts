@@ -12,7 +12,7 @@
 // enter the LLM context, so searching does not cost context. the agent gets its
 // own copy through the pi_search tool, which returns text.
 
-import { Type } from '@earendil-works/pi-ai';
+import { StringEnum, Type } from '@earendil-works/pi-ai';
 import {
     defineTool,
     type EntryRenderOptions,
@@ -158,6 +158,20 @@ export default function (pi: ExtensionAPI) {
                 ),
                 limit: Type.Optional(Type.Number({ description: 'Maximum results. Default 12.' })),
             }),
+            // a script gets the hits as records; the model gets the same hits
+            // as the lines it reads.
+            outputSchema: Type.Object({
+                query: Type.String(),
+                warning: Type.Union([Type.String(), Type.Null()]),
+                hits: Type.Array(
+                    Type.Object({
+                        kind: StringEnum(['command', 'doc']),
+                        title: Type.String(),
+                        origin: Type.String(),
+                        snippet: Type.String(),
+                    }),
+                ),
+            }),
             async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
                 const report = getIndex();
                 const options: SearchOptions = {
@@ -176,7 +190,20 @@ export default function (pi: ExtensionAPI) {
                               })
                               .join('\n');
                 const text = warning === null ? body : `${warning}\n\n${body}`;
-                return { content: [{ type: 'text', text }], details: {} };
+                return {
+                    content: [{ type: 'text', text }],
+                    details: {},
+                    structuredContent: {
+                        query: params.query,
+                        warning,
+                        hits: hits.map((hit) => ({
+                            kind: hit.record.kind,
+                            title: hitTitle(hit),
+                            origin: hitOrigin(hit),
+                            snippet: hit.snippet,
+                        })),
+                    },
+                };
             },
         }),
     );

@@ -4,7 +4,13 @@
 // and the ids it needs to act (`Hbol`) sit in the first column. Errors are
 // spelled in full, since the error is what the model came for; outputs are
 // clipped by the helper before they get here.
+//
+// A caller that is not a model wants the records rather than the table, so the
+// same answer is also published as `structuredContent` under CELLS_SCHEMA: a
+// codemode script receives that instead of the text.
 
+import { Type } from 'typebox';
+import type { JsonObject } from '@earendil-works/pi-ai';
 import type { LintFinding, LintReport } from './marimo-cli';
 
 export interface CellRecord {
@@ -46,6 +52,67 @@ export interface CellsAnswer {
     readonly errored: readonly string[];
     readonly stale?: readonly string[];
     readonly error?: string;
+}
+
+/** a cell as a caller that is not a model receives it: {@link CellRecord}. */
+export const CELL_SCHEMA = Type.Object({
+    id: Type.String(),
+    name: Type.Union([Type.String(), Type.Null()]),
+    status: Type.Union([Type.String(), Type.Null()]),
+    lines: Type.Integer(),
+    defs: Type.Array(Type.String()),
+    refs: Type.Array(Type.String()),
+    errors: Type.Array(Type.Object({ kind: Type.String(), msg: Type.String() })),
+    code: Type.Optional(Type.String()),
+    preview: Type.Optional(Type.String()),
+    has_output: Type.Optional(Type.Boolean()),
+    console: Type.Optional(Type.Array(Type.Object({ channel: Type.String(), text: Type.Union([Type.String(), Type.Null()]) }))),
+    /** the last run's length in milliseconds, absent when never seen running. */
+    runMs: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+});
+
+/** what `marimo_cells` answers with, beside the table it shows the model. */
+export const CELLS_SCHEMA = Type.Object({
+    notebook: Type.String(),
+    count: Type.Integer(),
+    errored: Type.Array(Type.String()),
+    stale: Type.Array(Type.String()),
+    cells: Type.Array(CELL_SCHEMA),
+});
+
+/** one cell, as JSON: an output holds a file path and a mimetype, neither of
+ * which outlives the call, so the record published here leaves it out. */
+function cellPayload(cell: CellRecord): JsonObject {
+    return {
+        id: cell.id,
+        name: cell.name,
+        status: cell.status,
+        lines: cell.lines,
+        defs: [...cell.defs],
+        refs: [...cell.refs],
+        errors: cell.errors.map((error) => ({ kind: error.kind, msg: error.msg })),
+        has_output: cell.has_output ?? cell.output != null,
+        ...(cell.code === undefined ? {} : { code: cell.code }),
+        ...(cell.preview === undefined ? {} : { preview: cell.preview }),
+        ...(cell.console === undefined ? {} : { console: cell.console.map((line) => ({ channel: line.channel, text: line.text })) }),
+        ...(cell.runMs === undefined ? {} : { runMs: cell.runMs }),
+    };
+}
+
+/** the cells of one notebook, under CELLS_SCHEMA. */
+export function cellsPayload(notebook: string, answer: Pick<CellsAnswer, 'count' | 'cells' | 'errored' | 'stale'>): JsonObject {
+    return {
+        notebook,
+        count: answer.count,
+        errored: [...answer.errored],
+        stale: [...(answer.stale ?? [])],
+        cells: answer.cells.map(cellPayload),
+    };
+}
+
+/** the same for cells read one by one, where the count is what was asked for. */
+export function readPayload(notebook: string, cells: readonly CellRecord[]): JsonObject {
+    return cellsPayload(notebook, { count: cells.length, cells, errored: cells.filter((c) => c.errors.length > 0).map((c) => c.id) });
 }
 
 const pad = (text: string, width: number): string => (text.length >= width ? text : text + ' '.repeat(width - text.length));

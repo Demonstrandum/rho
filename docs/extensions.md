@@ -315,6 +315,8 @@ the table lives on `globalThis`, because `/reload` replaces the module and the w
 `theme.ts` + `lib/chrome/theme-sample.ts` change the theme without asking anyone to imagine it.
 `/theme <name>` completes over the loaded themes and applies each one as its name passes under the cursor, because the thing being chosen is a session, not a word in a list.
 `/theme-picker` is the same choice made against a sample session.
+the completion list names each theme's appearance beside it (`dark`, `light (current)`), read from `theme.appearance`, which pi 0.99 added: a theme declares it, or pi detects it from the colours, and `system`, now pi's default, answers with whatever the terminal reports.
+rho's four themes declare it, because each of them leaves `text` as the terminal's own colour and there is nothing in the file to detect a background from.
 
 previewing needs two things pi does not hand over.
 the completion menu reports what is chosen and not what is merely highlighted, so `lib/tui/autocomplete-focus.ts` patches the editor at the two points where the menu's life changes and gives the highlighted item to whichever watcher claims the menu, by the editor's text rather than by the completion prefix (the prefix of `/theme dar` is `dar`, which names no command).
@@ -352,6 +354,7 @@ it is highlighted on every frame rather than once, because the theme it is highl
 pi caches its cli-highlight theme against the identity of the current theme object, and every `restyle` is a new object, so the cache falls out on its own.
 
 a palette outlives the theme it was chosen over, so `theme.ts` puts it back on: `withChosenPalette` wraps whatever theme is being applied, and where `[theme] persist` writes the name through pi's settings, the palette goes on again afterwards, since that path applies the theme bare.
+it also outlives a theme replaced with no command given: `system` is rebuilt whenever the terminal reports a switch between light and dark, and no event says so, so `syntax.ts` asks `isRestyled` at the start of each turn and lays the palette on again when the theme in force arrived without it.
 the choice itself is in rho's own global state (`[syntax] persist`), because pi's settings hold a theme name and have nowhere to record this.
 
 `lib/chrome/intro-card.ts` is one playing of the wordmark intro: it picks its mode, wordmark and shimmer direction from `[startup]` at construction and renders as a pure function of elapsed milliseconds.
@@ -393,6 +396,14 @@ a warning under every reply is worse than no checkpoints: the condition does not
 the class is not exported, so the instance whose prototype is patched comes from `resolveSessionCheckpointStorage` (side-effect free, and the storage directory exists by the time a checkpoint has failed), imported by file path from the chunk pi-rewind's own entry imports, since node keys the module cache on the resolved file url.
 that export name is minified; `tests/checkpoint-breaker.test.ts` pins it, because a rename would leave every turn waiting on a checkpoint that cannot succeed.
 `keep-trying` restores pi-rewind's behaviour of one attempt and one warning per turn.
+
+`lib/core/tool-annotations.ts` says what each registered tool does, as the four hints pi 0.99 passes to a permission extension (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`).
+the four read badly by hand: two of them mean nothing when a tool is read-only, and a hint left out is read as the dangerous case, so a tool states an effect (`read`, `add`, `replace`, `set`) and a reach (`local`, `open`) and `does()` turns that into the four.
+under the gate pi's own docs give, which is the one Codex uses, a `read` passes unasked at either reach, a `set` passes locally, and everything else is confirmed: `remove`, `undo`, `bash`, `write`, `edit`, `marimo_run` and `slack_manage_message` are the calls that ask.
+the hints are not verified and nothing in rho gates on them yet; they are there so a gate can tell one tool from another without a list of names.
+
+four tools answer a caller that is not a model as well: `pi_search`, `marimo_cells`, `marimo_vars` and `slack_read` declare an `outputSchema` and set `structuredContent`, which a codemode script receives instead of the text.
+the text stays as it was, since it is what the model reads; `lib/colab/format.ts` publishes the cell records it already has under `CELLS_SCHEMA`, leaving out the output, whose image file does not outlive the call.
 
 `remove.ts` and `undo.ts` + `lib/files/file-store.ts`, `lib/files/acting-file.ts`, `lib/files/undo-journal.ts` stop `write` destroying a file, give the agent a way to destroy one on purpose, and give it a way to take either back.
 pi's write is `mkdir` then `writeFile` (`dist/core/tools/write.js`): it does not stat the path, does not require that the file was read, and does not compare what is there with what the model last saw, so a model whose picture of a file is two turns old replaces every byte in it with one call.

@@ -5,6 +5,13 @@
 // RHO_AGENTICA_RUNTIME points at an agentica-mcp-runtime checkout. with the env
 // unset the extension is a no-op, so it never appears unless i opt in.
 //
+// pi 0.99 ships the same arrangement: MCP servers come from mcp.json or
+// pi.registerMcpServer() and are managed with /mcp, and the built-in codemode
+// tool runs model-written JavaScript that calls them, enabled with
+// `"defaultTools": ["+codemode"]`. that is the route for a new setup; this
+// stays for an existing agentica runtime, whose servers and python helpers pi
+// knows nothing about.
+//
 // env:
 //   RHO_AGENTICA_RUNTIME  absolute path to the agentica-mcp-runtime (required;
 //                         its presence is the explicit enable)

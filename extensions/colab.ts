@@ -39,7 +39,7 @@
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionContext, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { Text } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
@@ -599,20 +599,22 @@ export default function (pi: ExtensionAPI) {
      * the tools in a line the model can act on, and the definitions arrive
      * when something asks: the skill being read, /colab being used, a
      * notebook being named, or a file that builds marimo.App being read.
+     *
+     * `deferred` is pi's own word for that: the tools are registered and
+     * never declared until something activates them, so no request carries
+     * the definitions before one is asked for, and `tool_search` can find
+     * them on a wording none of the triggers below match.
      */
     const OWN = ['marimo_open', 'marimo_cells', 'marimo_run', 'marimo_edit', 'marimo_vars', 'marimo_ui', 'marimo_check', 'marimo_export', 'marimo_convert'];
-    /** Set by whatever asked for the tools, read by the hide below. */
-    let asked = false;
+    /** Spread into all nine: one group, none of them declared until asked for. */
+    const deferred = {
+        exposure: 'deferred',
+        namespace: { name: 'marimo', description: 'A marimo notebook open in a live kernel: its cells, variables and UI elements, and the files it converts to and from.' },
+    } satisfies Pick<ToolDefinition, 'exposure' | 'namespace'>;
     const load = (): void => {
-        asked = true;
         const active = pi.getActiveTools();
         const missing = OWN.filter((name) => !active.includes(name));
         if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
-    };
-    /** Take the tools out of the loadout, until something asks for them. */
-    const hide = (): void => {
-        if (asked || notebooks.size > 0) return;
-        pi.setActiveTools(pi.getActiveTools().filter((name) => !OWN.includes(name)));
     };
 
     pi.on('input', async (event) => {
@@ -638,11 +640,6 @@ export default function (pi: ExtensionAPI) {
 
     pi.on('session_start', async (_event, ctx) => {
         uiHost = ctx.ui;
-        // before the first request goes out, unlike a hide on the first tool
-        // call, which lets one request carry every definition. the input
-        // handler runs before the request too, so a message that asks for
-        // the tools still has them.
-        hide();
         openStore = PersistedState.open({ name: 'colab', scope: 'session', parse: parseOpenState }, { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() });
         const stored = openStore.read();
         refreshStatus();
@@ -701,6 +698,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'marimo_open',
+        ...deferred,
         label: 'marimo open',
         prepareArguments: dropNulls,
         description:
@@ -769,6 +767,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'marimo_cells',
+        ...deferred,
         label: 'marimo cells',
         prepareArguments: dropNulls,
         description:
@@ -830,6 +829,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'marimo_run',
+        ...deferred,
         label: 'marimo run',
         prepareArguments: dropNulls,
         description:
@@ -902,6 +902,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'marimo_edit',
+        ...deferred,
         label: 'marimo edit',
         prepareArguments: dropNulls,
         description:
@@ -1007,6 +1008,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'marimo_vars',
+        ...deferred,
         label: 'marimo vars',
         prepareArguments: dropNulls,
         description:
@@ -1058,6 +1060,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'marimo_ui',
+        ...deferred,
         label: 'marimo ui',
         prepareArguments: dropNulls,
         description:
@@ -1097,6 +1100,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'marimo_check',
+        ...deferred,
         label: 'marimo check',
         prepareArguments: dropNulls,
         description:
@@ -1137,6 +1141,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'marimo_export',
+        ...deferred,
         label: 'marimo export',
         prepareArguments: dropNulls,
         description:
@@ -1171,6 +1176,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: 'marimo_convert',
+        ...deferred,
         label: 'marimo convert',
         prepareArguments: dropNulls,
         description:

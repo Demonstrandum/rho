@@ -29,7 +29,7 @@ import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { Type } from 'typebox';
-import type { ExtensionAPI, ExtensionCommandContext, MessageRenderer, Theme } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionCommandContext, MessageRenderer, Theme, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Box, type Component, Text } from '@earendil-works/pi-tui';
 import type { RowTheme } from '../lib/tool-row/theme';
 import { slackCall, slackResult } from './row';
@@ -379,6 +379,7 @@ export default function (pi: ExtensionAPI) {
     let exchange: Exchange | null = null;
     let typingTimer: ReturnType<typeof setInterval> | null = null;
     let toolsRegistered = false;
+    const OWN = ['slack_reply', 'slack_send_file', 'slack_read', 'slack_done', 'slack_directory', 'slack_manage_message', 'slack_schedule'];
 
     // Registered at load, not on attach: a renderer costs the model nothing,
     // and a resumed session draws the messages of the session before it.
@@ -500,23 +501,42 @@ export default function (pi: ExtensionAPI) {
     /**
      * The Slack tools exist only where Slack does.
      *
-     * They are registered when a session attaches to an app, not at load, so a
-     * session that never touches Slack carries none of their definitions. An
-     * attached session needs them immediately: a message can arrive a second
-     * later, and an agent that cannot answer it is worse than one that costs
-     * seven definitions.
+     * They are registered at load and declared only while a session is
+     * attached to an app: `deferred` means pi holds the definitions without
+     * putting them in a request, so a session that never touches Slack
+     * carries none of them, and an attached session has them from the first
+     * request after `/slack`, which matters because a message can arrive a
+     * second later and an agent that cannot answer it is worse than one that
+     * costs seven definitions. Detaching takes them back out: before, they
+     * outlived the connection for the rest of the session.
      *
      * Seven and not more: each Slack surface that operates on something rather
      * than sending gets one tool with an action, because a tool per method
      * would put a dozen definitions in the prompt of every attached session to
      * save the model one enum.
      */
+    const deferred = {
+        exposure: 'deferred',
+        namespace: { name: 'slack', description: 'The Slack conversation this session is attached to: replies, files, history, the directory, and scheduled messages.' },
+    } satisfies Pick<ToolDefinition, 'exposure' | 'namespace'>;
+
+    /** Declared while attached. Activation is additive; pi keeps the rest. */
+    const activateTools = (): void => {
+        const active = pi.getActiveTools();
+        const missing = OWN.filter((name) => !active.includes(name));
+        if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
+    };
+    const deactivateTools = (): void => {
+        pi.setActiveTools(pi.getActiveTools().filter((name) => !OWN.includes(name)));
+    };
+
     const registerTools = (): void => {
         if (toolsRegistered) return;
         toolsRegistered = true;
 
         pi.registerTool({
             ...rowsFor('slack_reply'),
+            ...deferred,
             name: 'slack_reply',
             label: 'Slack reply',
             description:
@@ -557,6 +577,7 @@ export default function (pi: ExtensionAPI) {
 
         pi.registerTool({
             ...rowsFor('slack_send_file'),
+            ...deferred,
             name: 'slack_send_file',
             label: 'Slack file',
             description:
@@ -604,6 +625,7 @@ export default function (pi: ExtensionAPI) {
 
         pi.registerTool({
             ...rowsFor('slack_read'),
+            ...deferred,
             name: 'slack_read',
             label: 'Slack read',
             description:
@@ -647,6 +669,7 @@ export default function (pi: ExtensionAPI) {
 
         pi.registerTool({
             ...rowsFor('slack_done'),
+            ...deferred,
             name: 'slack_done',
             label: 'Slack done',
             description:
@@ -670,6 +693,7 @@ export default function (pi: ExtensionAPI) {
 
         pi.registerTool({
             ...rowsFor('slack_directory'),
+            ...deferred,
             name: 'slack_directory',
             label: 'Slack directory',
             description:
@@ -815,6 +839,7 @@ export default function (pi: ExtensionAPI) {
 
         pi.registerTool({
             ...rowsFor('slack_manage_message'),
+            ...deferred,
             name: 'slack_manage_message',
             label: 'Slack manage message',
             description:
@@ -906,6 +931,7 @@ export default function (pi: ExtensionAPI) {
 
         pi.registerTool({
             ...rowsFor('slack_schedule'),
+            ...deferred,
             name: 'slack_schedule',
             label: 'Slack schedule',
             description:
@@ -1002,6 +1028,7 @@ export default function (pi: ExtensionAPI) {
         const held = attached;
         attached = null;
         shared[REGISTRY] = undefined;
+        deactivateTools();
         if (held === null) return;
         held.socket.stop();
         if (sessionId !== null) releaseLock(held.app, sessionId);
@@ -1060,7 +1087,7 @@ export default function (pi: ExtensionAPI) {
         }
         attached.self = who.value;
         shared[REGISTRY] = { close: () => disconnect(false) };
-        registerTools();
+        activateTools();
         socket.start();
         save({ app: name });
 
@@ -1220,6 +1247,7 @@ export default function (pi: ExtensionAPI) {
             return;
         }
     };
+    registerTools();
     // After the factory returns, so registerCommand and registerTool have run.
     setTimeout(() => void reattachAfterReload(), 0);
 

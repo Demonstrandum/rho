@@ -252,6 +252,7 @@ pi also reacts to it by parking a 2-line `IdleStatus` in the dock, which `halfbl
 
 `halfblock-boxes.ts` four independent rendering patches, each switched by a key in `[render]` of `rho.toml`; a patch is only installed when its key is true, so a disabled behaviour costs nothing at render time.
 `half-blocks` replaces the blank `paddingY` rows of every `Box` with half-height block characters (`▄` on top, `▀` on the bottom, drawn in the box's own background colour), so a tool bubble costs no blank rows.
+since pi 1.0.0 a user message is a bare `Markdown` that pads and colours its own background, with no `Box` around it, so `Markdown.render` is patched the same way, but only for a `Markdown` that has a `bgColor`.
 `tight-tool-rows` drops the blank lines a tool row wraps itself in.
 `tight-after-tool-rows` drops the leading `Spacer(1)` of an assistant message when a tool row is what precedes it (the same blank line is kept after a user bubble, so it is decided by adjacency in `Container.render`).
 `hide-idle-status` skips pi's `IdleStatus`, two reserved dock rows, matched on constructor name since pi exports neither the class nor a subpath to it.

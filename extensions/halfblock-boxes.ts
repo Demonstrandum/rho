@@ -4,8 +4,11 @@
 // rho.toml. a patch is only installed when its key is true, so a disabled
 // behaviour costs nothing at render time.
 //
-//  half-blocks           Box.render: the paddingY blank rows become
-//                        half-height block characters.
+//  half-blocks           Box.render and Markdown.render: the paddingY blank
+//                        rows become half-height block characters. Markdown
+//                        is patched because since pi 1.0.0 a user message is
+//                        a bare Markdown that pads and colours itself, with
+//                        no Box around it.
 //  tight-tool-rows       ToolExecutionComponent.render: drops the blank lines
 //                        the tool row wraps itself in (its leading Spacer(1)
 //                        and the self-render path's "").
@@ -31,7 +34,7 @@ import {
     ToolExecutionComponent,
     type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
-import { Box, Container, type Component } from '@earendil-works/pi-tui';
+import { Box, Container, Markdown, type Component } from '@earendil-works/pi-tui';
 import { holdsImage, trimBlankEdges } from './lib/tui/box-edges';
 import { config } from './lib/core/config';
 import { isBlank as isBlankText, OSC } from './lib/core/text';
@@ -44,6 +47,13 @@ export { trimBlankEdges };
 interface BoxInternals {
     paddingY: number;
     bgFn?: (text: string) => string;
+}
+
+// the same two facts on Markdown, where the background lives in its default
+// text style rather than on the component.
+interface MarkdownInternals {
+    paddingY: number;
+    defaultTextStyle?: { bgColor?: (text: string) => string };
 }
 
 const LOWER_HALF = '\u2584';
@@ -77,28 +87,48 @@ function halfBlockLine(char: string, width: number, fgColor: string): string {
 
 const { halfBlocks, tightToolRows, tightAfterToolRows, hideIdleStatus } = config.render;
 
+// replaces the paddingY rows at each end of a rendered block with half blocks.
+// returns a copy: both Box and Markdown hand back their cache array by reference.
+export function halfBlockEdges(
+    rendered: readonly string[],
+    paddingY: number,
+    bgFn: ((text: string) => string) | undefined,
+    width: number,
+): string[] {
+    const lines = [...rendered];
+    if (paddingY === 0 || lines.length < paddingY * 2 + 1) return lines;
+    // a padding row of a box around an image can be the image's own
+    // reserved row, and a half block written there erases the picture.
+    if (holdsImage(lines)) return lines;
+
+    const fg = bgFnToFg(bgFn);
+    if (!fg) return lines;
+
+    for (let i = 0; i < paddingY; i++) {
+        lines[i] = halfBlockLine(LOWER_HALF, width, fg);
+    }
+    for (let i = 0; i < paddingY; i++) {
+        lines[lines.length - 1 - i] = halfBlockLine(UPPER_HALF, width, fg);
+    }
+    return lines;
+}
+
 if (halfBlocks) {
     const origBoxRender = Box.prototype.render;
     Box.prototype.render = function (this: Box, width: number): string[] {
         const self = this as unknown as BoxInternals;
-        // copy: the original returns its internal cache array by reference.
-        const lines: string[] = [...origBoxRender.call(this, width)];
-        const paddingY: number = self.paddingY ?? 1;
-        if (paddingY === 0 || lines.length < paddingY * 2 + 1) return lines;
-        // a padding row of a box around an image can be the image's own
-        // reserved row, and a half block written there erases the picture.
-        if (holdsImage(lines)) return lines;
+        return halfBlockEdges(origBoxRender.call(this, width), self.paddingY ?? 1, self.bgFn, width);
+    };
 
-        const fg = bgFnToFg(self.bgFn);
-        if (!fg) return lines;
-
-        for (let i = 0; i < paddingY; i++) {
-            lines[i] = halfBlockLine(LOWER_HALF, width, fg);
-        }
-        for (let i = 0; i < paddingY; i++) {
-            lines[lines.length - 1 - i] = halfBlockLine(UPPER_HALF, width, fg);
-        }
-        return lines;
+    const origMarkdownRender = Markdown.prototype.render;
+    Markdown.prototype.render = function (this: Markdown, width: number): string[] {
+        const self = this as unknown as MarkdownInternals;
+        const rendered = origMarkdownRender.call(this, width);
+        // a Markdown with no background of its own sits inside something else
+        // (a Box, or the transcript), and its padding rows are plain spacing.
+        const bgFn = self.defaultTextStyle?.bgColor;
+        if (!bgFn) return rendered;
+        return halfBlockEdges(rendered, self.paddingY ?? 0, bgFn, width);
     };
 }
 

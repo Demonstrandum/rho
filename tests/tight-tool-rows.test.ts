@@ -8,7 +8,7 @@ import { trimBlankEdges } from '../extensions/halfblock-boxes';
 // of it.
 function imageBlock(): string[] {
     setCapabilities({ images: 'kitty', trueColor: true, hyperlinks: true });
-    const image = new Image('', 'image/png', { fallbackColor: (s) => s }, {}, { widthPx: 640, heightPx: 537 });
+    const image = new Image('iVBORw0KGgo=', 'image/png', { fallbackColor: (s) => s }, {}, { widthPx: 640, heightPx: 537 });
     return image.render(80);
 }
 

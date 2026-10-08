@@ -16,7 +16,7 @@ interface Placement {
 }
 
 function placement(options: Record<string, number>): Placement {
-    const image = new Image('', 'image/png', { fallbackColor: (s) => s }, options, DIMENSIONS);
+    const image = new Image('iVBORw0KGgo=', 'image/png', { fallbackColor: (s) => s }, options, DIMENSIONS);
     const lines = image.render(80);
     const controls = /\x1b_G([^;]*);/.exec(lines[0]!)?.[1] ?? '';
     return {

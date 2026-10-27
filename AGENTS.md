@@ -15,6 +15,7 @@ if an entry here is growing past two lines, that is the signal to move it.
   one line each below; the reasoning is in `docs/extensions.md` and in each file's header comment
   - `system-prompt.ts` assembles `system/prompt.md` and appends it in `before_agent_start`
   - `bun-runtime.ts` stops a node session: patches pi's shebang to bun, re-runs under bun, else exits with a note, `[runtime]`
+  - `host-modules.ts` a Bun plugin that gives plain `.js` extensions pi's bundled modules instead of a second copy of pi from `node_modules`.
   - `env-block.ts` appends an `<env>` block: cwd, git work tree, platform, date, model, `[env]`
   - `git-snapshot.ts` appends a `<git>` block: branch, upstream divergence, dirty files, recent commits, `[git]`
   - `personality.ts` `/personality <name|path|off>` sets the session's voice; system prompt before the first turn, a message after, `[personality]`

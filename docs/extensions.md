@@ -384,6 +384,12 @@ a turn whose response held two thinking blocks side by side is replayed by pi as
 
 ## session and tooling
 
+`host-modules.ts` registers a Bun runtime plugin that maps `@earendil-works/pi-coding-agent`, `pi-tui`, `pi-ai` (and its subpaths), `pi-agent-core`, their `@mariozechner` names, and `typebox` to the modules pi's bundle already holds.
+pi 1.x runs from `dist/bundle/cli.js`, and jiti gives a `.ts` extension those modules through pi's `VIRTUAL_MODULES`, but hands a `.js` extension to bun's native import unchanged.
+bun then resolves the specifiers through the `tools/link-pi-packages.ts` symlinks to the unbundled `dist/index.js`, a second copy of pi of about 255 modules: 1 to 2.5 s at startup for `@ayulab/pi-rewind` alone (`PI_TIMING=1 PI_STARTUP_BENCHMARK=1`), and a `SessionManager` that is not the session's.
+with the plugin, pi-rewind's import takes under 10 ms and its `SessionManager` is pi's.
+the plugin is registered at import time, and `./extensions` comes before the packages in the `pi` manifest, so it is in place before the first `.js` package loads; the symlinks stay because typecheck reads them.
+
 `rewind-guard.ts` writes `ayu.checkpoint.enabled` before the session starts, so pi-rewind takes a per-turn checkpoint only where one can finish.
 the checkpoint engine snapshots the working directory into a shadow git repo every turn whatever the directory is, so a session started from home runs `git add -A -- .` with `--work-tree=$HOME` and is killed at the engine's own two-minute timeout (`Warning: Checkpoint failed: Command timed out after 120000ms`).
 `[rewind] auto-checkpoint` in `rho.toml`: `git` (default) requires a git work tree and excludes the home directory even when it is one, since a dotfiles repo there is the same snapshot; `always` and `never` are fixed.

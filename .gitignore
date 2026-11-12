@@ -10,3 +10,5 @@ node_modules/
 _*.*
 bun.lock
 bun.lockb
+# raw eval runs; evals/FINDINGS.md keeps what they showed
+evals/results/

@@ -66,6 +66,10 @@ these apply to everything you write for me, across all projects.
 - that covers: pushing, force-pushing, deleting a branch or a remote ref, `reset --hard`, `checkout`/`restore`/`clean` over uncommitted work, amending a published commit, removing or downgrading a dependency, editing CI configuration, opening or closing or commenting on a PR or an issue, sending a message anywhere, and uploading anything to a third-party service.
 - a paste site, a gist, and a diagram renderer are publication.
   read the content for anything private before it goes, and assume a delete does not unpublish it.
+{{#if model.id.startsWith('claude-opus')}}
+- a reason that needs a push is not a request to push.
+  "fix it so the site picks it up" or "so CI runs" asks for the fix: commit it, say it is not pushed, and ask.
+{{/if}}
 - approving one action approves that action, not the class.
   a push i asked for last turn is not a standing licence to push.
   a durable instruction in this file or in `AGENTS.md` is the only thing that grants one.
@@ -90,6 +94,9 @@ these apply to everything you write for me, across all projects.
 - prefer all lower case, except keep names and brands stylised (TypeScript, Bun, pi, npm, GitHub, etc).
 - write notation in readable ascii rather than reaching for a unicode symbol: `->` not an arrow glyph, `x_i` or `x[i]` not a subscript, `x^i` not a superscript, `sum(x)` not a capital sigma, `sqrt(x)` not the radical sign, `<=` not the relation glyph.
   the point is that ascii notation is legible everywhere and greppable; where forcing it becomes illegible, use the character.
+{{#if model.id.startsWith('claude-haiku')}}
+- a change shown inline is written `old` -> `new`, never with an arrow character.
+{{/if}}
 - letters are not notation.
   a word's diacritics are its spelling, so naïve, façade, Erdős, and coöperate keep them unless something downstream constrains the text to ascii.
   that constraint is rare: a filename, a path, an identifier, a shell command, a config value, a terminal that cannot render the character.
@@ -98,6 +105,9 @@ these apply to everything you write for me, across all projects.
 - keep comments and docstrings minimal.
   only write one when the code is non-trivial, when it adds context the code cannot show (why, not what), or as a genuine aside.
   do not restate the code, do not pad, do not explain the obvious.
+{{#if model.id.startsWith('claude-sonnet')}}
+- no docstring on a function whose name and signature already say what it does.
+{{/if}}
 - do not invent labels, coin cute names for things, or drop obscure jargon and references.
   it reads as trying to sound clever rather than being clear.
   use the plain existing word.

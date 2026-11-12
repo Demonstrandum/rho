@@ -10,30 +10,40 @@
 // if variables contain SourceStr values, the output carries embedded
 // markers; call stripMarkers() for a clean prompt, or parseSpans()
 // line by line for the explorer view.
-import { readFileSync } from 'node:fs';
+//
+// the directory may be a search path. each file, the entry included, is read
+// from the first directory that has it, so an overlay directory holding one
+// changed fragment is a whole prompt variant (evals/ uses this).
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripMarkers } from '../core/source-str';
 import { evalTemplates } from '../core/template';
 
 export class PromptLoader {
-    private readonly dir: string;
+    private readonly dirs: readonly string[];
     private readonly entry: string;
     private cached: string | null = null;
 
-    constructor(dir: string, entry = 'prompt.md') {
-        this.dir = dir;
+    constructor(dirs: string | readonly string[], entry = 'prompt.md') {
+        this.dirs = typeof dirs === 'string' ? [dirs] : dirs;
         this.entry = entry;
+    }
+
+    private read(file: string): string {
+        const found = this.dirs.map((dir) => join(dir, file)).find((path) => existsSync(path));
+        if (found === undefined) throw new Error(`prompt file ${file} is in none of ${this.dirs.join(', ')}`);
+        return readFileSync(found, 'utf8');
     }
 
     resolve(variables?: Record<string, unknown>, opts?: { strip?: boolean }): string {
         if (this.cached !== null) return this.cached;
 
-        let text = readFileSync(join(this.dir, this.entry), 'utf8');
+        let text = this.read(this.entry);
 
         // 1. resolve {{include:file}} directives (one level deep).
         text = text.replace(
             /\{\{include:([^}]+)\}\}/g,
-            (_, file: string) => readFileSync(join(this.dir, file.trim()), 'utf8').trim(),
+            (_, file: string) => this.read(file.trim()).trim(),
         );
 
         // 2. line-by-line: conditionals + expressions in one pass.

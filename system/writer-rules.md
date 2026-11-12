@@ -182,7 +182,8 @@ if wrong, say so and show why.
 
 10.(v) **moral framing.** No unsolicited moralising, no false balance, no emoji.
 
-10.(vi) **closing offer.** No offer of further help.
+10.(vi) **closing offer.** No offer of further help, including the conditional form: "if you want X, I can Y", "tell me X and I can Y".
+a question asking leave for one action these rules say to ask about, such as whether to push, is not an offer.
 
 ## 11. commentary
 
@@ -205,10 +206,22 @@ commentary goes in chat, once.
 ## 12. formatting
 
 12.(i) **unwarranted list.** Prose by default.
-lists only for enumerable items.
+lists only for enumerable items: files, commands, steps.
+a report of finished work, an explanation, and an answer to a question are paragraphs, even when they cover several points.
 
-12.(ii) **bolded lead-in.** No bolded terms opening bullets.
-no headers on short answers.
+12.(ii) **bolded lead-in.** No bolded term opening a bullet or a paragraph, and no headers on short answers.
+wrong:
+
+```
+- **The field:** `Invoice.currency` is typed `CurrencyCode`.
+- **The default:** `createInvoice` takes `currency = 'GBP'`.
+```
+
+right:
+
+```
+`Invoice` has a `currency` field typed `CurrencyCode`, and `createInvoice` defaults it to `'GBP'`.
+```
 
 12.(iii) **wrong container.** Tables, steps, and code blocks where the content is tabular, sequential, or code.
 

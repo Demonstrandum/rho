@@ -42,6 +42,7 @@
     "init": "bun tools/init-config.ts",
     "config": "bun tools/init-config.ts ./rho.toml --force",
     "smoke": "bun ci/smoke.ts",
+    "evals": "bun evals/run.ts",
     "smoke:docker": "docker build -f ci/Dockerfile -t rho-smoke . && docker run --rm rho-smoke",
     "install:check": "bun ci/install-check.ts",
     "link": "pi install -l $(pwd)",

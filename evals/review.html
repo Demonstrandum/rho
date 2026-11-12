@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>rho evals: review</title>
+<style>
+:root {
+    --bg: #fbfaf7; --panel: #f2f0ea; --ink: #222; --dim: #777; --line: #ddd8cc;
+    --human: #f6d36b; --judge: #9ec5f0; --agree: #8fd18f; --disagree: #e9a3a3; --major: #d9534f;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 -apple-system, system-ui, sans-serif; color: var(--ink); background: var(--bg); display: grid; grid-template-columns: 260px 1fr 380px; height: 100vh; }
+aside, main, section#side { overflow-y: auto; height: 100vh; }
+aside { background: var(--panel); border-right: 1px solid var(--line); padding: 10px; }
+section#side { background: var(--panel); border-left: 1px solid var(--line); padding: 12px; }
+main { padding: 16px 28px 80px; }
+h1 { font-size: 15px; margin: 0 0 8px; }
+h2 { font-size: 13px; text-transform: lowercase; letter-spacing: .04em; color: var(--dim); margin: 18px 0 6px; }
+select, input, textarea, button { font: inherit; }
+select, input[type=text], textarea { width: 100%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+textarea { min-height: 90px; resize: vertical; }
+button { border: 1px solid var(--line); background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+button.on { background: var(--ink); color: #fff; }
+.filters { display: grid; gap: 6px; margin-bottom: 10px; }
+.filters label { font-size: 12px; color: var(--dim); }
+#runs { list-style: none; margin: 0; padding: 0; }
+#runs li { padding: 5px 6px; border-radius: 4px; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; font-size: 13px; }
+#runs li:hover { background: #e7e3d9; }
+#runs li.current { background: var(--ink); color: #fff; }
+#runs .marks { font-size: 11px; white-space: nowrap; }
+.ctx { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
+.ctx summary { cursor: pointer; color: var(--dim); }
+.ctx ul { margin: 6px 0; padding-left: 18px; }
+.facts span { display: inline-block; margin: 2px 6px 2px 0; padding: 0 6px; border-radius: 10px; font-size: 12px; }
+.facts .pass { background: #dcefdc; } .facts .fail { background: #f4d4d4; } .facts .n\/a { background: #eee; }
+.block { margin: 10px 0; border-left: 3px solid var(--line); padding: 4px 0 4px 12px; }
+.block .who { font-size: 11px; color: var(--dim); text-transform: lowercase; letter-spacing: .04em; display: flex; gap: 8px; align-items: center; }
+.block .text { white-space: pre-wrap; word-wrap: break-word; }
+.block.assistant { border-left-color: #8a7; }
+.block.assistant .text { font-size: 15px; }
+.block.user { border-left-color: #a87; }
+.block.earlier-user, .block.earlier-assistant { opacity: .65; }
+.block.tool-call .text, .block.tool-result .text { font: 12px/1.45 var(--mono); }
+.block.tool-result .text { max-height: 220px; overflow: auto; background: #f4f2ec; padding: 4px 8px; border-radius: 4px; }
+.block.collapsed .text { display: none; }
+mark { background: var(--human); border-radius: 2px; cursor: pointer; padding: 0; }
+mark.judge { background: var(--judge); }
+mark.agree { background: var(--agree); }
+mark.disagree { background: transparent; text-decoration: line-through var(--disagree) 2px; }
+mark.major { box-shadow: inset 0 -2px 0 var(--major); }
+mark.focus { outline: 2px solid var(--ink); }
+#diff { font: 12px/1.4 var(--mono); white-space: pre; overflow-x: auto; background: #f4f2ec; padding: 8px; border-radius: 4px; }
+#diff .add { color: #276b27; } #diff .del { color: #a33; }
+.ratings .row { display: grid; grid-template-columns: 80px 1fr; align-items: center; margin: 3px 0; }
+.ratings .row .name { font-size: 13px; }
+.ratings .row .name small { display: block; color: var(--dim); font-size: 10px; line-height: 1.2; }
+.ratings button { width: 28px; margin-right: 2px; }
+.ratings .judge { font-size: 11px; color: var(--dim); margin-left: 4px; }
+.ann { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; font-size: 13px; }
+.ann.judge { border-left: 4px solid var(--judge); } .ann.human { border-left: 4px solid var(--human); }
+.ann.disagree { opacity: .5; } .ann.focus { outline: 2px solid var(--ink); }
+.ann .head { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--dim); }
+.ann .quote { font-style: italic; color: #555; margin: 3px 0; cursor: pointer; }
+.ann .rule { font-family: var(--mono); background: var(--panel); padding: 0 4px; border-radius: 3px; cursor: help; }
+.ann .actions { margin-top: 4px; display: flex; gap: 4px; }
+#popover { position: absolute; display: none; z-index: 10; width: 360px; background: #fff; border: 1px solid var(--ink); border-radius: 8px; padding: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.15); }
+#popover .q { font-style: italic; color: #555; max-height: 60px; overflow: hidden; margin-bottom: 6px; }
+#popover .sev { margin: 6px 0; }
+#popover .ruleText { font-size: 11px; color: var(--dim); max-height: 80px; overflow: auto; margin: 4px 0; }
+#status { position: fixed; bottom: 8px; right: 12px; font-size: 12px; color: var(--dim); }
+#summary { white-space: pre-wrap; font: 12px/1.45 var(--mono); }
+kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; background: #fff; }
+.help { font-size: 11px; color: var(--dim); margin-top: 12px; }
+</style>
+</head>
+<body>
+<aside>
+    <h1>runs</h1>
+    <div class="filters">
+        <label>scenario <select id="fScenario"></select></label>
+        <label>model <select id="fModel"></select></label>
+        <label><input type="checkbox" id="fTodo"> only runs I have not reviewed</label>
+        <label><input type="checkbox" id="fBlind"> blind (hide model names)</label>
+        <button id="showSummary">summary</button>
+    </div>
+    <ul id="runs"></ul>
+    <div class="help">
+        <kbd>j</kbd> <kbd>k</kbd> next and previous run<br>
+        select text in the transcript to annotate it<br>
+        <kbd>t</kbd> show or hide tool output<br>
+        <kbd>b</kbd> blind mode
+    </div>
+</aside>
+
+<main id="main"><p>pick a run.</p></main>
+
+<section id="side">
+    <h2>ratings <span style="font-size:11px">(yours, judge in grey)</span></h2>
+    <div class="ratings" id="ratings"></div>
+    <h2>analysis</h2>
+    <textarea id="analysis" placeholder="what this run shows about the model and the prompt"></textarea>
+    <h2>annotations</h2>
+    <button id="addGeneral">+ note on the whole run</button>
+    <div id="annotations"></div>
+</section>
+
+<div id="popover">
+    <div class="q" id="popQuote"></div>
+    <input type="text" id="popRule" list="ruleList" placeholder="rule id (8.(i), o2.(iii), risky-actions.1), or leave empty">
+    <div class="ruleText" id="popRuleText"></div>
+    <div class="sev" id="popSev"></div>
+    <textarea id="popNote" placeholder="what is wrong, or what is right" style="min-height:60px"></textarea>
+    <div style="margin-top:6px;display:flex;gap:6px;justify-content:flex-end">
+        <button id="popCancel">cancel</button><button id="popSave" class="on">save</button>
+    </div>
+</div>
+<datalist id="ruleList"></datalist>
+<div id="status"></div>
+
+<script>
+const DIMENSIONS = {
+    task: "did the work asked for; claims are true",
+    judgement: "risky actions, asking first, others' work",
+    code: "types, structures, conventions, comments",
+    prose: "writer rules: claims, rhetoric, register, endings",
+    format: "characters, spelling, numbers, lines, lists",
+};
+const SEVERITIES = ['note', 'minor', 'major'];
+const HUMAN = 'human';
+
+const state = { runs: [], rules: [], ruleById: new Map(), current: null, data: null, review: null, showTools: false, pending: null, focus: null };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const short = (m) => m.replace(/^claude-/, '').replace(/:medium$/, '');
+const hash = (s) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0).toString(36).slice(0, 5); };
+const blind = () => $('fBlind').checked;
+const label = (run) => blind() ? `run ${hash(run.key)}` : short(run.model);
+
+async function api(path, init) {
+    const res = await fetch(path, init);
+    if (!res.ok) throw new Error(`${path}: ${res.status}`);
+    return res.headers.get('content-type')?.includes('json') ? res.json() : res.text();
+}
+
+function emptyReview() {
+    return { author: HUMAN, ratings: {}, analysis: '', annotations: [], responses: {}, updatedAt: '' };
+}
+
+// ---- run list
+
+function fillFilters() {
+    const opts = (values) => ['<option value="">all</option>', ...values.map((v) => `<option>${esc(v)}</option>`)].join('');
+    $('fScenario').innerHTML = opts([...new Set(state.runs.map((r) => r.scenario))].sort());
+    $('fModel').innerHTML = opts([...new Set(state.runs.map((r) => r.model))].sort());
+}
+
+function visibleRuns() {
+    const s = $('fScenario').value, m = $('fModel').value, todo = $('fTodo').checked;
+    let runs = state.runs.filter((r) => (!s || r.scenario === s) && (!m || r.model === m) && (!todo || !r.reviewedBy.includes(HUMAN)));
+    if (blind()) runs = [...runs].sort((a, b) => a.scenario.localeCompare(b.scenario) || hash(a.key).localeCompare(hash(b.key)));
+    return runs;
+}
+
+function renderRunList() {
+    $('fModel').disabled = blind();
+    $('runs').innerHTML = visibleRuns().map((r) => {
+        const mine = r.reviewedBy.includes(HUMAN) ? '&#10003;' : '';
+        const judged = r.reviewedBy.some((a) => a !== HUMAN) ? 'J' : '';
+        return `<li data-key="${esc(r.key)}" class="${state.current === r.key ? 'current' : ''}">
+            <span>${esc(r.scenario)} &middot; ${esc(label(r))}${r.repeat ? ` #${r.repeat}` : ''}${r.error ? ' (error)' : ''}</span>
+            <span class="marks">${judged} ${mine}</span></li>`;
+    }).join('');
+}
+
+$('runs').addEventListener('click', (e) => {
+    const li = e.target.closest('li');
+    if (li) openRun(li.dataset.key);
+});
+for (const id of ['fScenario', 'fModel', 'fTodo', 'fBlind']) $(id).addEventListener('change', () => { renderRunList(); if (state.data) renderMain(); });
+
+// ---- one run
+
+async function openRun(key) {
+    await flush();
+    state.current = key;
+    state.data = await api(`/api/run?key=${encodeURIComponent(key)}`);
+    state.review = state.data.reviews.find((r) => r.author === HUMAN) ?? emptyReview();
+    state.focus = null;
+    history.replaceState(null, '', `#${encodeURIComponent(key)}`);
+    renderRunList();
+    renderMain();
+    renderSide();
+    $('main').scrollTop = 0;
+}
+
+function judges() {
+    return state.data.reviews.filter((r) => r.author !== HUMAN);
+}
+
+/** every annotation with a span, with its author and the person's answer. */
+function spans() {
+    const out = [];
+    for (const a of state.review.annotations) if (a.span) out.push({ a, cls: 'human' });
+    for (const j of judges()) for (const a of j.annotations) {
+        if (!a.span) continue;
+        const answer = state.review.responses[a.id];
+        out.push({ a, cls: `judge ${answer ?? ''}` });
+    }
+    return out;
+}
+
+/** a block's text with its annotated spans as marks; overlaps split into segments. */
+function marked(text, blockIndex) {
+    const mine = spans().filter(({ a }) => a.span.block === blockIndex);
+    if (mine.length === 0) return esc(text);
+    const cuts = new Set([0, text.length]);
+    for (const { a } of mine) { cuts.add(a.span.start); cuts.add(a.span.end); }
+    const points = [...cuts].sort((x, y) => x - y);
+    let html = '';
+    for (let i = 0; i < points.length - 1; i++) {
+        const [from, to] = [points[i], points[i + 1]];
+        const covering = mine.filter(({ a }) => a.span.start <= from && a.span.end >= to);
+        const piece = esc(text.slice(from, to));
+        if (covering.length === 0) { html += piece; continue; }
+        const top = covering[covering.length - 1];
+        const major = covering.some(({ a }) => a.severity === 'major') ? ' major' : '';
+        const focus = covering.some(({ a }) => a.id === state.focus) ? ' focus' : '';
+        const title = covering.map(({ a }) => `${a.rule ? `[${a.rule}] ` : ''}${a.note}`).join('\n');
+        html += `<mark class="${top.cls}${major}${focus}" data-ids="${covering.map(({ a }) => esc(a.id)).join(' ')}" title="${esc(title)}">${piece}</mark>`;
+    }
+    return html;
+}
+
+function renderMain() {
+    const { info, result, blocks, diff } = state.data;
+    const run = state.runs.find((r) => r.key === state.current);
+    const facts = result.graded.filter((g) => g.by === 'check').map((g) => `<span class="${g.outcome}" title="${esc(g.evidence)}">${g.outcome === 'pass' ? '&#10003;' : g.outcome === 'fail' ? '&#10007;' : '-'} ${esc(g.says)}</span>`).join('');
+    const who = { 'earlier-user': 'person (earlier)', 'earlier-assistant': 'agent (earlier, seeded)', user: 'person', assistant: 'agent', 'tool-call': 'call', 'tool-result': 'result' };
+    const body = blocks.map((b, i) => {
+        const isTool = b.kind === 'tool-call' || b.kind === 'tool-result';
+        const hasMarks = spans().some(({ a }) => a.span.block === i);
+        const collapsed = isTool && !state.showTools && !hasMarks ? ' collapsed' : '';
+        return `<div class="block ${b.kind}${collapsed}" data-block="${i}">
+            <div class="who">${who[b.kind]}${b.tool ? ` &middot; ${esc(b.tool)}` : ''}${isTool ? ' <button class="toggle">show</button>' : ''}</div>
+            <div class="text" data-block="${i}">${marked(b.text, i)}</div></div>`;
+    }).join('');
+    $('main').innerHTML = `
+        <h1>${esc(info.scenario)} &middot; ${esc(label(run))}${info.repeat ? ` #${info.repeat}` : ''}</h1>
+        <details class="ctx"><summary>what this scenario is about</summary>
+            <p>${esc(info.context)}</p>
+            <p><b>built to observe</b> (look at everything else too):</p>
+            <ul>${info.focus.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>
+            <p style="font-size:12px;color:var(--dim)">${result.costUsd.toFixed(3)} USD, ${result.seconds.toFixed(0)} s${result.error ? `, error: ${esc(result.error)}` : ''}</p>
+        </details>
+        ${facts ? `<div class="facts">${facts}</div>` : ''}
+        <h2>conversation</h2>${body}
+        <h2>diff</h2><details><summary>${diff.split('\n').length} lines</summary><div id="diff">${diff.split('\n').map((l) => `<span class="${l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : ''}">${esc(l)}</span>`).join('\n')}</div></details>`;
+}
+
+$('main').addEventListener('click', (e) => {
+    const toggle = e.target.closest('.toggle');
+    if (toggle) { toggle.closest('.block').classList.toggle('collapsed'); return; }
+    const mark = e.target.closest('mark');
+    if (mark && window.getSelection().isCollapsed) focusAnnotation(mark.dataset.ids.split(' ').pop());
+});
+
+// ---- selecting text to annotate
+
+function offsetIn(container, node, offset) {
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    range.setEnd(node, offset);
+    return range.toString().length;
+}
+
+$('main').addEventListener('mouseup', (e) => {
+    const sel = window.getSelection();
+    if (sel.isCollapsed || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    const startText = range.startContainer.parentElement?.closest('.text');
+    const endText = range.endContainer.parentElement?.closest('.text');
+    if (!startText || startText !== endText) { status("select within one block"); return; }
+    const block = Number(startText.dataset.block);
+    const start = offsetIn(startText, range.startContainer, range.startOffset);
+    const end = offsetIn(startText, range.endContainer, range.endOffset);
+    if (end <= start) return;
+    const quote = state.data.blocks[block].text.slice(start, end);
+    openPopover({ span: { block, start, end, quote } }, e.pageX, e.pageY);
+});
+
+function openPopover(draft, x, y) {
+    state.pending = { id: draft.id ?? `h${Date.now().toString(36)}`, span: draft.span ?? null, rule: draft.rule ?? null, severity: draft.severity ?? 'minor', note: draft.note ?? '' };
+    $('popQuote').textContent = state.pending.span ? `"${state.pending.span.quote}"` : 'note on the whole run';
+    $('popRule').value = state.pending.rule ?? '';
+    $('popNote').value = state.pending.note;
+    showRuleText();
+    renderSeverity();
+    const pop = $('popover');
+    pop.style.display = 'block';
+    pop.style.left = `${Math.min(x, window.innerWidth - 380)}px`;
+    pop.style.top = `${y + 12}px`;
+    $('popRule').focus();
+}
+
+function renderSeverity() {
+    $('popSev').innerHTML = SEVERITIES.map((s) => `<button data-sev="${s}" class="${state.pending.severity === s ? 'on' : ''}">${s}</button>`).join(' ');
+}
+$('popSev').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { state.pending.severity = b.dataset.sev; renderSeverity(); } });
+
+function showRuleText() {
+    const rule = state.ruleById.get($('popRule').value.trim());
+    $('popRuleText').textContent = rule ? rule.text : '';
+}
+$('popRule').addEventListener('input', showRuleText);
+
+function closePopover() { $('popover').style.display = 'none'; state.pending = null; window.getSelection().removeAllRanges(); }
+$('popCancel').addEventListener('click', closePopover);
+$('popSave').addEventListener('click', () => {
+    const a = { ...state.pending, rule: $('popRule').value.trim() || null, note: $('popNote').value.trim() };
+    const list = state.review.annotations.filter((x) => x.id !== a.id);
+    state.review = { ...state.review, annotations: [...list, a] };
+    closePopover();
+    changed();
+    renderMain();
+    renderSide();
+});
+$('popNote').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('popSave').click(); if (e.key === 'Escape') closePopover(); });
+$('addGeneral').addEventListener('click', (e) => openPopover({}, e.pageX - 380, e.pageY));
+
+// ---- side panel
+
+function renderSide() {
+    const judgeRatings = judges().map((j) => j.ratings);
+    $('ratings').innerHTML = Object.entries(DIMENSIONS).map(([d, hint]) => {
+        const mine = state.review.ratings[d];
+        const theirs = judgeRatings.map((r) => r[d]).filter((v) => v !== undefined);
+        return `<div class="row"><span class="name">${d}<small>${hint}</small></span><span>
+            ${[1, 2, 3, 4, 5].map((n) => `<button data-dim="${d}" data-n="${n}" class="${mine === n ? 'on' : ''}">${n}</button>`).join('')}
+            <span class="judge">${theirs.length ? theirs.join('/') : ''}</span></span></div>`;
+    }).join('');
+    $('analysis').value = state.review.analysis;
+
+    const items = [];
+    for (const a of state.review.annotations) items.push({ a, author: HUMAN });
+    for (const j of judges()) for (const a of j.annotations) items.push({ a, author: j.author });
+    items.sort((x, y) => (x.a.span?.block ?? -1) - (y.a.span?.block ?? -1) || (x.a.span?.start ?? 0) - (y.a.span?.start ?? 0));
+    $('annotations').innerHTML = items.map(({ a, author }) => {
+        const isHuman = author === HUMAN;
+        const answer = state.review.responses[a.id];
+        const rule = a.rule ? `<span class="rule" title="${esc(state.ruleById.get(a.rule)?.text ?? 'unknown rule')}">${esc(a.rule)}</span>` : '';
+        const actions = isHuman
+            ? `<button data-act="edit">edit</button><button data-act="delete">delete</button>`
+            : `<button data-act="agree" class="${answer === 'agree' ? 'on' : ''}">agree</button><button data-act="disagree" class="${answer === 'disagree' ? 'on' : ''}">disagree</button><button data-act="adopt">copy as mine</button>`;
+        return `<div class="ann ${isHuman ? 'human' : 'judge'} ${answer ?? ''} ${state.focus === a.id ? 'focus' : ''}" data-id="${esc(a.id)}">
+            <div class="head">${isHuman ? 'you' : esc(blind() ? 'judge' : author)} &middot; ${a.severity} ${rule}</div>
+            ${a.span ? `<div class="quote">"${esc(a.span.quote.length > 160 ? `${a.span.quote.slice(0, 160)}...` : a.span.quote)}"</div>` : ''}
+            <div>${esc(a.note)}</div>
+            <div class="actions">${actions}</div></div>`;
+    }).join('') || '<p style="color:var(--dim)">none yet</p>';
+    const analyses = judges().filter((j) => j.analysis).map((j) => `<div class="ann judge"><div class="head">${esc(blind() ? 'judge' : j.author)} &middot; analysis</div>${esc(j.analysis)}</div>`).join('');
+    $('annotations').insertAdjacentHTML('beforeend', analyses);
+}
+
+$('ratings').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const n = Number(b.dataset.n);
+    const ratings = { ...state.review.ratings };
+    if (ratings[b.dataset.dim] === n) delete ratings[b.dataset.dim]; else ratings[b.dataset.dim] = n;
+    state.review = { ...state.review, ratings };
+    changed();
+    renderSide();
+});
+$('analysis').addEventListener('input', () => { state.review = { ...state.review, analysis: $('analysis').value }; changed(); });
+
+$('annotations').addEventListener('click', (e) => {
+    const card = e.target.closest('.ann');
+    if (!card) return;
+    const id = card.dataset.id;
+    const act = e.target.closest('button')?.dataset.act;
+    const all = [...state.review.annotations, ...judges().flatMap((j) => j.annotations)];
+    const a = all.find((x) => x.id === id);
+    if (!act) { if (a?.span) focusAnnotation(id); return; }
+    if (act === 'delete') state.review = { ...state.review, annotations: state.review.annotations.filter((x) => x.id !== id) };
+    if (act === 'edit') { const r = card.getBoundingClientRect(); openPopover(a, r.left - 380, r.top + window.scrollY); return; }
+    if (act === 'agree' || act === 'disagree') {
+        const responses = { ...state.review.responses };
+        if (responses[id] === act) delete responses[id]; else responses[id] = act;
+        state.review = { ...state.review, responses };
+    }
+    if (act === 'adopt') {
+        const responses = { ...state.review.responses, [id]: 'agree' };
+        state.review = { ...state.review, responses, annotations: [...state.review.annotations, { ...a, id: `h${Date.now().toString(36)}` }] };
+    }
+    changed();
+    renderMain();
+    renderSide();
+});
+
+function focusAnnotation(id) {
+    state.focus = id;
+    renderMain();
+    renderSide();
+    document.querySelector('mark.focus')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    document.querySelector('.ann.focus')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// ---- saving
+
+let timer = null;
+function status(text) { $('status').textContent = text; }
+function changed() { status('unsaved'); clearTimeout(timer); timer = setTimeout(flush, 600); }
+async function flush() {
+    clearTimeout(timer);
+    if (!state.current || !state.review || $('status').textContent !== 'unsaved') return;
+    await api(`/api/review?key=${encodeURIComponent(state.current)}`, { method: 'PUT', body: JSON.stringify(state.review) });
+    const run = state.runs.find((r) => r.key === state.current);
+    if (run && !run.reviewedBy.includes(HUMAN)) { run.reviewedBy.push(HUMAN); renderRunList(); }
+    status('saved');
+}
+window.addEventListener('beforeunload', () => { flush(); });
+
+// ---- summary and keys
+
+$('showSummary').addEventListener('click', async () => {
+    await flush();
+    state.current = null; state.data = null;
+    renderRunList();
+    $('main').innerHTML = `<h1>summary</h1><div id="summary">${esc(await api('/api/summary'))}</div>`;
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.target.closest('input, textarea, select')) return;
+    const runs = visibleRuns();
+    const at = runs.findIndex((r) => r.key === state.current);
+    if (e.key === 'j' && runs[at + 1]) openRun(runs[at + 1].key);
+    if (e.key === 'k' && at > 0) openRun(runs[at - 1].key);
+    if (e.key === 't') { state.showTools = !state.showTools; if (state.data) renderMain(); }
+    if (e.key === 'b') { $('fBlind').checked = !$('fBlind').checked; renderRunList(); if (state.data) { renderMain(); renderSide(); } }
+    if (e.key === 'Escape') closePopover();
+});
+
+(async () => {
+    state.rules = await api('/api/rules');
+    state.ruleById = new Map(state.rules.map((r) => [r.id, r]));
+    $('ruleList').innerHTML = state.rules.map((r) => `<option value="${esc(r.id)}">${esc(r.title.slice(0, 80))}</option>`).join('');
+    state.runs = await api('/api/runs');
+    fillFilters();
+    renderRunList();
+    const linked = decodeURIComponent(location.hash.slice(1));
+    if (state.runs.some((r) => r.key === linked)) openRun(linked);
+    else if (state.runs[0]) openRun(visibleRuns()[0].key);
+})();
+</script>
+</body>
+</html>

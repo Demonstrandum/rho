@@ -25,7 +25,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { Type } from '@earendil-works/pi-ai';
+import { Type } from 'typebox';
 import { defineTool, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { does } from './lib/core/tool-annotations';
 

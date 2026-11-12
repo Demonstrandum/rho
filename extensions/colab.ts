@@ -40,7 +40,8 @@ import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync 
 import { spawn } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { StringEnum, type JsonObject } from '@earendil-works/pi-ai';
+import type { JsonObject } from '@earendil-works/pi-ai';
+import { StringEnum } from './lib/core/string-enum';
 import { Text } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import { config } from './lib/core/config';

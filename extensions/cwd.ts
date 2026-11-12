@@ -34,8 +34,7 @@ import {
     type ExtensionAPI,
     type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
-import type { TSchema } from '@earendil-works/pi-ai';
-import { Type } from 'typebox';
+import { Type, type TSchema } from 'typebox';
 import { PersistedState } from './lib/core/state-store';
 import { config } from './lib/core/config';
 import { currentEnvironment } from './environment';

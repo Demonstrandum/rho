@@ -12,7 +12,8 @@
 // enter the LLM context, so searching does not cost context. the agent gets its
 // own copy through the pi_search tool, which returns text.
 
-import { StringEnum, Type } from '@earendil-works/pi-ai';
+import { Type } from 'typebox';
+import { StringEnum } from './lib/core/string-enum';
 import {
     defineTool,
     type EntryRenderOptions,

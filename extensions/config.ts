@@ -25,7 +25,7 @@
 
 import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
-import { Type } from '@earendil-works/pi-ai';
+import { Type } from 'typebox';
 import {
     defineTool,
     type ExtensionAPI,

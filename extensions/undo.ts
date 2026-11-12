@@ -17,7 +17,7 @@
 // the two mechanisms are not connected and neither can undo the other: after
 // an undo, /rewind still has the same checkpoints it had.
 
-import { Type } from '@earendil-works/pi-ai';
+import { Type } from 'typebox';
 import {
     defineTool,
     isToolCallEventType,

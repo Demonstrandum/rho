@@ -25,7 +25,7 @@
 // (lib/undo-journal.ts), so the agent can put it back itself with undo.
 
 import { createHash } from 'node:crypto';
-import { Type } from '@earendil-works/pi-ai';
+import { Type } from 'typebox';
 import {
     defineTool,
     isToolCallEventType,

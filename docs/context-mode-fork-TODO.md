@@ -1,7 +1,7 @@
 # forking context-mode into rho
 
 context-mode is a dependency whose tools run on the laptop.
-with an environment attached, `bash`, `read`, `write` and `edit` act on another machine while `ctx_execute` and `ctx_batch_execute` do not, so they are refused there today.
+with an environment attached, `bash`, `read`, `write` and `edit` act on another machine while `ctx_execute` and `ctx_batch` do not, so they are refused there today.
 refusing is a stopgap.
 the plan is to fork the plugin into rho, rewrite it in rho's own style, and give it the executor as its runner, so one code path decides where a command runs and everything follows an `/environment` switch.
 

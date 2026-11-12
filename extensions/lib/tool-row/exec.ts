@@ -1,5 +1,5 @@
-// collapsed and expanded rows for the three tools whose argument is source
-// code: ctx_execute, ctx_execute_file, ctx_batch_execute.
+// collapsed and expanded rows for the two context-mode tools whose argument is
+// source code: ctx_execute and ctx_batch.
 //
 // pure: no pi imports. a renderer feeds it the tool name, the raw tool
 // arguments, the result text, a width, and a theme (theme.ts), and gets back
@@ -8,7 +8,8 @@
 //
 // three pieces:
 //   parseExecCall    unvalidated tool args -> a typed call, or null
-//   parseExecResult  raw result text -> the code echo plus a typed outcome
+//   parseExecResult  raw result text and its error flag -> the code echo plus
+//                    a typed outcome
 //   collapse/expand  a call and an outcome -> lines to draw
 //
 // shortening is a ladder per part: every command carries its renderings from
@@ -21,8 +22,10 @@ import { visibleWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 import { PLAIN_THEME, type RowColor, type RowTheme } from './theme';
 import { toolTitle } from './title';
 
+// context-mode names five and runs any other runtime on PATH by name; these are
+// the ones a row knows how to highlight.
 export const EXEC_LANGUAGES = [
-    'javascript', 'typescript', 'python', 'shell', 'ruby',
+    'javascript', 'typescript', 'python', 'shell', 'powershell', 'ruby',
     'go', 'rust', 'php', 'perl', 'r', 'elixir', 'csharp',
 ] as const;
 
@@ -32,7 +35,7 @@ function isExecLanguage(value: unknown): value is ExecLanguage {
     return typeof value === 'string' && (EXEC_LANGUAGES as readonly string[]).includes(value);
 }
 
-export const EXEC_TOOLS = ['ctx_execute', 'ctx_execute_file', 'ctx_batch_execute'] as const;
+export const EXEC_TOOLS = ['ctx_execute', 'ctx_batch'] as const;
 
 export type ExecToolName = (typeof EXEC_TOOLS)[number];
 
@@ -40,66 +43,60 @@ export function isExecTool(name: string): name is ExecToolName {
     return (EXEC_TOOLS as readonly string[]).includes(name);
 }
 
-export interface BatchCommand {
-    label: string;
-    command: string;
-}
-
 export type ExecCall =
-    | { tool: 'ctx_execute'; language: ExecLanguage; code: string; cwd?: string; intent?: string; background?: boolean }
-    | { tool: 'ctx_execute_file'; path: string; language: ExecLanguage; code: string; intent?: string }
-    | { tool: 'ctx_batch_execute'; commands: BatchCommand[]; queries: string[]; concurrency?: number };
+    | {
+        tool: 'ctx_execute';
+        language: ExecLanguage;
+        code: string;
+        /** a file the code reads, handed over in CTX_FILE. */
+        file?: string;
+        intent?: string;
+        background?: boolean;
+        timeoutMs?: number;
+    }
+    | { tool: 'ctx_batch'; commands: string[]; queries: string[] };
 
 // args arrive mid-stream, so every field is optional until it is not.
 export function parseExecCall(tool: string, args: unknown): ExecCall | null {
     if (!isExecTool(tool) || args === null || typeof args !== 'object') return null;
     const a = args as Record<string, unknown>;
-    const language = isExecLanguage(a.language) ? a.language : 'shell';
-    const code = typeof a.code === 'string' ? a.code : '';
+    const strings = (value: unknown): string[] =>
+        Array.isArray(value) ? value.filter((s): s is string => typeof s === 'string') : [];
     switch (tool) {
         case 'ctx_execute':
             return {
                 tool,
-                language,
-                code,
-                cwd: typeof a.cwd === 'string' ? a.cwd : undefined,
+                language: isExecLanguage(a.language) ? a.language : 'shell',
+                code: typeof a.code === 'string' ? a.code : '',
+                file: typeof a.file === 'string' ? a.file : undefined,
                 intent: typeof a.intent === 'string' ? a.intent : undefined,
                 background: a.background === true,
+                timeoutMs: typeof a.timeoutMs === 'number' ? a.timeoutMs : undefined,
             };
-        case 'ctx_execute_file':
-            return {
-                tool,
-                path: typeof a.path === 'string' ? a.path : '',
-                language,
-                code,
-                intent: typeof a.intent === 'string' ? a.intent : undefined,
-            };
-        case 'ctx_batch_execute': {
-            const commands = Array.isArray(a.commands)
-                ? a.commands.flatMap((entry): BatchCommand[] => {
-                    if (entry === null || typeof entry !== 'object') return [];
-                    const e = entry as Record<string, unknown>;
-                    if (typeof e.command !== 'string') return [];
-                    return [{ label: typeof e.label === 'string' ? e.label : '', command: e.command }];
-                })
-                : [];
-            const queries = Array.isArray(a.queries) ? a.queries.filter((q): q is string => typeof q === 'string') : [];
-            return { tool, commands, queries, concurrency: typeof a.concurrency === 'number' ? a.concurrency : undefined };
-        }
+        case 'ctx_batch':
+            return { tool, commands: strings(a.commands), queries: strings(a.queries) };
     }
 }
 
+// context-mode merges stderr into the output of a command that exits nonzero
+// and drops it otherwise, so an outcome carries one output, not two streams.
+//
+// `indexed` is set when the reply shows fewer bytes than the command printed:
+// the rest went to the knowledge base, and what is shown is the sections that
+// matched the intent.
 export type ExecOutcome =
     | { kind: 'empty' }
-    | { kind: 'ok'; stdout: string }
-    | { kind: 'exit'; code: number; stdout: string; stderr: string }
-    | { kind: 'timeout'; ms: number; stderr: string }
-    | { kind: 'partial'; stdout: string; ms: number; state: 'backgrounded' | 'timed-out' }
-    | { kind: 'indexed'; body: string };
+    | { kind: 'ok'; stdout: string; indexed: boolean }
+    /** `failed` is false for a shell exit 1 with no stderr, which context-mode does not count as an error (grep finding nothing). */
+    | { kind: 'exit'; code: number; output: string; indexed: boolean; failed: boolean }
+    | { kind: 'timeout'; ms: number }
+    | { kind: 'background'; pid: number }
+    | { kind: 'cancelled' }
+    /** any other refusal context-mode reports: a path outside the project, no runtime, a failed spawn. */
+    | { kind: 'failed'; message: string };
 
 export interface ExecEcho {
     language?: string;
-    path?: string;
     code?: string;
 }
 
@@ -108,58 +105,42 @@ export interface ParsedExecResult {
     outcome: ExecOutcome;
 }
 
-const ECHO = /^(?:path=(?<path>[^\n]*)\n)?```(?<lang>[a-z]*)\n(?<code>[\s\S]*?)\n```\n*/;
-const HARD_EXIT = /^Exit code: (\d+)\n\nstdout:\n([\s\S]*?)\n\nstderr:\n([\s\S]*)$/;
-const TIMEOUT = /^Execution timed out after (\d+)ms\n\nstderr:\n?([\s\S]*)$/;
-const BACKGROUNDED = /\n*_\(process backgrounded after (\d+)ms \u2014 still running\)_\s*$/;
-const TIMED_OUT_PARTIAL = /\n*_\(timed out after (\d+)ms \u2014 partial output shown above\)_\s*$/;
-const INDEXED = /^Indexed \d+ sections\b/;
+// the reply shapes of context-mode 2.x (src/core/tools/execute.ts): a clean
+// exit with output is the bare output; anything else opens with the summary
+// line, then the code echo when `summary` was asked for, then the output.
+const SUMMARY = /^exit (\d+) \u00b7 (\d+) B(?:\n|$)/;
+const ECHO = /^```(?<lang>[\w-]*)\n(?<code>[\s\S]*?)\n```\n?/;
+const TIMEOUT = /^Timed out after (\d+) ms\./;
+const BACKGROUND = /^started in background, pid (\d+)\s*$/;
+const CANCELLED = 'Cancelled.';
 
-export function parseExecResult(text: string): ParsedExecResult {
-    const match = ECHO.exec(text);
+export function parseExecResult(text: string, isError = false): ParsedExecResult {
+    const summary = SUMMARY.exec(text);
+    if (summary === null) return { outcome: parseBare(text, isError) };
+    const rest = text.slice(summary[0].length);
+    const match = ECHO.exec(rest);
     const echo: ExecEcho | undefined = match?.groups
-        ? {
-            language: match.groups.lang || undefined,
-            path: match.groups.path || undefined,
-            code: match.groups.code,
-        }
+        ? { language: match.groups.lang || undefined, code: match.groups.code }
         : undefined;
-    const body = match ? text.slice(match[0].length) : text;
-    return { echo, outcome: parseExecBody(body) };
+    const shown = match ? rest.slice(match[0].length) : rest;
+    const output = shown.trim();
+    const code = Number(summary[1]);
+    // counted before the trim: the byte count includes the trailing newline.
+    const indexed = new TextEncoder().encode(shown).length < Number(summary[2]);
+    if (code === 0) return { echo, outcome: output === '' ? { kind: 'empty' } : { kind: 'ok', stdout: output, indexed } };
+    return { echo, outcome: { kind: 'exit', code, output, indexed, failed: isError } };
 }
 
-export function parseExecBody(body: string): ExecOutcome {
-    const trimmed = body.trim();
-    if (trimmed === '' || trimmed === '(no output)') return { kind: 'empty' };
-
-    const hard = HARD_EXIT.exec(trimmed);
-    if (hard) {
-        return { kind: 'exit', code: Number(hard[1]), stdout: hard[2].trim(), stderr: hard[3].trim() };
-    }
+function parseBare(text: string, isError: boolean): ExecOutcome {
+    const trimmed = text.trim();
     const timeout = TIMEOUT.exec(trimmed);
-    if (timeout) {
-        return { kind: 'timeout', ms: Number(timeout[1]), stderr: timeout[2].trim() };
-    }
-    const backgrounded = BACKGROUNDED.exec(trimmed);
-    if (backgrounded) {
-        return {
-            kind: 'partial',
-            stdout: trimmed.slice(0, backgrounded.index).trim(),
-            ms: Number(backgrounded[1]),
-            state: 'backgrounded',
-        };
-    }
-    const partial = TIMED_OUT_PARTIAL.exec(trimmed);
-    if (partial) {
-        return {
-            kind: 'partial',
-            stdout: trimmed.slice(0, partial.index).trim(),
-            ms: Number(partial[1]),
-            state: 'timed-out',
-        };
-    }
-    if (INDEXED.test(trimmed)) return { kind: 'indexed', body: trimmed };
-    return { kind: 'ok', stdout: trimmed };
+    if (timeout) return { kind: 'timeout', ms: Number(timeout[1]) };
+    if (trimmed === CANCELLED) return { kind: 'cancelled' };
+    if (isError) return { kind: 'failed', message: trimmed };
+    const background = BACKGROUND.exec(trimmed);
+    if (background) return { kind: 'background', pid: Number(background[1]) };
+    if (trimmed === '') return { kind: 'empty' };
+    return { kind: 'ok', stdout: trimmed, indexed: false };
 }
 
 // a part's renderings, longest first. never empty.
@@ -384,6 +365,7 @@ const NOISE: Record<ExecLanguage, RegExp> = {
     typescript: /^(?:\/\/|import |(?:const|let|var) .*=\s*require\()/,
     python: /^(?:#|import |from \w+ import)/,
     shell: /^#/,
+    powershell: /^(?:#|Import-Module )/,
     ruby: /^(?:#|require )/,
     go: /^(?:\/\/|package |import )/,
     rust: /^(?:\/\/|use )/,
@@ -406,18 +388,11 @@ function dedupeSequential(rungs: readonly string[]): readonly [string, ...string
 export function callLadders(call: ExecCall): Ladder[] {
     switch (call.tool) {
         case 'ctx_execute':
-        case 'ctx_execute_file':
             return call.language === 'shell'
                 ? splitShell(call.code).map(shellLadder)
                 : [codeLadder(call.language, call.code)];
-        // a batch command carries a written label, which beats any clipping of
-        // the command itself, so it is the top rung and the command is unused.
-        case 'ctx_batch_execute':
-            return call.commands.map((c) =>
-                c.label === ''
-                    ? shellLadder(c.command)
-                    : ([c.label, truncate(c.label, 16)] as Ladder),
-            );
+        case 'ctx_batch':
+            return call.commands.flatMap(splitShell).map(shellLadder);
     }
 }
 
@@ -428,6 +403,7 @@ const HIGHLIGHT_LANGUAGE: Record<ExecLanguage, string> = {
     typescript: 'typescript',
     python: 'python',
     shell: 'bash',
+    powershell: 'powershell',
     ruby: 'ruby',
     go: 'go',
     rust: 'rust',
@@ -443,7 +419,7 @@ function highlightLine(theme: RowTheme, text: string, language: ExecLanguage): s
 }
 
 function callLanguage(call: ExecCall): ExecLanguage {
-    return call.tool === 'ctx_batch_execute' ? 'shell' : call.language;
+    return call.tool === 'ctx_batch' ? 'shell' : call.language;
 }
 
 export interface CollapsedPreview {
@@ -457,8 +433,7 @@ export interface CollapsedPreview {
 // never call one tool two things.
 const VERB: Record<ExecToolName, string> = {
     ctx_execute: toolTitle('ctx_execute'),
-    ctx_execute_file: toolTitle('ctx_execute_file'),
-    ctx_batch_execute: toolTitle('ctx_batch_execute'),
+    ctx_batch: toolTitle('ctx_batch'),
 };
 
 interface StatusTag {
@@ -471,32 +446,25 @@ function statusTag(outcome: ExecOutcome | undefined): StatusTag | undefined {
     switch (outcome.kind) {
         // no "code:" label: the bubble is already the error colour, so the
         // number alone reads as the exit status.
-        case 'exit': return { text: `[${outcome.code}]`, color: 'error' };
+        case 'exit': return { text: `[${outcome.code}]`, color: outcome.failed ? 'error' : 'warning' };
         case 'timeout': return { text: `[timeout ${outcome.ms}ms]`, color: 'error' };
-        case 'partial': return outcome.state === 'backgrounded'
-            ? { text: '[background]', color: 'warning' }
-            : { text: `[partial ${outcome.ms}ms]`, color: 'warning' };
-        case 'indexed': return { text: '[indexed]', color: 'accent' };
+        case 'background': return { text: `[background ${outcome.pid}]`, color: 'warning' };
+        case 'cancelled': return { text: '[cancelled]', color: 'warning' };
+        case 'failed': return { text: '[error]', color: 'error' };
         case 'empty': return { text: '[no output]', color: 'dim' };
-        case 'ok': return undefined;
+        case 'ok': return outcome.indexed ? { text: '[indexed]', color: 'accent' } : undefined;
     }
 }
 
-// ctx_batch_execute's success text ("Executed N commands (...). Indexed M
-// sections. Searched K queries.") is not a captured stdout, it is the tool's
-// own written result. it does not get the stdout/stderr treatment: no label,
-// no dim.
-function isBatchSummary(
+// ctx_batch's reply is its answers to the queries, under one `## query`
+// heading each, not a captured output. it does not get the output treatment:
+// no label, no dim.
+function isBatchAnswer(
     call: ExecCall,
     outcome: ExecOutcome | undefined,
-): outcome is { kind: 'ok'; stdout: string } {
-    return call.tool === 'ctx_batch_execute' && outcome?.kind === 'ok';
+): outcome is Extract<ExecOutcome, { kind: 'ok' }> {
+    return call.tool === 'ctx_batch' && outcome?.kind === 'ok';
 }
-
-// batch entries are labels, not source: no backticks (that notation means
-// "this is a command"), no syntax highlighting, and joined with a bullet
-// rather than "; ", since they are independent named items, not statements.
-const LABEL_SEP = ` \u00b7 `;
 
 // the call line never carries a status tag: pi renders the call slot (this
 // function) and the result slot (outputDigest, below) as two independently
@@ -506,11 +474,8 @@ const LABEL_SEP = ` \u00b7 `;
 export function collapseCall(call: ExecCall, width: number, theme: RowTheme = PLAIN_THEME): string {
     const verb = VERB[call.tool];
     const budget = Math.max(8, width - verb.length - 3);
-    const isBatch = call.tool === 'ctx_batch_execute';
-    const source = fitLadders(callLadders(call), budget, isBatch ? LABEL_SEP : '; ');
-    const rendered = isBatch
-        ? theme.fg('text', source)
-        : theme.fg('dim', '`') + highlightLine(theme, source, callLanguage(call)) + theme.fg('dim', '`');
+    const source = fitLadders(callLadders(call), budget);
+    const rendered = theme.fg('dim', '`') + highlightLine(theme, source, callLanguage(call)) + theme.fg('dim', '`');
     return theme.fg('toolTitle', theme.bold(verb)) + ' ' + rendered;
 }
 
@@ -523,7 +488,7 @@ export function collapseResult(
 ): string | undefined {
     const tag = statusTag(outcome);
     const tagWidth = tag ? tag.text.length + 1 : 0;
-    const digest = isBatchSummary(call, outcome)
+    const digest = isBatchAnswer(call, outcome)
         ? theme.fg('toolOutput', truncate(oneLine(outcome.stdout), Math.max(8, width - tagWidth)))
         : outputDigest(outcome, Math.max(8, width - tagWidth), theme);
     if (!tag) return digest;
@@ -571,19 +536,24 @@ export function outputDigest(
         .split(sep)
         .map((part) => theme.fg('toolOutput', part))
         .join(theme.fg('dim', displaySep));
-    return theme.fg(label === 'stderr' ? 'error' : 'muted', prefix) + styled;
+    return theme.fg(STREAM_COLOR[label], prefix) + styled;
 }
 
-function pickStream(outcome: ExecOutcome): { label: 'stdout' | 'stderr'; text: string } | undefined {
+/** `stdout` is a clean run's output; `output` is a failed run's, stdout and stderr merged; `error` is context-mode's own refusal. */
+type StreamLabel = 'stdout' | 'output' | 'error';
+
+const STREAM_COLOR: Record<StreamLabel, RowColor> = { stdout: 'muted', output: 'error', error: 'error' };
+
+function pickStream(outcome: ExecOutcome): { label: StreamLabel; text: string } | undefined {
     switch (outcome.kind) {
-        case 'empty': return undefined;
+        case 'empty':
+        case 'timeout':
+        case 'background':
+        case 'cancelled':
+            return undefined;
         case 'ok': return { label: 'stdout', text: outcome.stdout };
-        case 'exit': return outcome.stderr !== ''
-            ? { label: 'stderr', text: outcome.stderr }
-            : { label: 'stdout', text: outcome.stdout };
-        case 'timeout': return { label: 'stderr', text: outcome.stderr };
-        case 'partial': return { label: 'stdout', text: outcome.stdout };
-        case 'indexed': return { label: 'stdout', text: outcome.body };
+        case 'exit': return { label: outcome.failed ? 'output' : 'stdout', text: outcome.output };
+        case 'failed': return { label: 'error', text: outcome.message };
     }
 }
 
@@ -609,20 +579,22 @@ function wrapped(lines: readonly string[], width: number | undefined): string[] 
     return out;
 }
 
-/** the call slot's expanded lines: verb, path (execute_file), full command(s)/code. */
+/** the call slot's expanded lines: verb, the file the code reads, full command(s)/code. */
 export function expandCall(call: ExecCall, theme: RowTheme = PLAIN_THEME, width?: number): string[] {
     const language = callLanguage(call);
     const prompt = theme.fg('dim', '$ ');
     const lines: string[] = [theme.fg('toolTitle', theme.bold(VERB[call.tool]))];
 
-    if (call.tool === 'ctx_execute_file') {
-        lines.push('', theme.fg('muted', 'path=') + theme.fg('text', call.path));
+    if (call.tool === 'ctx_execute' && call.file !== undefined) {
+        lines.push('', theme.fg('muted', 'file=') + theme.fg('text', call.file));
     }
     lines.push('');
-    if (call.tool === 'ctx_batch_execute') {
-        for (const c of call.commands) {
-            const label = c.label === '' ? '' : theme.fg('dim', `   # ${c.label}`);
-            lines.push(prompt + highlightLine(theme, c.command, 'shell') + label);
+    if (call.tool === 'ctx_batch') {
+        for (const command of call.commands) {
+            lines.push(prompt + highlightLine(theme, command, 'shell'));
+        }
+        if (call.queries.length > 0) {
+            lines.push('', theme.fg('muted', 'queries: ') + theme.fg('text', call.queries.join(' \u00b7 ')));
         }
     } else if (call.language === 'shell') {
         for (const command of splitShell(call.code)) {
@@ -658,32 +630,25 @@ function expandedResult(
         case 'empty':
             return stream(theme, 'stdout', '');
         case 'ok':
-            return call.tool === 'ctx_batch_execute'
-                ? [theme.fg('toolOutput', outcome.stdout)]
-                : stream(theme, 'stdout', outcome.stdout);
+            if (call.tool === 'ctx_batch') return outcome.stdout.split('\n').map((l) => theme.fg('toolOutput', l));
+            return [
+                ...(outcome.indexed ? [theme.fg('accent', 'indexed: the sections that matched the intent'), ''] : []),
+                ...stream(theme, 'stdout', outcome.stdout),
+            ];
         case 'exit':
             return [
-                theme.fg('error', `Exit code: ${outcome.code}`),
+                theme.fg(outcome.failed ? 'error' : 'warning', `exit code ${outcome.code}`),
                 '',
-                ...stream(theme, 'stdout', outcome.stdout),
-                ...stream(theme, 'stderr', outcome.stderr),
+                ...stream(theme, outcome.failed ? 'output' : 'stdout', outcome.output),
             ];
         case 'timeout':
-            return [
-                theme.fg('error', `timed out after ${outcome.ms}ms`),
-                '',
-                ...stream(theme, 'stderr', outcome.stderr),
-            ];
-        case 'partial':
-            return [
-                theme.fg('warning', outcome.state === 'backgrounded'
-                    ? `backgrounded after ${outcome.ms}ms, still running`
-                    : `timed out after ${outcome.ms}ms, partial output`),
-                '',
-                ...stream(theme, 'stdout', outcome.stdout),
-            ];
-        case 'indexed':
-            return outcome.body.split('\n').map((l) => theme.fg('toolOutput', l));
+            return [theme.fg('error', `timed out after ${outcome.ms}ms`)];
+        case 'background':
+            return [theme.fg('warning', `running in the background, pid ${outcome.pid}`)];
+        case 'cancelled':
+            return [theme.fg('warning', 'cancelled')];
+        case 'failed':
+            return stream(theme, 'error', outcome.message);
     }
 }
 
@@ -697,17 +662,15 @@ export function expand(
 }
 
 /**
- * a labelled block of output. empty stderr is the ordinary case and is
- * omitted rather than shown as "nothing here"; empty stdout still says so,
- * since a command that ran and printed nothing is worth stating. one line
- * folds onto the label; more than one gets the label alone, then each line
- * dimmed and indented by one space, no border.
+ * a labelled block of output. empty output still says so, since a command
+ * that ran and printed nothing is worth stating. one line folds onto the
+ * label; more than one gets the label alone, then each line dimmed and
+ * indented by one space, no border.
  */
-function stream(theme: RowTheme, label: 'stdout' | 'stderr', text: string): string[] {
-    const color: RowColor = label === 'stderr' ? 'error' : 'muted';
+function stream(theme: RowTheme, label: StreamLabel, text: string): string[] {
+    const color = STREAM_COLOR[label];
     const trimmed = text.trim();
     if (trimmed === '') {
-        if (label === 'stderr') return [];
         return [theme.fg(color, `${label}: `) + theme.fg('dim', '[no output]')];
     }
     const body = trimmed.split('\n');

@@ -15,15 +15,15 @@
 //   detail        a tool with no renderCall of its own gets one: its subject,
 //                 and a quoted first line of the text it carries
 //                 (lib/tool-row/preview.ts).
-//   exec-preview  the three context-mode exec tools get a highlighted one-line
+//   exec-preview  the two context-mode exec tools get a highlighted one-line
 //                 command, a status tag and an output digest, and the whole
 //                 command and output on expand (lib/tool-row/exec.ts).
 //
 // why a patch and not a registration. context-mode registers its exec tools
-// itself (mcp-bridge.js) with its own renderers, and `getAllRegisteredTools()`
+// itself (node_modules/context-mode/pi/index.js), and `getAllRegisteredTools()`
 // keeps first-registration-wins by extension load order, so a competing
 // registration of the same name either loses silently or wins and then has to
-// reimplement the MCP stdio bridge to have anything to execute. patching the
+// reimplement context-mode's sandbox to have anything to execute. patching the
 // component is keyed on the running tool name instead, so it applies whoever
 // registered the tool, the same way halfblock-boxes.ts patches `render`.
 //
@@ -309,7 +309,7 @@ if (titles || detail || execPreview) {
                 if (!call) return new Lines(() => []);
                 if (options.isPartial) return new Lines(() => [theme.fg('warning', 'running\u2026')]);
 
-                const { outcome } = parseExecResult(resultText(result));
+                const { outcome } = parseExecResult(resultText(result), context.isError === true);
                 const rowTheme = adapt(theme);
 
                 if (options.expanded) {

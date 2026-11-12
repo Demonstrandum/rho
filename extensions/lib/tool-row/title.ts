@@ -24,8 +24,6 @@ const NAMESPACES: ReadonlySet<string> = new Set(['ctx', 'mcp']);
 /** names whose derived title would be wrong, rather than merely unusual. */
 const TITLES: Readonly<Record<string, string>> = {
     ctx_execute: 'exec',
-    ctx_execute_file: 'exec file',
-    ctx_batch_execute: 'batch',
 };
 
 export function toolTitle(name: string, overrides: Readonly<Record<string, string>> = {}): string {

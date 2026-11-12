@@ -91,13 +91,16 @@ interface Sample {
     tool: string;
     args: unknown;
     result: string;
+    /** a reply context-mode threw, which pi marks as an error. */
+    isError?: boolean;
 }
 
 const FENCE = '```';
 
 const samples: Sample[] = [
     {
-        name: 'shell, soft fail (zsh no matches)',
+        name: 'shell, failed (zsh no matches)',
+        isError: true,
         tool: 'ctx_execute',
         args: {
             language: 'shell',
@@ -106,21 +109,9 @@ rg -n '${FENCE}' dist/*.js 2>/dev/null | head -20
 echo === files
 ls; ls dist 2>/dev/null | head`,
         },
-        result: `${FENCE}shell
-cd /Users/samuel/Code/rho/node_modules/context-mode
-rg -n '${FENCE}' dist/*.js 2>/dev/null | head -20
-echo === files
-ls; ls dist 2>/dev/null | head
-${FENCE}
-
-Exit code: 1
-
-stdout:
-
-
-stderr:
-/var/folders/p5/fhz_3y0x1gv865tck2wjhql00000gn/T/.ctx-mode-15HZHi/script.sh:3: no matches found: dist/*.js
-/var/folders/p5/fhz_3y0x1gv865tck2wjhql00000gn/T/.ctx-mode-15HZHi/script.sh:4: == not found`,
+        result: `exit 2 · 98 B
+zsh:3: no matches found: dist/*.js
+/var/folders/p5/fhz_3y0x1gv865tck2wjhql00000gn/T/ctx-exec-15HZHi/code:4: == not found`,
     },
     {
         name: 'shell, ok',
@@ -132,12 +123,7 @@ rg -n 'getAllTools|ToolInfo' core/agent-session.d.ts | head -20
 echo === ToolInfo def
 rg -rn 'interface ToolInfo|type ToolInfo' core/*.d.ts | head`,
         },
-        result: `${FENCE}shell
-cd /Users/samuel/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist
-rg -n 'getAllTools|ToolInfo' core/agent-session.d.ts | head -20
-${FENCE}
-
-19:import { type ContextUsage } from "./extensions/index.ts";
+        result: `19:import { type ContextUsage } from "./extensions/index.ts";
 306:    getAllTools(): ToolInfo[];
 === ToolInfo def
 1146:export type ToolInfo = Pick<ToolDefinition, "name">;`,
@@ -152,11 +138,7 @@ ${FENCE}
 const files = fs.readdirSync('extensions').filter(f => f.endsWith('.ts'));
 files.forEach(f => console.log(f, fs.readFileSync('extensions/' + f, 'utf8').split('\\n').length));`,
         },
-        result: `${FENCE}javascript
-const fs = require('fs');
-${FENCE}
-
-auditor.ts 41
+        result: `auditor.ts 41
 context.ts 388
 cwd.ts 96`,
     },
@@ -164,73 +146,71 @@ cwd.ts 96`,
         name: 'shell, empty output',
         tool: 'ctx_execute',
         args: { language: 'shell', code: "rg -n 'x' server.bundle.mjs build/*.js | head" },
-        result: `${FENCE}shell
-rg -n 'x' server.bundle.mjs build/*.js | head
-${FENCE}
-
-(no output)`,
+        result: 'exit 0 · 0 B\n',
+    },
+    {
+        name: 'shell, grep found nothing (exit 1, not an error)',
+        tool: 'ctx_execute',
+        args: { language: 'shell', code: "rg -n 'nothing here' extensions" },
+        result: 'exit 1 · 0 B\n',
     },
     {
         name: 'batch, 3 commands',
-        tool: 'ctx_batch_execute',
+        tool: 'ctx_batch',
         args: {
             commands: [
-                { label: 'extensions doc renderers', command: "rg -n 'renderCall|renderResult' /Users/samuel/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/docs/extensions.md | head -60" },
-                { label: 'tui doc renderers', command: "rg -n 'renderCall|setToolRenderer' /Users/samuel/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/docs/tui.md | head -40" },
-                { label: 'pi api tool registry', command: "rg -n 'getAllTools' dist/core/*.d.ts | head -40" },
+                "rg -n 'renderCall|renderResult' /Users/samuel/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/docs/extensions.md | head -60",
+                "rg -n 'renderCall|setToolRenderer' /Users/samuel/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/docs/tui.md | head -40",
+                "rg -n 'getAllTools' dist/core/*.d.ts | head -40",
             ],
             queries: ['how to register a tool call renderer'],
-            concurrency: 3,
         },
-        result: 'Executed 3 commands (59 lines, 5.1KB). Indexed 4 sections. Searched 4 queries.',
+        result: '## how to register a tool call renderer\n1598:  renderCall(args, theme, context) {\n1612:  renderResult(result, options, theme, context) {',
     },
     {
-        name: 'execute_file',
-        tool: 'ctx_execute_file',
+        name: 'execute with a file',
+        tool: 'ctx_execute',
         args: {
-            path: 'huge.log',
+            file: 'huge.log',
             language: 'javascript',
-            code: `const errs = FILE_CONTENT.split('\\n').filter(l => /ERROR|FATAL/.test(l));
+            code: `const errs = require('fs').readFileSync(process.env.CTX_FILE, 'utf8').split('\\n').filter(l => /ERROR|FATAL/.test(l));
 console.log(errs.length + ' error lines');`,
         },
-        result: `path=huge.log
-${FENCE}javascript
-const errs = FILE_CONTENT.split('\\n');
-${FENCE}
-
-412 error lines`,
+        result: '412 error lines\n',
     },
     {
-        name: 'timeout, no output',
+        name: 'timeout',
         tool: 'ctx_execute',
-        args: { language: 'shell', code: 'sleep 60 && echo done' },
-        result: `${FENCE}shell
-sleep 60 && echo done
-${FENCE}
-
-Execution timed out after 30000ms
-
-stderr:
-`,
+        isError: true,
+        args: { language: 'shell', code: 'sleep 700 && echo done' },
+        result: 'Timed out after 600000 ms. Fix: pass background: true.',
     },
     {
-        name: 'indexed (large stdout)',
+        name: 'background',
         tool: 'ctx_execute',
-        args: { language: 'shell', code: 'rg -n TODO . | head -5000' },
-        result: `${FENCE}shell
-rg -n TODO . | head -5000
-${FENCE}
-
-Indexed 37 sections (12 with code) from: execute:shell
-Use ctx_search(queries: ["..."]) to query this content.`,
+        args: { language: 'shell', code: 'bun run dev', background: true },
+        result: 'started in background, pid 48213',
+    },
+    {
+        name: 'refused (outside the project)',
+        tool: 'ctx_execute',
+        isError: true,
+        args: { language: 'shell', code: 'wc -l "$CTX_FILE"', file: '/tmp/out.log' },
+        result: 'Path /tmp/out.log is outside the project. Fix: use a path inside /Users/samuel/Code/rho.',
+    },
+    {
+        name: 'indexed (large stdout, with an intent)',
+        tool: 'ctx_execute',
+        args: { language: 'shell', code: 'rg -n TODO . | head -5000', intent: 'unfinished remote work' },
+        result: 'exit 0 · 182044 B\n./docs/remote.md:185: TODO fetch only that range\n./extensions/remote.ts:41: TODO retry a dropped socket\nmore: ctx_search({queries:["unfinished remote work"],source:"ctx_execute:rg -n TODO . | head -5000"})',
     },
 ];
 
 for (const sample of samples) {
     const call: ExecCall | null = parseExecCall(sample.tool, sample.args);
     if (!call) continue;
-    const { outcome } = parseExecResult(sample.result);
-    const bg = outcome.kind === 'exit' || outcome.kind === 'timeout' ? 'toolErrorBg' : 'toolSuccessBg';
+    const { outcome } = parseExecResult(sample.result, sample.isError === true);
+    const bg = sample.isError === true ? 'toolErrorBg' : 'toolSuccessBg';
     const preview = collapse(call, outcome, WIDTH - 2, theme);
 
     // as pi would: two independently rendered slots, call then result, each

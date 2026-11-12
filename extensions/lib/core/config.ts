@@ -1127,7 +1127,7 @@ const SCHEMA = {
             isBool,
             true,
             'name a tool row by its derived display name rather than the name the',
-            'model calls: slack_reply reads "slack reply", ctx_batch_execute reads',
+            'model calls: slack_reply reads "slack reply", ctx_batch reads',
             '"batch". a namespace prefix (ctx, mcp) is dropped',
         ),
         detail: field(
@@ -1141,7 +1141,7 @@ const SCHEMA = {
             'exec-preview',
             isBool,
             true,
-            'shorten ctx_execute / ctx_execute_file / ctx_batch_execute tool rows to',
+            'shorten ctx_execute and ctx_batch tool rows to',
             'one highlighted line each, expanding to the full command and output',
         ),
         names: field(

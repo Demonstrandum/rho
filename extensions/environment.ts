@@ -358,7 +358,7 @@ export default function (pi: ExtensionAPI) {
 
     /** Said out loud, because a change of machine the model cannot see is a trap. */
     const announce = async (environment: Environment | null): Promise<void> => {
-        // The context-mode prompt tells the model to prefer ctx_batch_execute
+        // The context-mode prompt tells the model to prefer ctx_batch
         // over bash, and that advice is wrong here: those tools run on this
         // machine whatever is attached. Saying so where the switch is
         // announced is the only place the model reads both facts together.
@@ -374,7 +374,7 @@ export default function (pi: ExtensionAPI) {
                         '<environment>',
                         'working locally on this machine',
                         `cwd: ${process.cwd()}`,
-                        'every tool acts here, including ctx_execute and ctx_batch_execute',
+                        'every tool acts here, including ctx_execute and ctx_batch',
                         '</environment>',
                         ...(here.text === null ? [] : ['', here.text]),
                     ].join('\n'),
@@ -408,9 +408,9 @@ export default function (pi: ExtensionAPI) {
                     facts,
                     'bash, read, write and edit act on this machine, with no argument needed:',
                     'pass bash\u2019s on, or address a path, only to reach a different machine.',
-                    'ctx_execute, ctx_execute_file and ctx_batch_execute do not: they run on the',
-                    'laptop and are refused while this is attached, whatever the context-mode',
-                    'guidance says. use bash for commands here.',
+                    'ctx_execute and ctx_batch do not: they run on the laptop and are refused',
+                    'while this is attached, whatever the context-mode guidance says. use bash',
+                    'for commands here.',
                     '</environment>',
                     ...(tree.text === null ? [] : ['', tree.text]),
                 ].join('\n'),
@@ -689,7 +689,7 @@ export default function (pi: ExtensionAPI) {
      * runs there. That is the wrong-machine failure again, with the added
      * insult that its output looks authoritative.
      */
-    const RUNS_LOCALLY = /^(ctx_execute|ctx_execute_file|ctx_batch_execute)$/;
+    const RUNS_LOCALLY = /^(ctx_execute|ctx_batch)$/;
 
     pi.on('tool_call', async (event) => {
         if (active() === null && dead === null) return;

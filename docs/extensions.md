@@ -44,7 +44,7 @@ the distinction is what the agent acts on: a missing block reads as "no reposito
 
 `scratchpad.ts` + `lib/session/scratchpad.ts` give the session one directory for intermediate files, name it in a `<scratch>` block, and export it as `RHO_SCRATCH` so a bash call reaches it without the path being retyped.
 the alternative is what happened before it: temporary work goes to `/tmp`, mixed with every other process's files, surviving the session, and refused by any tool confined to the workspace.
-context-mode rejects a read outside the project root, so a `/tmp` file written by bash cannot then be summarised by `ctx_execute_file`.
+context-mode rejects a read outside the project root, so a `/tmp` file written by bash cannot then be handed to `ctx_execute` as its `file`.
 that refusal decides the default location: `.rho/scratch/<session>/` inside the working tree is readable by every tool and needs one `.gitignore` line.
 `[scratch] location = data-dir` moves it under the rho data directory for a working tree that must stay untouched, and `off` registers nothing.
 a session id keeps two concurrent sessions in one project apart, and an in-memory session shares one directory, which is the choice `lib/core/state-store.ts` makes for the same case.

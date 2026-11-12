@@ -9,8 +9,8 @@ import { prepare } from './lib/session/scratchpad';
 // the alternative is what happens now: temporary work goes to /tmp, where it is
 // mixed with every other process's files, survives the session, and is refused
 // by any tool confined to the workspace. context-mode rejects a read outside the
-// project root, so a /tmp file written by bash cannot then be summarised by
-// ctx_execute_file.
+// project root, so a /tmp file written by bash cannot then be handed to
+// ctx_execute as its `file`.
 //
 // that refusal is what decides the default location. `.rho/scratch/<session>/`
 // inside the working tree is readable by every tool and needs one .gitignore

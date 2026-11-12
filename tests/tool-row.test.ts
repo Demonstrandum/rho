@@ -16,8 +16,7 @@ test('toolTitle drops a namespace and spaces the words, lower case throughout', 
 
 test('toolTitle takes the exec family from the names the preview already uses', () => {
     expect(toolTitle('ctx_execute')).toBe('exec');
-    expect(toolTitle('ctx_execute_file')).toBe('exec file');
-    expect(toolTitle('ctx_batch_execute')).toBe('batch');
+    expect(toolTitle('ctx_batch')).toBe('batch');
 });
 
 test('toolTitle takes an override ahead of the derivation', () => {
